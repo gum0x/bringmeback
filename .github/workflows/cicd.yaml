@@ -1,0 +1,48 @@
+name: Flutter CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: 
+
+jobs:
+  build:
+    name: Build Flutter App
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22'
+        channel: 'stable'
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Run tests
+      run: flutter test
+    
+    - name: Build macOS app
+      if: matrix.os == 'macos-latest'
+      run: flutter build macos --release
+    
+    - name: Build Windows app
+      if: matrix.os == 'windows-latest'
+      run: flutter build windows --release
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-app-${{ matrix.os }}
+        path: |
+          build/macos/Build/Products/Release/*.app
+          build/windows/runner/Release/*.exe
+        if-no-files-found: ignore
