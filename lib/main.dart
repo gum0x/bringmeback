@@ -191,16 +191,19 @@ class _TaskState extends State<Task> {
             child: Row(
               children: [
                 Expanded(
-                    child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  child: Column(
+                  mainAxisSize: MainAxisSize.max,
+                  mainAxisAlignment: MainAxisAlignment.start,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     TextField(
                         controller: _controller,
                         focusNode: _focusNode,
                         style: TextStyle(fontSize: 18, color: Colors.black),
+                        keyboardType: TextInputType.multiline,
+                        maxLines: null,
                         decoration: const InputDecoration(
-                          border: InputBorder.none,
+                          border: OutlineInputBorder(),
                           hintText: "Task description here",
                           fillColor: Colors.white60,
                         ),
@@ -211,10 +214,25 @@ class _TaskState extends State<Task> {
                             tasksBloc.add(UpdateTaskNameEvent(
                                 index: widget.index, newName: value));
                           });
-                        }),
-                    const SizedBox(
-                      height: 8,
+                        })
+                  ],
+                )),
+                Column(
+                  mainAxisSize: MainAxisSize.max,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _buildTextField(
+                      intToMinutes(widget.task.taskTimerSeconds),
+                      'min',
+                      (value) {
+                        tasksBloc.add(UpdateTaskTimerEvent(
+                            index: widget.index, seconds: int.parse(value) * 60));
+                      },
                     ),
+                    //const SizedBox(
+                    //  height: 8,
+                    //),
                     TaskWidget(
                       seconds: widget.task.taskTimerSeconds,
                       fontSize: 18,
@@ -224,16 +242,8 @@ class _TaskState extends State<Task> {
                       fontSize: 12,
                     )
                   ],
-                )),
-                _buildTextField(
-                  intToMinutes(widget.task.taskTimerSeconds),
-                  'min',
-                  (value) {
-                    tasksBloc.add(UpdateTaskTimerEvent(
-                        index: widget.index, seconds: int.parse(value) * 60));
-                  },
                 ),
-                const SizedBox(width: 16),
+                                const SizedBox(width: 16),
                 Column(
                   children: [
                     FloatingActionButton(

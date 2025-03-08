@@ -257,7 +257,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         if (task.taskTimerSeconds == 0) {
           _playAlertSound();
         }
-        if ((i == 0 && task.taskTimerSeconds % (15 * 60) == 0)) {
+        if ((i == 0 && task.taskTimerSeconds % (30 * 60) == 0)) {
           _playAlertSound(alertType: 'REMINDER');
         }
       } else {
@@ -295,7 +295,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         await _audioPlayer.play(AssetSource('alert.mp3'));
 
       default:
-        await _audioPlayer.play(AssetSource('alert.mp3'));
+        await _audioPlayer.play(AssetSource('bmb-reminder.mp3'));
     }
   }
 
