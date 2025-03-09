@@ -243,12 +243,13 @@ class _TaskState extends State<Task> {
                     )
                   ],
                 ),
-                                const SizedBox(width: 16),
+                const SizedBox(width: 16),
                 Column(
                   children: [
                     FloatingActionButton(
                         onPressed: () =>
                             tasksBloc.add(RemoveTaskEvent(index: widget.index)),
+                        mini: true,
                         child: Icon(Icons.delete)),
                     FloatingActionButton(
                         onPressed: () {
@@ -259,7 +260,19 @@ class _TaskState extends State<Task> {
                               name: "",
                               id: ValueKey<String>(taskId)));
                         },
+                        mini: true,
                         child: Icon(Icons.add)),
+                    FloatingActionButton(
+                        onPressed: () {
+                            if(widget.task.running) {
+                              tasksBloc.add(StopTimerEvent(index: widget.index));
+                            } else {
+                              tasksBloc.add(ResumeTimerEvent(index: widget.index));
+                            }
+                        },
+                        mini: true,
+                        child:  
+                          Icon(widget.task.running ? Icons.pause : Icons.play_arrow))
                   ],
                 )
               ],

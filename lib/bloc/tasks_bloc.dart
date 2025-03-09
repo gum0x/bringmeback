@@ -102,6 +102,12 @@ class StopTimerEvent extends TasksEvent {
   StopTimerEvent({required this.index});
 }
 
+class ResumeTimerEvent extends TasksEvent {
+  final int index;
+
+  ResumeTimerEvent({required this.index});
+}
+
 class ResetTimerEvent extends TasksEvent {
   final int index;
 
@@ -140,6 +146,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<StartTimerEvent>(_onStartTimer);
     on<StopTimerEvent>(_onStopTimer);
     on<ResetTimerEvent>(_onResetTimer);
+    on<ResumeTimerEvent>(_onResumeTimer);
     on<UpdateTimerEvent>(_onUpdateTimer);
     on<UpdateTaskNameEvent>(_onUpdateTaskName);
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
@@ -216,7 +223,15 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     final newTasks = [...state.tasks];
     final task = newTasks[event.index];
     task.running = false;
-    task.lastTimerUpdate = 0;
+
+    _saveState();
+    emit(state.copyWith(tasks: newTasks));
+  }
+
+  void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
+    final newTasks = [...state.tasks];
+    final task = newTasks[event.index];
+    task.running = true;
 
     _saveState();
     emit(state.copyWith(tasks: newTasks));
