@@ -3,46 +3,69 @@ name: Flutter CI
 on:
   push:
     branches: [ main ]
+    paths: &code-paths
+      - 'lib/**'
+      - 'test/**'
+      - 'assets/**'
+      - 'windows/**'
+      - 'macos/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'analysis_options.yaml'
+      - '.github/workflows/cicd.yaml'
   pull_request:
     branches: [ main ]
-  workflow_dispatch: 
+    paths: *code-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     name: Build Flutter App
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
-    
+        include:
+          - os: macos-latest
+            target: macos
+            artifact_path: build/macos/Build/Products/Release/*.app
+          - os: windows-latest
+            target: windows
+            artifact_path: build/windows/x64/runner/Release/
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        flutter-version: '3.22'
+        persist-credentials: false
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version: '3.47.7'
         channel: 'stable'
-    
+        cache: true
+
     - name: Install dependencies
       run: flutter pub get
-    
+
     #- name: Run tests
     #run: flutter test
-    
-    - name: Build macOS app
-      if: matrix.os == 'macos-latest'
-      run: flutter build macos --release
-    
-    - name: Build Windows app
-      if: matrix.os == 'windows-latest'
-      run: flutter build windows --release
-    
+
+    - name: Build ${{ matrix.target }} app
+      run: flutter build ${{ matrix.target }} --release
+
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: release-app-${{ matrix.os }}
-        path: |
-          build/macos/Build/Products/Release/*.app
-          build/windows/runner/Release/*.exe
-        if-no-files-found: ignore
+        name: release-app-${{ matrix.target }}
+        path: ${{ matrix.artifact_path }}
+        if-no-files-found: error
+        retention-days: 14
