@@ -1,3 +1,3 @@
 # bringmeback
-Pomodoro/Stopwatch/TaskManager for people with ADHD
+A Pomodoro timer, stopwatch, and task manager to help you stay focused.
 
