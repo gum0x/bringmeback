@@ -1,5 +1,5 @@
 name: bringmeback
-description: "A new Flutter project."
+description: "A Pomodoro timer, stopwatch, and task manager to help you stay focused."
 publish_to: 'none'
 version: 0.1.0
 
