@@ -3,8 +3,19 @@ name: Flutter CI
 on:
   push:
     branches: [ main ]
+    paths: &code-paths
+      - 'lib/**'
+      - 'test/**'
+      - 'assets/**'
+      - 'windows/**'
+      - 'macos/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'analysis_options.yaml'
+      - '.github/workflows/cicd.yaml'
   pull_request:
     branches: [ main ]
+    paths: *code-paths
   workflow_dispatch:
 
 permissions:
