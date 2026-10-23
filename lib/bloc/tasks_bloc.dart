@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:bringmeback/timer.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,11 +8,43 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+final Random _random = Random.secure();
+
+/// A random 128-bit id, hex encoded. Unlike timestamps, ids made on different devices can't collide.
+String newId() => List.generate(
+    16, (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+
+int nowSeconds() =>
+    DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
+
+/// One stretch of tracked time on one device. `end` is null while the timer runs.
+class TimeEntry {
+  final String deviceId;
+  final int start;
+  int? end;
+
+  TimeEntry({required this.deviceId, required this.start, this.end});
+
+  /// Seconds of this entry after `from`, counting an open entry up to `now`.
+  int secondsSince(int from, int now) {
+    final s = start > from ? start : from;
+    final e = end ?? now;
+    return e > s ? e - s : 0;
+  }
+
+  Map<String, dynamic> toJson() => {'d': deviceId, 's': start, 'e': end};
+
+  factory TimeEntry.fromJson(Map<String, dynamic> json) =>
+      TimeEntry(deviceId: json['d'], start: json['s'], end: json['e']);
+}
+
 class TaskState {
   final String name;
   final ValueKey<String> id;
   int taskTimerSeconds;
-  int totalTaskTimerSeconds;
+  // Tracked time is kept as entries so devices can merge it; a reset only moves totalResetAt.
+  final List<TimeEntry> entries;
+  int totalResetAt;
   bool inFocus;
   bool running;
   int lastTimerUpdate;
@@ -20,18 +53,26 @@ class TaskState {
       {required this.name,
       required this.id,
       this.taskTimerSeconds = 20 * 60,
-      this.totalTaskTimerSeconds = 0,
+      List<TimeEntry>? entries,
+      this.totalResetAt = 0,
       this.inFocus = false,
       this.running = false,
-      this.lastTimerUpdate = 0});
+      this.lastTimerUpdate = 0})
+      : entries = entries ?? [];
+
+  /// Time tracked since the last reset, on every device.
+  int get totalTaskTimerSeconds => totalSecondsAt(nowSeconds());
+
+  int totalSecondsAt(int now) =>
+      entries.fold(0, (sum, e) => sum + e.secondsSince(totalResetAt, now));
 
   TaskState copyWith({
     String? name,
     ValueKey<String>? id,
     int? taskTimerSeconds,
-    int? totalTaskTimerSeconds,
+    List<TimeEntry>? entries,
+    int? totalResetAt,
     bool? inFocus,
-    Timer? timer,
     bool? running,
     int? lastTimerUpdate,
   }) {
@@ -39,8 +80,8 @@ class TaskState {
       name: name ?? this.name,
       id: id ?? this.id,
       taskTimerSeconds: taskTimerSeconds ?? this.taskTimerSeconds,
-      totalTaskTimerSeconds:
-          totalTaskTimerSeconds ?? this.totalTaskTimerSeconds,
+      entries: entries ?? this.entries,
+      totalResetAt: totalResetAt ?? this.totalResetAt,
       inFocus: inFocus ?? this.inFocus,
       running: running ?? this.running,
       lastTimerUpdate: lastTimerUpdate ?? this.lastTimerUpdate,
@@ -137,6 +178,7 @@ class LoadStateEvent extends TasksEvent {}
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
   Timer? tick;
   final AudioPlayer _audioPlayer = AudioPlayer();
+  String _deviceId = '';
 
   TasksBloc() : super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
@@ -241,7 +283,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     final newTasks = [...state.tasks];
     newTasks[event.index] = newTasks[event.index].copyWith(
       taskTimerSeconds: 20 * 60,
-      totalTaskTimerSeconds: 0,
+      totalResetAt: nowSeconds(),
     );
 
     _saveState();
@@ -266,7 +308,6 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         }
 
         task.taskTimerSeconds -= diff;
-        task.totalTaskTimerSeconds += diff;
 
         // Check if timer has reached zero
         if (task.taskTimerSeconds == 0) {
@@ -279,6 +320,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         task.lastTimerUpdate = 0;
       }
     }
+
+    _trackTime(newTasks, nowSeconds());
 
     if (newTasks.isNotEmpty && (newTasks[0].totalTaskTimerSeconds % 5) == 0) {
       _saveState();
@@ -314,7 +357,31 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
+  /// Opens an entry for each running task on this device and closes it when the task stops.
+  void _trackTime(List<TaskState> tasks, int now) {
+    if (_deviceId.isEmpty) return;
+    for (final task in tasks) {
+      final open =
+          task.entries.where((e) => e.end == null && e.deviceId == _deviceId);
+      if (task.running && open.isEmpty) {
+        task.entries.add(TimeEntry(deviceId: _deviceId, start: now));
+      } else if (!task.running) {
+        for (final entry in open) {
+          entry.end = now;
+        }
+      }
+    }
+  }
+
+  /// Turns a total saved by an older version into one closed entry ending now.
+  List<TimeEntry> _migrateTotal(int total) {
+    if (total <= 0) return [];
+    final now = nowSeconds();
+    return [TimeEntry(deviceId: _deviceId, start: now - total, end: now)];
+  }
+
   Future<void> _saveState() async {
+    _trackTime(state.tasks, nowSeconds());
     final prefs = await SharedPreferences.getInstance();
     final String tasksJson = jsonEncode(
       state.tasks
@@ -322,7 +389,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
                 'name': task.name,
                 'id': task.id.value,
                 'taskTimerSeconds': task.taskTimerSeconds,
-                'totalTaskTimerSeconds': task.totalTaskTimerSeconds,
+                'entries': task.entries.map((e) => e.toJson()).toList(),
+                'totalResetAt': task.totalResetAt,
                 'inFocus': task.inFocus,
                 'running': task.running,
                 'lastTimerUpdate': task.lastTimerUpdate,
@@ -334,6 +402,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onLoadState(LoadStateEvent event, Emitter<TasksState> emit) async {
     final prefs = await SharedPreferences.getInstance();
+    if (_deviceId.isEmpty) {
+      _deviceId = prefs.getString('deviceId') ?? newId();
+      await prefs.setString('deviceId', _deviceId);
+    }
     final String? tasksJson = prefs.getString('tasks');
     if (tasksJson != null) {
       final List<dynamic> decoded = jsonDecode(tasksJson);
@@ -342,7 +414,12 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
                 name: task['name'],
                 id: ValueKey<String>(task['id']),
                 taskTimerSeconds: task['taskTimerSeconds'],
-                totalTaskTimerSeconds: task['totalTaskTimerSeconds'],
+                entries: task['entries'] != null
+                    ? (task['entries'] as List)
+                        .map((e) => TimeEntry.fromJson(e))
+                        .toList()
+                    : _migrateTotal(task['totalTaskTimerSeconds'] ?? 0),
+                totalResetAt: task['totalResetAt'] ?? 0,
                 inFocus: task['inFocus'],
                 running: task['running'],
                 lastTimerUpdate: task['lastTimerUpdate'],

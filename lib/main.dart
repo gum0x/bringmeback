@@ -75,7 +75,7 @@ class TasksStack extends StatelessWidget {
                 child: ElevatedButton(
                     onPressed: () {
                       final taskId =
-                          DateTime.now().millisecondsSinceEpoch.toString();
+                          newId();
                       tasksBloc.add(AddTaskOnTopEvent(
                         name: "",
                         id: ValueKey<String>(taskId),
@@ -91,7 +91,7 @@ class TasksStack extends StatelessWidget {
   }
 
   void _addNewTask(TasksBloc taskBloc) {
-    final taskId = DateTime.now().millisecondsSinceEpoch.toString();
+    final taskId = newId();
     taskBloc.add(AddTaskOnTopEvent(
       name: "",
       id: ValueKey<String>(taskId),
@@ -103,7 +103,7 @@ class TasksStack extends StatelessWidget {
   }
 
   void _addNextTask(TasksBloc tasksBloc) {
-    final taskId = DateTime.now().millisecondsSinceEpoch.toString();
+    final taskId = newId();
     tasksBloc.add(
         AddNextTaskEvent(id: ValueKey<String>(taskId), name: "", index: 0));
   }
@@ -254,7 +254,7 @@ class _TaskState extends State<Task> {
                     FloatingActionButton(
                         onPressed: () {
                           final taskId =
-                              DateTime.now().millisecondsSinceEpoch.toString();
+                              newId();
                           tasksBloc.add(AddNextTaskEvent(
                               index: widget.index,
                               name: "",
