@@ -30,45 +30,36 @@ void main() {
   });
 
   group('TaskState', () {
-    TaskState task(List<TimeEntry> entries) =>
-        TaskState(name: 't', id: const ValueKey('x'), entries: entries);
+    TaskState task(List<TimeEntry> entries,
+            {int length = 20 * 60, int startAt = 0, int resetAt = 0}) =>
+        TaskState(
+            name: 't',
+            id: const ValueKey('x'),
+            entries: entries,
+            timerLengthSeconds: length,
+            timerStartAt: startAt,
+            totalResetAt: resetAt);
 
     test('total sums entries since the reset', () {
-      final t = task([
+      final entries = [
         TimeEntry(start: 0, end: 100),
         TimeEntry(start: 200, end: 260),
         TimeEntry(start: 300),
-      ]);
-      expect(t.totalSecondsAt(310), 170);
-      t.totalResetAt = 250;
-      expect(t.totalSecondsAt(310), 20);
+      ];
+      expect(task(entries).totalSecondsAt(310), 170);
+      expect(task(entries, resetAt: 250).totalSecondsAt(310), 20);
     });
 
     test('countdown is derived from the same entries', () {
-      final t = task([TimeEntry(start: 0, end: 100), TimeEntry(start: 200)])
-        ..timerLengthSeconds = 300
-        ..timerStartAt = 50;
+      final t = task([TimeEntry(start: 0, end: 100), TimeEntry(start: 200)],
+          length: 300, startAt: 50);
       expect(t.remainingSecondsAt(250), 300 - 50 - 50);
       expect(t.remainingSecondsAt(600), -150);
     });
 
     test('running is whether an entry is open', () {
-      final t = task([]);
-      expect(t.running, isFalse);
-      t.running = true;
-      expect(t.running, isTrue);
-      expect(t.entries.length, 1);
-      t.running = true;
-      expect(t.entries.length, 1);
-      t.running = false;
-      expect(t.running, isFalse);
-      expect(t.entries.single.end, isNotNull);
-    });
-
-    test('copyWith keeps the running state unless told otherwise', () {
-      final t = task([TimeEntry(start: 0)]);
-      expect(t.copyWith(name: 'n').running, isTrue);
-      expect(t.copyWith(running: false).running, isFalse);
+      expect(task([TimeEntry(start: 0, end: 5)]).running, isFalse);
+      expect(task([TimeEntry(start: 0)]).running, isTrue);
     });
   });
 }

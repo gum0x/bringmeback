@@ -105,6 +105,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
+  crdt_lf:
+    dependency: "direct main"
+    description:
+      name: crdt_lf
+      sha256: c4448d4e44e5e21de5b389f86c45913c552e190d73ac860d8aac78c34cebb469
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.1.2"
   crypto:
     dependency: transitive
     description:
@@ -176,6 +184,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  hlc_dart:
+    dependency: transitive
+    description:
+      name: hlc_dart
+      sha256: b6e798b4fe648fa1a054a9541238e28ba6fe2e6fe28d7d7a2d13ca893187a127
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.0"
   http:
     dependency: transitive
     description:
@@ -510,5 +526,5 @@ packages:
     source: hosted
     version: "1.0.4"
 sdks:
-  dart: ">=3.10.0-0 <4.0.0"
+  dart: ">=3.11.0-0 <4.0.0"
   flutter: ">=3.44.0"
