@@ -3,6 +3,8 @@ import 'package:bringmeback/timer.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'sync/sync_cubit.dart';
+import 'sync/sync_page.dart';
 import 'dart:async';
 
 void main() {
@@ -12,8 +14,11 @@ void main() {
 class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-        create: (_) => TasksBloc()..add(LoadStateEvent()),
+    return MultiBlocProvider(
+        providers: [
+          BlocProvider(create: (_) => TasksBloc()..add(LoadStateEvent())),
+          BlocProvider(create: (_) => SyncCubit()..load()),
+        ],
         child: MaterialApp(
           title: 'Flutter Stopwatch App',
           theme: ThemeData(primarySwatch: Colors.blue, fontFamily: "arial"),
@@ -72,16 +77,27 @@ class TasksStack extends StatelessWidget {
               })),
               Container(
                 padding: EdgeInsets.all(16),
-                child: ElevatedButton(
-                    onPressed: () {
-                      final taskId =
-                          newId();
-                      tasksBloc.add(AddTaskOnTopEvent(
-                        name: "",
-                        id: ValueKey<String>(taskId),
-                      ));
-                    },
-                    child: Icon(Icons.add)),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton(
+                        onPressed: () {
+                          final taskId =
+                              newId();
+                          tasksBloc.add(AddTaskOnTopEvent(
+                            name: "",
+                            id: ValueKey<String>(taskId),
+                          ));
+                        },
+                        child: Icon(Icons.add)),
+                    const SizedBox(width: 16),
+                    IconButton(
+                        tooltip: 'Devices',
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const SyncPage())),
+                        icon: Icon(Icons.devices)),
+                  ],
+                ),
               )
             ],
           ),
