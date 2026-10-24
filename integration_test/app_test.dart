@@ -167,6 +167,10 @@ void main() {
     expect(nameOf(tester, 0), 'Second');
     // The task that moves to the top starts running.
     expect(taskButton(0, Icons.pause), findsOneWidget);
+
+    await tester.tap(taskButton(0, Icons.delete));
+    await tester.pumpAndSettle();
+    expect(taskCards, findsNothing);
   });
 
   testWidgets('keyboard shortcuts add and remove tasks', (tester) async {
