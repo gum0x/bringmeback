@@ -17,13 +17,12 @@ String newId() => List.generate(
 int nowSeconds() =>
     DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
 
-/// One stretch of tracked time on one device. `end` is null while the timer runs.
+/// One stretch of time a task's timer ran. `end` is null while it runs.
 class TimeEntry {
-  final String deviceId;
   final int start;
   int? end;
 
-  TimeEntry({required this.deviceId, required this.start, this.end});
+  TimeEntry({required this.start, this.end});
 
   /// Seconds of this entry after `from`, counting an open entry up to `now`.
   int secondsSince(int from, int now) {
@@ -32,59 +31,82 @@ class TimeEntry {
     return e > s ? e - s : 0;
   }
 
-  Map<String, dynamic> toJson() => {'d': deviceId, 's': start, 'e': end};
+  Map<String, dynamic> toJson() => {'s': start, 'e': end};
 
   factory TimeEntry.fromJson(Map<String, dynamic> json) =>
-      TimeEntry(deviceId: json['d'], start: json['s'], end: json['e']);
+      TimeEntry(start: json['s'], end: json['e']);
 }
 
 class TaskState {
   final String name;
   final ValueKey<String> id;
-  int taskTimerSeconds;
-  // Tracked time is kept as entries so devices can merge it; a reset only moves totalResetAt.
+  // Everything about the timer is derived from entries and timestamps, so any device holding the
+  // same task state shows the same running state, countdown and total, and fires the same alerts.
   final List<TimeEntry> entries;
+  int timerLengthSeconds;
+  int timerStartAt;
   int totalResetAt;
   bool inFocus;
-  bool running;
-  int lastTimerUpdate;
 
   TaskState(
       {required this.name,
       required this.id,
-      this.taskTimerSeconds = 20 * 60,
+      this.timerLengthSeconds = 20 * 60,
+      this.timerStartAt = 0,
       List<TimeEntry>? entries,
       this.totalResetAt = 0,
       this.inFocus = false,
-      this.running = false,
-      this.lastTimerUpdate = 0})
-      : entries = entries ?? [];
+      bool? running})
+      : entries = entries ?? [] {
+    if (running != null) this.running = running;
+  }
 
-  /// Time tracked since the last reset, on every device.
+  bool get running => entries.any((e) => e.end == null);
+
+  set running(bool value) {
+    final now = nowSeconds();
+    if (value && !running) {
+      entries.add(TimeEntry(start: now));
+    } else if (!value) {
+      for (final e in entries.where((e) => e.end == null)) {
+        e.end = now;
+      }
+    }
+  }
+
+  /// Countdown left; negative once it has run out.
+  int get taskTimerSeconds => remainingSecondsAt(nowSeconds());
+
+  int remainingSecondsAt(int now) =>
+      timerLengthSeconds - _secondsSince(timerStartAt, now);
+
+  /// Time tracked since the last reset.
   int get totalTaskTimerSeconds => totalSecondsAt(nowSeconds());
 
-  int totalSecondsAt(int now) =>
-      entries.fold(0, (sum, e) => sum + e.secondsSince(totalResetAt, now));
+  int totalSecondsAt(int now) => _secondsSince(totalResetAt, now);
+
+  int _secondsSince(int from, int now) =>
+      entries.fold(0, (sum, e) => sum + e.secondsSince(from, now));
 
   TaskState copyWith({
     String? name,
     ValueKey<String>? id,
-    int? taskTimerSeconds,
+    int? timerLengthSeconds,
+    int? timerStartAt,
     List<TimeEntry>? entries,
     int? totalResetAt,
     bool? inFocus,
     bool? running,
-    int? lastTimerUpdate,
   }) {
     return TaskState(
       name: name ?? this.name,
       id: id ?? this.id,
-      taskTimerSeconds: taskTimerSeconds ?? this.taskTimerSeconds,
+      timerLengthSeconds: timerLengthSeconds ?? this.timerLengthSeconds,
+      timerStartAt: timerStartAt ?? this.timerStartAt,
       entries: entries ?? this.entries,
       totalResetAt: totalResetAt ?? this.totalResetAt,
       inFocus: inFocus ?? this.inFocus,
-      running: running ?? this.running,
-      lastTimerUpdate: lastTimerUpdate ?? this.lastTimerUpdate,
+      running: running,
     );
   }
 }
@@ -178,7 +200,8 @@ class LoadStateEvent extends TasksEvent {}
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
   Timer? tick;
   final AudioPlayer _audioPlayer = AudioPlayer();
-  String _deviceId = '';
+  // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
+  final Map<String, int> _lastRemaining = {};
 
   TasksBloc() : super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
@@ -281,9 +304,12 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onResetTimer(ResetTimerEvent event, Emitter<TasksState> emit) {
     final newTasks = [...state.tasks];
+    final now = nowSeconds();
+    _lastRemaining.remove(newTasks[event.index].id.value);
     newTasks[event.index] = newTasks[event.index].copyWith(
-      taskTimerSeconds: 20 * 60,
-      totalResetAt: nowSeconds(),
+      timerLengthSeconds: 20 * 60,
+      timerStartAt: now,
+      totalResetAt: now,
     );
 
     _saveState();
@@ -292,36 +318,22 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onUpdateTimer(UpdateTimerEvent event, Emitter<TasksState> emit) {
     final newTasks = [...state.tasks];
+    final now = nowSeconds();
     for (int i = 0; i < newTasks.length; i++) {
-      TaskState task = newTasks[i];
-      if (task.running) {
-        int diff;
-        final int now = DateTime.now().millisecondsSinceEpoch ~/
-            Duration.millisecondsPerSecond;
+      final task = newTasks[i];
+      final remaining = task.remainingSecondsAt(now);
+      final previous = _lastRemaining[task.id.value];
+      _lastRemaining[task.id.value] = remaining;
+      if (previous == null || previous == remaining) continue;
 
-        if (task.lastTimerUpdate == 0) {
-          diff = 1;
-          task.lastTimerUpdate = now;
-        } else {
-          diff = now - task.lastTimerUpdate;
-          task.lastTimerUpdate = now;
-        }
-
-        task.taskTimerSeconds -= diff;
-
-        // Check if timer has reached zero
-        if (task.taskTimerSeconds == 0) {
-          _playAlertSound();
-        }
-        if ((i == 0 && task.taskTimerSeconds % (30 * 60) == 0)) {
-          _playAlertSound(alertType: 'REMINDER');
-        }
-      } else {
-        task.lastTimerUpdate = 0;
+      // Check if timer has reached zero
+      if (previous > 0 && remaining <= 0) {
+        _playAlertSound();
+      }
+      if (i == 0 && (previous / 1800).floor() != (remaining / 1800).floor()) {
+        _playAlertSound(alertType: 'REMINDER');
       }
     }
-
-    _trackTime(newTasks, nowSeconds());
 
     if (newTasks.isNotEmpty && (newTasks[0].totalTaskTimerSeconds % 5) == 0) {
       _saveState();
@@ -340,8 +352,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   void _onUpdateTaskTimer(
       UpdateTaskTimerEvent event, Emitter<TasksState> emit) {
     final newTasks = [...state.tasks];
-    newTasks[event.index] =
-        newTasks[event.index].copyWith(taskTimerSeconds: event.seconds);
+    _lastRemaining.remove(newTasks[event.index].id.value);
+    newTasks[event.index] = newTasks[event.index].copyWith(
+        timerLengthSeconds: event.seconds, timerStartAt: nowSeconds());
 
     _saveState();
     emit(state.copyWith(tasks: newTasks));
@@ -357,43 +370,33 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
-  /// Opens an entry for each running task on this device and closes it when the task stops.
-  void _trackTime(List<TaskState> tasks, int now) {
-    if (_deviceId.isEmpty) return;
-    for (final task in tasks) {
-      final open =
-          task.entries.where((e) => e.end == null && e.deviceId == _deviceId);
-      if (task.running && open.isEmpty) {
-        task.entries.add(TimeEntry(deviceId: _deviceId, start: now));
-      } else if (!task.running) {
-        for (final entry in open) {
-          entry.end = now;
-        }
-      }
-    }
-  }
-
-  /// Turns a total saved by an older version into one closed entry ending now.
-  List<TimeEntry> _migrateTotal(int total) {
-    if (total <= 0) return [];
+  /// Builds a task saved by an older version, which stored counters instead of entries.
+  TaskState _migrateTask(Map<String, dynamic> task) {
     final now = nowSeconds();
-    return [TimeEntry(deviceId: _deviceId, start: now - total, end: now)];
+    final int total = task['totalTaskTimerSeconds'] ?? 0;
+    return TaskState(
+      name: task['name'],
+      id: ValueKey<String>(task['id']),
+      timerLengthSeconds: task['taskTimerSeconds'] ?? 20 * 60,
+      timerStartAt: now,
+      entries: [if (total > 0) TimeEntry(start: now - total, end: now)],
+      inFocus: task['inFocus'] ?? false,
+      running: task['running'] ?? false,
+    );
   }
 
   Future<void> _saveState() async {
-    _trackTime(state.tasks, nowSeconds());
     final prefs = await SharedPreferences.getInstance();
     final String tasksJson = jsonEncode(
       state.tasks
           .map((task) => {
                 'name': task.name,
                 'id': task.id.value,
-                'taskTimerSeconds': task.taskTimerSeconds,
+                'timerLengthSeconds': task.timerLengthSeconds,
+                'timerStartAt': task.timerStartAt,
                 'entries': task.entries.map((e) => e.toJson()).toList(),
                 'totalResetAt': task.totalResetAt,
                 'inFocus': task.inFocus,
-                'running': task.running,
-                'lastTimerUpdate': task.lastTimerUpdate,
               })
           .toList(),
     );
@@ -402,28 +405,23 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onLoadState(LoadStateEvent event, Emitter<TasksState> emit) async {
     final prefs = await SharedPreferences.getInstance();
-    if (_deviceId.isEmpty) {
-      _deviceId = prefs.getString('deviceId') ?? newId();
-      await prefs.setString('deviceId', _deviceId);
-    }
     final String? tasksJson = prefs.getString('tasks');
     if (tasksJson != null) {
       final List<dynamic> decoded = jsonDecode(tasksJson);
       final List<TaskState> loadedTasks = decoded
-          .map((task) => TaskState(
-                name: task['name'],
-                id: ValueKey<String>(task['id']),
-                taskTimerSeconds: task['taskTimerSeconds'],
-                entries: task['entries'] != null
-                    ? (task['entries'] as List)
-                        .map((e) => TimeEntry.fromJson(e))
-                        .toList()
-                    : _migrateTotal(task['totalTaskTimerSeconds'] ?? 0),
-                totalResetAt: task['totalResetAt'] ?? 0,
-                inFocus: task['inFocus'],
-                running: task['running'],
-                lastTimerUpdate: task['lastTimerUpdate'],
-              ))
+          .map((task) => task['entries'] == null
+              ? _migrateTask(task)
+              : TaskState(
+                  name: task['name'],
+                  id: ValueKey<String>(task['id']),
+                  timerLengthSeconds: task['timerLengthSeconds'],
+                  timerStartAt: task['timerStartAt'],
+                  entries: (task['entries'] as List)
+                      .map((e) => TimeEntry.fromJson(e))
+                      .toList(),
+                  totalResetAt: task['totalResetAt'],
+                  inFocus: task['inFocus'],
+                ))
           .toList();
 
       emit(state.copyWith(tasks: loadedTasks));
