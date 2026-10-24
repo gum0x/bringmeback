@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'package:bringmeback/timer.dart';
+import 'package:crdt_lf/crdt_lf.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'task_document.dart';
 
 final Random _random = Random.secure();
 
@@ -37,16 +39,17 @@ class TimeEntry {
       TimeEntry(start: json['s'], end: json['e']);
 }
 
+/// A task as the UI sees it, read from the [TaskDocument].
 class TaskState {
   final String name;
   final ValueKey<String> id;
   // Everything about the timer is derived from entries and timestamps, so any device holding the
   // same task state shows the same running state, countdown and total, and fires the same alerts.
   final List<TimeEntry> entries;
-  int timerLengthSeconds;
-  int timerStartAt;
-  int totalResetAt;
-  bool inFocus;
+  final int timerLengthSeconds;
+  final int timerStartAt;
+  final int totalResetAt;
+  final bool inFocus;
 
   TaskState(
       {required this.name,
@@ -55,24 +58,10 @@ class TaskState {
       this.timerStartAt = 0,
       List<TimeEntry>? entries,
       this.totalResetAt = 0,
-      this.inFocus = false,
-      bool? running})
-      : entries = entries ?? [] {
-    if (running != null) this.running = running;
-  }
+      this.inFocus = false})
+      : entries = entries ?? [];
 
   bool get running => entries.any((e) => e.end == null);
-
-  set running(bool value) {
-    final now = nowSeconds();
-    if (value && !running) {
-      entries.add(TimeEntry(start: now));
-    } else if (!value) {
-      for (final e in entries.where((e) => e.end == null)) {
-        e.end = now;
-      }
-    }
-  }
 
   /// Countdown left; negative once it has run out.
   int get taskTimerSeconds => remainingSecondsAt(nowSeconds());
@@ -87,28 +76,6 @@ class TaskState {
 
   int _secondsSince(int from, int now) =>
       entries.fold(0, (sum, e) => sum + e.secondsSince(from, now));
-
-  TaskState copyWith({
-    String? name,
-    ValueKey<String>? id,
-    int? timerLengthSeconds,
-    int? timerStartAt,
-    List<TimeEntry>? entries,
-    int? totalResetAt,
-    bool? inFocus,
-    bool? running,
-  }) {
-    return TaskState(
-      name: name ?? this.name,
-      id: id ?? this.id,
-      timerLengthSeconds: timerLengthSeconds ?? this.timerLengthSeconds,
-      timerStartAt: timerStartAt ?? this.timerStartAt,
-      entries: entries ?? this.entries,
-      totalResetAt: totalResetAt ?? this.totalResetAt,
-      inFocus: inFocus ?? this.inFocus,
-      running: running,
-    );
-  }
 }
 
 class TasksState {
@@ -200,6 +167,10 @@ class LoadStateEvent extends TasksEvent {}
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
   Timer? tick;
   final AudioPlayer _audioPlayer = AudioPlayer();
+  // Null until the saved document has been loaded; edits before that are ignored.
+  TaskDocument? _doc;
+  // Which task has the focus is local to this device.
+  String? _focusId;
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
 
@@ -223,104 +194,96 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
   }
 
-  void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
-    state.tasks.forEach((task) {
-      task.inFocus = false;
-    });
+  TasksState _view() => TasksState(tasks: _doc?.tasks(focusId: _focusId) ?? []);
 
-    final newTask =
-        new TaskState(name: "", id: event.id, inFocus: true, running: true);
-    final newTasks = [newTask, ...state.tasks];
-
+  /// Applies [change] to the document, then shows and saves the result.
+  void _edit(Emitter<TasksState> emit, void Function(TaskDocument doc) change) {
+    final doc = _doc;
+    if (doc == null) return;
+    change(doc);
+    emit(_view());
     _saveState();
-    emit(state.copyWith(tasks: newTasks));
+  }
+
+  /// The id of the task at [index], or null when there is none.
+  String? _idAt(int index) {
+    final ids = _doc?.ids ?? const [];
+    return index >= 0 && index < ids.length ? ids[index] : null;
+  }
+
+  /// Focuses the first task and starts its timer, as removing or moving a task does.
+  void _focusFirst(TaskDocument doc) {
+    final first = _idAt(0);
+    if (first == null) return;
+    _focusId = first;
+    doc.setRunning(first, true);
+  }
+
+  void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) {
+      doc.insert(0, event.id.value, running: true);
+      _focusId = event.id.value;
+    });
   }
 
   void _onAddNextTask(AddNextTaskEvent event, Emitter<TasksState> emit) {
-    state.tasks.forEach((task) {
-      task.inFocus = false;
+    _edit(emit, (doc) {
+      doc.insert(min(event.index + 1, doc.ids.length), event.id.value);
+      _focusId = event.id.value;
     });
-
-    final newTask =
-        new TaskState(id: event.id, name: "", inFocus: true, running: false);
-    final newTasks = [...state.tasks];
-    newTasks.insert(event.index + 1, newTask);
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
   }
 
   void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    newTasks.removeAt(event.index);
-    newTasks[0].inFocus = true;
-    newTasks[0].running = true;
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    _edit(emit, (doc) {
+      doc.removeAt(event.index);
+      _focusFirst(doc);
+    });
   }
 
   void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    final task = newTasks.removeAt(event.fromIndex);
-    newTasks.insert(event.toIndex, task);
-
-    newTasks.forEach((task) {
-      task.inFocus = false;
+    _edit(emit, (doc) {
+      doc.move(event.fromIndex, event.toIndex);
+      _focusFirst(doc);
     });
-    newTasks[0].inFocus = true;
-    newTasks[0].running = true;
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
   }
 
   void _onStartTimer(StartTimerEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    newTasks[event.index] =
-        newTasks[event.index].copyWith(inFocus: true, running: true);
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _edit(emit, (doc) {
+      _focusId = id;
+      doc.setRunning(id, true);
+    });
   }
 
   void _onStopTimer(StopTimerEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    final task = newTasks[event.index];
-    task.running = false;
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _edit(emit, (doc) => doc.setRunning(id, false));
   }
 
   void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    final task = newTasks[event.index];
-    task.running = true;
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _edit(emit, (doc) => doc.setRunning(id, true));
   }
 
   void _onResetTimer(ResetTimerEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
+    final id = _idAt(event.index);
+    if (id == null) return;
     final now = nowSeconds();
-    _lastRemaining.remove(newTasks[event.index].id.value);
-    newTasks[event.index] = newTasks[event.index].copyWith(
-      timerLengthSeconds: 20 * 60,
-      timerStartAt: now,
-      totalResetAt: now,
-    );
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    _lastRemaining.remove(id);
+    _edit(emit, (doc) {
+      doc.setTimer(id, 20 * 60, now);
+      doc.setTotalResetAt(id, now);
+    });
   }
 
   void _onUpdateTimer(UpdateTimerEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
+    final view = _view();
     final now = nowSeconds();
-    for (int i = 0; i < newTasks.length; i++) {
-      final task = newTasks[i];
+    for (int i = 0; i < view.tasks.length; i++) {
+      final task = view.tasks[i];
       final remaining = task.remainingSecondsAt(now);
       final previous = _lastRemaining[task.id.value];
       _lastRemaining[task.id.value] = remaining;
@@ -335,29 +298,21 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       }
     }
 
-    if (newTasks.isNotEmpty && (newTasks[0].totalTaskTimerSeconds % 5) == 0) {
-      _saveState();
-    }
-    emit(state.copyWith(tasks: newTasks));
+    emit(view);
   }
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    newTasks[event.index] = newTasks[event.index].copyWith(name: event.newName);
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _edit(emit, (doc) => doc.setName(id, event.newName));
   }
 
   void _onUpdateTaskTimer(
       UpdateTaskTimerEvent event, Emitter<TasksState> emit) {
-    final newTasks = [...state.tasks];
-    _lastRemaining.remove(newTasks[event.index].id.value);
-    newTasks[event.index] = newTasks[event.index].copyWith(
-        timerLengthSeconds: event.seconds, timerStartAt: nowSeconds());
-
-    _saveState();
-    emit(state.copyWith(tasks: newTasks));
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _lastRemaining.remove(id);
+    _edit(emit, (doc) => doc.setTimer(id, event.seconds, nowSeconds()));
   }
 
   void _playAlertSound({String? alertType}) async {
@@ -370,62 +325,90 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
-  /// Builds a task saved by an older version, which stored counters instead of entries.
-  TaskState _migrateTask(Map<String, dynamic> task) {
-    final now = nowSeconds();
-    final int total = task['totalTaskTimerSeconds'] ?? 0;
-    return TaskState(
-      name: task['name'],
-      id: ValueKey<String>(task['id']),
-      timerLengthSeconds: task['taskTimerSeconds'] ?? 20 * 60,
-      timerStartAt: now,
-      entries: [if (total > 0) TimeEntry(start: now - total, end: now)],
-      inFocus: task['inFocus'] ?? false,
-      running: task['running'] ?? false,
-    );
-  }
-
   Future<void> _saveState() async {
+    final doc = _doc;
+    if (doc == null) return;
     final prefs = await SharedPreferences.getInstance();
-    final String tasksJson = jsonEncode(
-      state.tasks
-          .map((task) => {
-                'name': task.name,
-                'id': task.id.value,
-                'timerLengthSeconds': task.timerLengthSeconds,
-                'timerStartAt': task.timerStartAt,
-                'entries': task.entries.map((e) => e.toJson()).toList(),
-                'totalResetAt': task.totalResetAt,
-                'inFocus': task.inFocus,
-              })
-          .toList(),
-    );
-    await prefs.setString('tasks', tasksJson);
+    await prefs.setString('taskDocument', doc.encodeChanges());
+    final focusId = _focusId;
+    if (focusId != null) await prefs.setString('focusId', focusId);
   }
 
-  void _onLoadState(LoadStateEvent event, Emitter<TasksState> emit) async {
+  Future<void> _onLoadState(
+      LoadStateEvent event, Emitter<TasksState> emit) async {
+    if (_doc != null) return;
     final prefs = await SharedPreferences.getInstance();
-    final String? tasksJson = prefs.getString('tasks');
-    if (tasksJson != null) {
-      final List<dynamic> decoded = jsonDecode(tasksJson);
-      final List<TaskState> loadedTasks = decoded
-          .map((task) => task['entries'] == null
-              ? _migrateTask(task)
-              : TaskState(
-                  name: task['name'],
-                  id: ValueKey<String>(task['id']),
-                  timerLengthSeconds: task['timerLengthSeconds'],
-                  timerStartAt: task['timerStartAt'],
-                  entries: (task['entries'] as List)
-                      .map((e) => TimeEntry.fromJson(e))
-                      .toList(),
-                  totalResetAt: task['totalResetAt'],
-                  inFocus: task['inFocus'],
-                ))
-          .toList();
+    if (_doc != null) return;
 
-      emit(state.copyWith(tasks: loadedTasks));
+    // The peer id names this install as the author of its changes; it must stay the same.
+    var peerId = prefs.getString('peerId');
+    if (peerId == null) {
+      peerId = PeerId.generate().toString();
+      await prefs.setString('peerId', peerId);
     }
+    final doc = TaskDocument(
+        CRDTDocument(peerId: PeerId.parse(peerId), documentId: 'tasks'));
+
+    final saved = prefs.getString('taskDocument');
+    final legacy = prefs.getString('tasks');
+    if (saved != null) {
+      doc.importEncodedChanges(saved);
+      _focusId = prefs.getString('focusId');
+    } else if (legacy != null) {
+      // Tasks saved before the document existed. The old key is left in place.
+      final tasks = (jsonDecode(legacy) as List)
+          .map((t) => _legacyTask(t as Map<String, dynamic>))
+          .toList();
+      for (final (i, t) in tasks.indexed) {
+        doc.insert(i, t.task.id.value,
+            name: t.task.name,
+            timerLengthSeconds: t.task.timerLengthSeconds,
+            timerStartAt: t.task.timerStartAt,
+            totalResetAt: t.task.totalResetAt,
+            entries: t.task.entries,
+            running: t.running);
+        if (t.task.inFocus) _focusId = t.task.id.value;
+      }
+    }
+
+    _doc = doc;
+    emit(_view());
+    await _saveState();
+  }
+
+  /// Reads a task saved as JSON by an earlier version, with or without time entries.
+  ({TaskState task, bool running}) _legacyTask(Map<String, dynamic> t) {
+    final now = nowSeconds();
+    final id = ValueKey<String>(t['id']);
+    if (t['entries'] != null) {
+      final entries = [
+        for (final e in t['entries'] as List) TimeEntry.fromJson(e)
+      ];
+      return (
+        task: TaskState(
+          name: t['name'] ?? '',
+          id: id,
+          timerLengthSeconds: t['timerLengthSeconds'] ?? 20 * 60,
+          timerStartAt: t['timerStartAt'] ?? now,
+          totalResetAt: t['totalResetAt'] ?? 0,
+          entries: entries,
+          inFocus: t['inFocus'] ?? false,
+        ),
+        running: false,
+      );
+    }
+    final int total = t['totalTaskTimerSeconds'] ?? 0;
+    return (
+      task: TaskState(
+        name: t['name'] ?? '',
+        id: id,
+        timerLengthSeconds: t['taskTimerSeconds'] ?? 20 * 60,
+        timerStartAt: now,
+        entries: [if (total > 0) TimeEntry(start: now - total, end: now)],
+        inFocus: t['inFocus'] ?? false,
+      ),
+      running: t['running'] ?? false,
+    );
   }
 
   @override
