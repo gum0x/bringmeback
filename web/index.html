@@ -33,6 +33,24 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script>
+    // Flutter's engine stops at startup when the browser reports a locale tag that Intl.Locale
+    // rejects, such as "en-US@posix" from Chromium on Linux with a C/POSIX locale. Report only
+    // tags it accepts, falling back to en-US.
+    (function () {
+      function valid(tag) {
+        try { new Intl.Locale(tag); return true; } catch (e) { return false; }
+      }
+      var reported = navigator.languages && navigator.languages.length
+        ? navigator.languages : [navigator.language];
+      var langs = reported
+        .map(function (tag) { return String(tag).split('@')[0]; })
+        .filter(valid);
+      if (!langs.length) langs = ['en-US'];
+      Object.defineProperty(Navigator.prototype, 'languages', { get: function () { return langs; } });
+      Object.defineProperty(Navigator.prototype, 'language', { get: function () { return langs[0]; } });
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
