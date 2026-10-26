@@ -96,9 +96,8 @@ Today's task list, unchanged. Later additions that belong here, not in a new vie
   its own: share Work with a colleague's device without exposing Personal.
 - Fits the sync plan: one CRDT document and one pairing secret per log (today the only document is
   `tasks`, which becomes the first log).
-- Open question: can two logs run timers at once? Recommended: no. One current task across all logs,
-  so "the top task is the current task" still holds. Switching log while working asks nothing; the
-  running task stays running and the top bar shows it.
+- One current task across all logs (monotasking, principle 1): two logs never run timers at once.
+  Switching log while working asks nothing; the running task stays running and the top bar shows it.
 - A task can be moved to another log from its ⋮ menu.
 
 ## Alerts

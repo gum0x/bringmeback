@@ -31,6 +31,12 @@ leave the field. From the task's ⋮ menu you can **Restart countdown** or **Res
 While a task runs, a short reminder sound plays every 30 minutes. The speaker icon in the top bar mutes
 all sounds.
 
+## Interruptions
+
+An interruption is a new task. Press **New task** (Alt+N): it goes on top, gets the focus and is timed,
+and the task you were on pauses one place below. When the interruption is done, mark it done and the
+task it interrupted takes over again.
+
 ## Pause and breaks
 
 Press **Pause** on the top task when you step away. The time until you press **Resume** is logged as a

@@ -1,41 +1,59 @@
 # Principles and goals
 
 bringmeback exists to answer two questions at a glance: **what am I doing now, and what comes next?**
-As a side effect it keeps an honest record of where the time went, without asking you to keep one.
+It is built for monotasking: one thing at a time, in priority order. As a side effect it keeps an honest
+record of where the time went, without asking you to keep one.
 
 ## Goals
 
-1. **Get back on track fast.** After an interruption, one look at the top of the list tells you what
+1. **Do one thing at a time.** Multitasking is not optimal and not really possible. The app keeps a
+   single current task and steers away from anything that looks like juggling several.
+2. **Get back on track fast.** After an interruption, one look at the top of the list tells you what
    you were doing and how long you have been at it.
-2. **Plan by ordering.** The list is the plan. Its order is the order you will work in.
-3. **Record time for free.** Every minute is attributed to a task or a break by the normal act of using
-   the list, so history and metrics need no extra input.
-4. **Stay private.** Your data lives on your devices. Sharing and sync are opt-in and end-to-end
-   encrypted.
+3. **Stay out of the way.** Managing tasks, above all adding and finishing them, is so quick that the
+   app never becomes a distraction itself.
+4. **Carry your tasks everywhere.** Tasks and ideas are not tied to work, home or one device. They move
+   with you between your phone, laptop and desktop.
+5. **Stay private.** No service behind the app: your data lives only on your devices, synced directly
+   between them.
+
+## Usability rules
+
+1. **Tasks are always in priority order.** The list says what is going to be done next. Its order is
+   the plan.
+2. **One thing at a time.** The first task is the one being worked on, and the only one being counted.
+3. **An interruption is a new task on top.** It takes the focus and its timer, and the task you were on
+   pauses one place below, ready to resume when the interruption is done.
 
 ## Principles
 
 These are the rules a change has to respect. When two of them pull in different directions, the
 earlier one wins.
 
-1. **The top task is the current task.** Only the top task's timer runs. Done, delete and reorder hand
-   the running timer to whatever becomes the top, and a paused state stays paused.
+1. **Monotasking: the top task is the current task.** Only the top task's timer runs, and there is never
+   more than one running task, across every list and device. Done, delete and reorder hand the running
+   timer to whatever becomes the top, and a paused state stays paused. Features that encourage working
+   on several things at once (parallel timers, split views of running tasks) are out.
 2. **No bookkeeping.** Never ask the user to log, tag or categorise time to get value. Pausing logs a
    break; done keeps when it finished; history is computed from those.
 3. **Nothing is lost.** Every action that takes something away can be undone, and the document keeps
    history even after a task leaves the list.
-4. **One step for the common things.** New task, pause/resume and done are each one tap or one key.
-   Everything else may live one level down, in the task's menu.
+4. **Managing tasks is effortless.** Adding and finishing a task are the core actions: one tap or one
+   key each, from anywhere, with no form to fill in. Pause/resume is one tap too. Everything else may
+   live one level down, in the task's menu. If the app takes attention away from the task, it is
+   failing.
 5. **Calm, not nagging.** Alerts tell you something useful (time's up, a long stretch) and can be
    muted. No streaks, scores or guilt.
-6. **Phone and desktop are equal.** Every screen works at 380 px wide and with a keyboard. Browser
-   shortcut clashes get an Alt variant.
+6. **Multiplatform and multidevice.** The same tasks and ideas on every device you own: phone, desktop
+   and web are equal, every screen works at 380 px wide and with a keyboard, and browser shortcut
+   clashes get an Alt variant. You use one device at a time; which one does not matter, and the next
+   one you pick up carries on where the last one stopped.
 7. **Say it in plain words.** Clocks carry labels ("Left", "Total", "over"), buttons have tooltips,
    placeholders never look like real content.
 8. **Few views, one home.** The task list is home. Any other view is one step away and one step back,
    and must earn its place by answering a question the list cannot.
-9. **Local first.** The app works fully offline with no account. Anything that leaves the device is
-   encrypted and optional.
+9. **Offline, no service behind.** The app works fully offline with no account and no server of ours.
+   Devices sync directly with each other; whatever travels between them is end-to-end encrypted.
 
 ## The usability path
 
@@ -44,17 +62,22 @@ step or a decision here, it needs a strong reason.
 
 1. Open the app. The empty state says what to do: add a task.
 2. Press **New task** (or Alt+N). A task appears on top and its timer starts. Type its name.
-3. Add the next few tasks below it, in the order you will do them.
-4. Step away: press **Pause**. The break is logged. Press **Resume** when back.
-5. Finish: press **Done**. The task leaves the list and the next one starts timing.
-6. Made a mistake? **Undo** in the message at the bottom.
-7. At the end of the day, look at what you did and where the time went (History, see
+3. Add the next few tasks below it, in priority order: what you will do next comes next.
+4. Interrupted? Press **New task** again. The interruption goes on top and is timed; the task you were
+   on pauses just below it.
+5. Step away: press **Pause**. The break is logged. Press **Resume** when back.
+6. Finish: press **Done**. The task leaves the list and the next one, often the task the interruption
+   paused, starts timing.
+7. Made a mistake? **Undo** in the message at the bottom.
+8. Pick up another device later. The same list is there, in the same state.
+9. At the end of the day, look at what you did and where the time went (History, see
    [VIEWS.md](VIEWS.md)).
 
 ## Checklist for a change
 
-- Does the top of the list still say what is happening now?
+- Does the top of the list still say what is happening now, and is only one thing running?
+- Are adding and finishing a task still one step each?
 - Can the change be undone, or does it lose nothing?
 - Does it add a tap, a field or a question to the usability path?
-- Does it work at phone width and from the keyboard?
-- Does it keep data on the device unless the user opted in?
+- Does it work at phone width and from the keyboard, and on every platform?
+- Does it work offline, with no server, and keep data on your own devices?
