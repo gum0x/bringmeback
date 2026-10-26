@@ -26,8 +26,9 @@ described in [VIEWS.md](VIEWS.md).
 4. **Multiple logs.** Work, Personal and more, each its own document. Log switcher, move a task to
    another log. Comes before sync so that sharing is per log from the start.
 5. **Notes.** Notes per log, optionally linked to a task.
-6. **Alerts.** Scheduled local notifications so alerts fire with the app in the background; the bell
-   with fired and upcoming alerts.
+6. **Task alerts.** Set a date and time on a task; when it fires, switch to it now, make it next or
+   snooze. Scheduled local notifications so alerts fire with the app in the background; the bell lists
+   upcoming and missed alerts.
 7. **Live sync between your devices** (sync steps 3 to 5): pairing by QR or text code, Nostr for
    signalling only, WebRTC data channel, encrypted and signed changes. Opt-in, per log. Pairing is
    already in review (#13); it should be adapted to pair per log once step 4 lands.

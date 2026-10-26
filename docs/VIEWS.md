@@ -12,7 +12,7 @@ Three main views, plus two things in the top bar and one switcher. That is the w
 | Main view | **Now** (task list, home) | What am I doing, what's next? |
 | Main view | **History** (log and metrics) | What did I do, where did the time go? |
 | Main view | **Notes** | What did I want to remember? |
-| Top bar | **Alerts** (bell) | What has fired, what is coming up? |
+| Top bar | **Alerts** (bell) | Which task needs me at a set time? |
 | Top bar | **Settings** (gear) | How should the app behave? |
 | Title | **Log switcher** (Work, Personal, …) | Which list am I looking at, and who shares it? |
 
@@ -102,10 +102,35 @@ Today's task list, unchanged. Later additions that belong here, not in a new vie
 
 ## Alerts
 
-- The bell opens a list: alerts that fired (time's up, 30-minute reminders) and the next ones due.
-- Background alerts on phones need scheduled local notifications computed from the countdown; the same
-  mechanism the sync plan needs for alerts on another device.
-- Per-alert settings live in Settings, not here. The bell is for "what happened", not configuration.
+An alert always belongs to a task. It says: at this date and time, this task needs to become the
+current one (a meeting, a call, picking someone up).
+
+```
+Task menu ⋮ → Alert at…            When it fires
+┌──────────────────────────┐       ┌──────────────────────────────┐
+│ Call the bank            │       │ 🔔 15:00  Call the bank      │
+│ Mon 26 Oct   15:00       │       │ [Switch now]  [Make it next] │
+│ [Remove]   [Cancel] [Set]│       │ [In 10 min]                  │
+└──────────────────────────┘       └──────────────────────────────┘
+```
+
+- **Set it on the task.** "Alert at…" in the task's ⋮ menu picks a date and time. A task with an alert
+  shows a small bell and the time on its card. Adding a future task with an alert is the way to plan
+  something that must happen at a set time.
+- **When it fires**, a sound plays and a notification offers:
+  - **Switch now**: the task moves to the top and its timer starts; the task you were on pauses just
+    below it, exactly like an interruption.
+  - **Make it next**: the task moves to second place, so it takes over when you finish the current one.
+  - **In 10 min**: snooze.
+- The app never reorders the list on its own when an alert fires. You choose, so the top task never
+  changes behind your back (principle 1).
+- The countdown's time's up and the 30-minute reminder stay as they are: they are alerts of the running
+  task, with no date to set.
+- **The bell** in the top bar lists upcoming alerts (task and time) and the ones that fired and were not
+  acted on. Tapping one jumps to the task.
+- Background alerts on phones need scheduled local notifications, set from each task's alert time and
+  countdown. Alerts sync with the task, but only the device in use rings.
+- Sound and notification settings live in Settings, not here.
 
 ## Settings
 
