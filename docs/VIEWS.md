@@ -42,6 +42,9 @@ Phone (< 600 px)                          Desktop (>= 600 px)
 - Alerts and Settings open as full pages on a phone and as side sheets on desktop, with a back arrow.
   They are not destinations, because you visit them rarely and always return to where you were.
 - Now stays the start screen. The bottom bar never hides the top task.
+- A small sync status icon sits next to the log name once sync is on: in sync, changes waiting to
+  hand over, or no other device seen for a while. Tapping it shows the paired devices and when each
+  was last in sync.
 - Keyboard: Alt+1/2/3 switch views (to confirm when built, against browser clashes).
 
 ## Now (exists)

@@ -32,11 +32,10 @@ described in [VIEWS.md](VIEWS.md).
 7. **Live sync between your devices** (sync steps 3 to 5): pairing by QR or text code, Nostr for
    signalling only, WebRTC data channel, encrypted and signed changes. Opt-in, per log. Pairing is
    already in review (#13); it should be adapted to pair per log once step 4 lands.
+   Every device keeps working offline. Since you only write on one device at a time, changes merge
+   without conflicts the next time two devices are online together. A **sync status indicator** in the
+   top bar shows whether this device is up to date with the others or has changes still to hand over.
 8. **Shared logs.** Share one log with another person's device, using the same pairing.
-9. **Offline sync (to decide).** An app-dedicated Nostr relay as an encrypted mailbox, so devices that
-   are never online together still converge. This puts a service behind the app, which the goals
-   rule out, so it stays here only until we decide whether handing over between devices that are
-   online together is enough.
 
 ## Later, not ordered
 
@@ -50,3 +49,5 @@ described in [VIEWS.md](VIEWS.md).
 - Accounts or a hosted backend.
 - Goals, streaks or scores.
 - Veilid and IPFS for sync (ruled out in the sync research).
+- A relay or server that stores changes for devices that are never online together. Devices merge when
+  they meet.
