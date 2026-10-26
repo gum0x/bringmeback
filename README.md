@@ -5,6 +5,11 @@ Keep tasks in the order you will do them. The top task is the one you are workin
 only one whose timer runs. When it's done, mark it done and the next one takes over. Pausing logs a
 break, so the time between tasks is kept too. Done and deleted tasks can be brought back with Undo.
 
+- [How to use the app](docs/USAGE.md)
+- [Principles and goals](docs/PRINCIPLES.md)
+- [Views and navigation plan](docs/VIEWS.md)
+- [Roadmap](docs/ROADMAP.md)
+
 ## Keyboard shortcuts
 
 | Keys | Action |
