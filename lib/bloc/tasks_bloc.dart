@@ -115,7 +115,14 @@ class RemoveTaskEvent extends TasksEvent {
   RemoveTaskEvent({required this.index});
 }
 
-/// Puts a removed task back, to undo [RemoveTaskEvent].
+/// Takes a task off the list as done.
+class DoneTaskEvent extends TasksEvent {
+  final int index;
+
+  DoneTaskEvent({required this.index});
+}
+
+/// Puts a removed or done task back, to undo [RemoveTaskEvent] or [DoneTaskEvent].
 class RestoreTaskEvent extends TasksEvent {
   final int index;
   final ValueKey<String> id;
@@ -212,6 +219,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>(_onAddNextTask);
     on<RemoveTaskEvent>(_onRemoveTask);
+    on<DoneTaskEvent>(_onDoneTask);
     on<RestoreTaskEvent>(_onRestoreTask);
     on<FocusTaskEvent>(_onFocusTask);
     on<ResetTotalEvent>(_onResetTotal);
@@ -250,44 +258,63 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     return index >= 0 && index < ids.length ? ids[index] : null;
   }
 
-  /// Starts the timer of [id] and pauses every other one, so only one task runs at a time.
-  void _runOnly(TaskDocument doc, String id) {
-    for (final other in doc.ids) {
-      if (other != id) doc.setRunning(other, false);
+  /// Whether work is under way: the top task's timer runs, rather than a pause or nothing.
+  bool _working(TaskDocument doc) => doc.ids.any((id) => doc.task(id).running);
+
+  /// Only the top task is the one being worked on, so only its timer may run. Running it ends any
+  /// pause being logged.
+  void _runTop(TaskDocument doc, bool run) {
+    for (final (i, id) in doc.ids.indexed) {
+      doc.setRunning(id, run && i == 0);
     }
-    doc.setRunning(id, true);
+    if (run && doc.ids.isNotEmpty) doc.endPauses();
   }
 
   void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
       doc.insert(0, event.id.value);
-      _runOnly(doc, event.id.value);
+      _runTop(doc, true);
       _focusId = event.id.value;
     });
   }
 
   void _onAddNextTask(AddNextTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
+      final working = _working(doc);
       doc.insert(min(event.index + 1, doc.ids.length), event.id.value);
+      _runTop(doc, working);
       _focusId = event.id.value;
     });
   }
 
-  void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
+  /// Takes the task at [index] off the list with [takeOff]. When it was being worked on, work
+  /// carries on with the task that moves up.
+  void _takeOff(Emitter<TasksState> emit, int index,
+      void Function(TaskDocument doc, String id) takeOff) {
+    final id = _idAt(index);
     if (id == null) return;
     _edit(emit, (doc) {
-      // A removed task stays paused, so undoing the removal doesn't count the time it was gone.
+      final working = _working(doc);
+      // A task taken off stays paused, so undoing doesn't count the time it was gone.
       doc.setRunning(id, false);
-      doc.removeAt(event.index);
-      if (_focusId == id) _focusId = _idAt(min(event.index, doc.ids.length - 1));
+      takeOff(doc, id);
+      _runTop(doc, working);
+      if (_focusId == id) _focusId = _idAt(min(index, doc.ids.length - 1));
     });
   }
+
+  void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) =>
+      _takeOff(emit, event.index, (doc, id) => doc.removeAt(event.index));
+
+  void _onDoneTask(DoneTaskEvent event, Emitter<TasksState> emit) =>
+      _takeOff(emit, event.index, (doc, id) => doc.markDone(event.index, id));
 
   void _onRestoreTask(RestoreTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
       if (doc.ids.contains(event.id.value)) return;
+      final working = _working(doc);
       doc.restore(min(event.index, doc.ids.length), event.id.value);
+      _runTop(doc, working);
       _focusId = event.id.value;
     });
   }
@@ -300,32 +327,34 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _saveState();
   }
 
+  /// Moving a task to the top makes it the one being worked on.
   void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
-    _edit(emit, (doc) => doc.move(event.fromIndex, event.toIndex));
-  }
-
-  void _onStartTimer(StartTimerEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
     _edit(emit, (doc) {
-      _focusId = id;
-      _runOnly(doc, id);
+      final working = _working(doc);
+      doc.move(event.fromIndex, event.toIndex);
+      _runTop(doc, working);
     });
   }
 
+  // Starting, pausing and resuming act on the top task, the only one with a running timer.
+
+  void _onStartTimer(StartTimerEvent event, Emitter<TasksState> emit) {
+    if (_idAt(0) == null) return;
+    _edit(emit, (doc) => _runTop(doc, true));
+  }
+
+  /// Pauses the work and logs the pause, so the time between tasks is kept too.
   void _onStopTimer(StopTimerEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) => doc.setRunning(id, false));
+    _edit(emit, (doc) {
+      if (!_working(doc)) return;
+      _runTop(doc, false);
+      doc.startPause(newId());
+    });
   }
 
   void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) {
-      _focusId = id;
-      _runOnly(doc, id);
-    });
+    if (_idAt(0) == null) return;
+    _edit(emit, (doc) => _runTop(doc, true));
   }
 
   void _onResetTimer(ResetTimerEvent event, Emitter<TasksState> emit) {
@@ -440,6 +469,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       }
     }
 
+    // Earlier versions let any task run; now only the top one may.
+    _runTop(doc, _working(doc));
     _doc = doc;
     emit(_view());
     await _saveState();

@@ -24,6 +24,29 @@ void main() {
     expect(d.ids, ['a']);
   });
 
+  test('a task marked done leaves the list and comes back on restore', () {
+    final d = newDoc()
+      ..insert(0, 'a')
+      ..insert(1, 'b');
+    d.markDone(0, 'a');
+    expect(d.ids, ['b']);
+    expect(d.doneAt('a'), isNotNull);
+    d.restore(0, 'a');
+    expect(d.ids, ['a', 'b']);
+    expect(d.doneAt('a'), isNull);
+  });
+
+  test('pauses are logged as hidden tasks with one time entry', () {
+    final d = newDoc()..insert(0, 'a');
+    d.startPause('p1');
+    expect(d.ids, ['a']);
+    expect(d.pauseIds, ['p1']);
+    expect(d.task('p1').running, isTrue);
+    d.endPauses();
+    expect(d.task('p1').running, isFalse);
+    expect(d.task('p1').entries, hasLength(1));
+  });
+
   test('starting and stopping opens and closes a time entry', () {
     final d = newDoc()..insert(0, 'a', running: true);
     expect(d.task('a').running, isTrue);

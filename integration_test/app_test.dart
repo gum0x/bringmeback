@@ -19,7 +19,8 @@ Finder inTask(int index, Finder finder) =>
 Finder nameField(int index) => inTask(
     index,
     find.byWidgetPredicate((w) =>
-        w is TextField && w.decoration?.hintText == 'What are you working on?'));
+        w is TextField &&
+        w.decoration?.hintText == 'What are you working on?'));
 
 Finder minutesField(int index) => inTask(
     index,
@@ -28,6 +29,14 @@ Finder minutesField(int index) => inTask(
 
 Finder taskButton(int index, IconData icon) =>
     inTask(index, find.widgetWithIcon(IconButton, icon));
+
+/// The play/pause button, which only the top task has.
+Finder playPause(int index) => inTask(
+    index,
+    find.byWidgetPredicate((w) =>
+        w is IconButton &&
+        w.icon is Icon &&
+        {Icons.play_arrow, Icons.pause}.contains((w.icon as Icon).icon)));
 
 /// Picks an entry from a task's "More actions" menu.
 Future<void> taskMenu(WidgetTester tester, int index, String entry) async {
@@ -126,14 +135,68 @@ void main() {
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), isEmpty);
     expect(nameOf(tester, 1), 'Write the report');
-    // Only one task runs at a time: the new one pauses the one below.
+    // Only the top task runs, and only it has a play/pause button.
     expect(taskButton(0, Icons.pause), findsOneWidget);
-    expect(taskButton(1, Icons.play_arrow), findsOneWidget);
+    expect(playPause(1), findsNothing);
+    final belowTotal = total(tester, 1);
+    await wait(tester, const Duration(milliseconds: 2000));
+    expect(total(tester, 1), belowTotal);
 
-    await tester.tap(taskButton(1, Icons.play_arrow));
+    // Finishing the top task hands the work to the next one.
+    await tester.tap(taskButton(0, Icons.check_circle_outline));
     await tester.pumpAndSettle();
-    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
-    expect(taskButton(1, Icons.pause), findsOneWidget);
+    expect(taskCards, findsOneWidget);
+    expect(nameOf(tester, 0), 'Write the report');
+    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expect(find.text('Task done'), findsOneWidget);
+  });
+
+  testWidgets('a task marked done can be brought back', (tester) async {
+    await startApp(tester);
+    await tester.tap(addOnTopButton);
+    await tester.pumpAndSettle();
+    await typeName(tester, 0, 'Second');
+    await tester.tap(addOnTopButton);
+    await tester.pumpAndSettle();
+    await typeName(tester, 0, 'First');
+
+    await tester.tap(taskButton(0, Icons.check_circle_outline));
+    await tester.pumpAndSettle();
+    expect(find.text('Done: First'), findsOneWidget);
+    expect(nameOf(tester, 0), 'Second');
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(taskCards, findsNWidgets(2));
+    expect(nameOf(tester, 0), 'First');
+    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expect(playPause(1), findsNothing);
+  });
+
+  testWidgets('moving a task to the top makes it the running one',
+      (tester) async {
+    await startApp(tester);
+    await tester.tap(addOnTopButton);
+    await tester.pumpAndSettle();
+    await typeName(tester, 0, 'Later');
+    await tester.tap(addOnTopButton);
+    await tester.pumpAndSettle();
+    await typeName(tester, 0, 'Now');
+
+    final handle = inTask(1, find.byIcon(Icons.drag_indicator));
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    await tester.pump(const Duration(milliseconds: 100));
+    for (var i = 0; i < 15; i++) {
+      await gesture.moveBy(const Offset(0, -20));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(nameOf(tester, 0), 'Later');
+    expect(nameOf(tester, 1), 'Now');
+    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expect(playPause(1), findsNothing);
   });
 
   testWidgets('pausing a task stops its clocks and resuming restarts them',
@@ -212,21 +275,22 @@ void main() {
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), 'First');
     // A task added below waits its turn instead of starting.
-    expect(taskButton(1, Icons.play_arrow), findsOneWidget);
+    expect(playPause(1), findsNothing);
 
     await taskMenu(tester, 0, 'Delete task');
     expect(taskCards, findsOneWidget);
     expect(nameOf(tester, 0), 'Second');
-    // Deleting doesn't start another task's timer.
-    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
+    // Work carries on with the task that moved up.
+    expect(taskButton(0, Icons.pause), findsOneWidget);
 
-    // The deletion can be undone, and the task comes back where it was, paused.
+    // The deletion can be undone, and the task comes back where it was.
     await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), 'First');
     expect(nameOf(tester, 1), 'Second');
-    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
+    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expect(playPause(1), findsNothing);
 
     await taskMenu(tester, 1, 'Delete task');
     await taskMenu(tester, 0, 'Delete task');
@@ -292,7 +356,7 @@ void main() {
     expect(nameOf(tester, 0), 'Running task');
     expect(nameOf(tester, 1), 'Paused task');
     expect(taskButton(0, Icons.pause), findsOneWidget);
-    expect(taskButton(1, Icons.play_arrow), findsOneWidget);
+    expect(playPause(1), findsNothing);
     expect(seconds(total(tester, 0)), greaterThanOrEqualTo(1));
   });
 }
