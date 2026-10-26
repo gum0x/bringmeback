@@ -6,7 +6,7 @@ only one whose timer runs. When it's done, mark it done and the next one takes o
 break, so the time between tasks is kept too. Done and deleted tasks can be brought back with Undo.
 
 - [How to use the app](docs/USAGE.md)
-- [Principles and goals](docs/PRINCIPLES.md)
+- [Goals and usability rules](docs/PRINCIPLES.md)
 - [Views and navigation plan](docs/VIEWS.md)
 - [Roadmap](docs/ROADMAP.md)
 

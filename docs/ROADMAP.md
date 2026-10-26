@@ -34,8 +34,8 @@ described in [VIEWS.md](VIEWS.md).
    already in review (#13); it should be adapted to pair per log once step 4 lands.
 8. **Shared logs.** Share one log with another person's device, using the same pairing.
 9. **Offline sync (to decide).** An app-dedicated Nostr relay as an encrypted mailbox, so devices that
-   are never online together still converge. This puts a service behind the app, which principle 9
-   rules out, so it stays here only until we decide whether handing over between devices that are
+   are never online together still converge. This puts a service behind the app, which the goals
+   rule out, so it stays here only until we decide whether handing over between devices that are
    online together is enough.
 
 ## Later, not ordered

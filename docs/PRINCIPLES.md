@@ -1,4 +1,4 @@
-# Principles and goals
+# Goals and usability rules
 
 bringmeback exists to answer two questions at a glance: **what am I doing now, and what comes next?**
 It is built for monotasking: one thing at a time, in priority order. As a side effect it keeps an honest
@@ -24,36 +24,6 @@ record of where the time went, without asking you to keep one.
 2. **One thing at a time.** The first task is the one being worked on, and the only one being counted.
 3. **An interruption is a new task on top.** It takes the focus and its timer, and the task you were on
    pauses one place below, ready to resume when the interruption is done.
-
-## Principles
-
-These are the rules a change has to respect. When two of them pull in different directions, the
-earlier one wins.
-
-1. **Monotasking: the top task is the current task.** Only the top task's timer runs, and there is never
-   more than one running task, across every list and device. Done, delete and reorder hand the running
-   timer to whatever becomes the top, and a paused state stays paused. Features that encourage working
-   on several things at once (parallel timers, split views of running tasks) are out.
-2. **No bookkeeping.** Never ask the user to log, tag or categorise time to get value. Pausing logs a
-   break; done keeps when it finished; history is computed from those.
-3. **Nothing is lost.** Every action that takes something away can be undone, and the document keeps
-   history even after a task leaves the list.
-4. **Managing tasks is effortless.** Adding and finishing a task are the core actions: one tap or one
-   key each, from anywhere, with no form to fill in. Pause/resume is one tap too. Everything else may
-   live one level down, in the task's menu. If the app takes attention away from the task, it is
-   failing.
-5. **Calm, not nagging.** Alerts tell you something useful (time's up, a long stretch) and can be
-   muted. No streaks, scores or guilt.
-6. **Multiplatform and multidevice.** The same tasks and ideas on every device you own: phone, desktop
-   and web are equal, every screen works at 380 px wide and with a keyboard, and browser shortcut
-   clashes get an Alt variant. You use one device at a time; which one does not matter, and the next
-   one you pick up carries on where the last one stopped.
-7. **Say it in plain words.** Clocks carry labels ("Left", "Total", "over"), buttons have tooltips,
-   placeholders never look like real content.
-8. **Few views, one home.** The task list is home. Any other view is one step away and one step back,
-   and must earn its place by answering a question the list cannot.
-9. **Offline, no service behind.** The app works fully offline with no account and no server of ours.
-   Devices sync directly with each other; whatever travels between them is end-to-end encrypted.
 
 ## The usability path
 

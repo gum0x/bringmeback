@@ -71,7 +71,7 @@ Today's task list, unchanged. Later additions that belong here, not in a new vie
 - Day view first, then week. Metrics kept small: time worked, breaks, tasks done, and per task the
   countdown set versus time actually spent.
 - A done task can be brought back to the list from here (the long-term version of Undo).
-- No goals, scores or streaks (principle 5).
+- No goals, scores or streaks.
 
 ## Notes
 
@@ -96,7 +96,7 @@ Today's task list, unchanged. Later additions that belong here, not in a new vie
   its own: share Work with a colleague's device without exposing Personal.
 - Fits the sync plan: one CRDT document and one pairing secret per log (today the only document is
   `tasks`, which becomes the first log).
-- One current task across all logs (monotasking, principle 1): two logs never run timers at once.
+- One current task across all logs (one thing at a time): two logs never run timers at once.
   Switching log while working asks nothing; the running task stays running and the top bar shows it.
 - A task can be moved to another log from its ⋮ menu.
 
@@ -123,7 +123,7 @@ Task menu ⋮ → Alert at…            When it fires
   - **Make it next**: the task moves to second place, so it takes over when you finish the current one.
   - **In 10 min**: snooze.
 - The app never reorders the list on its own when an alert fires. You choose, so the top task never
-  changes behind your back (principle 1).
+  changes behind your back.
 - The countdown's time's up and the 30-minute reminder stay as they are: they are alerts of the running
   task, with no date to set.
 - **The bell** in the top bar lists upcoming alerts (task and time) and the ones that fired and were not
