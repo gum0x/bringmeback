@@ -77,6 +77,9 @@ class TaskDocument {
 
   void removeAt(int index) => _order.delete(index);
 
+  /// Puts a removed task back at [index]; its fields never left the document.
+  void restore(int index, String id) => _order.insert(index, id);
+
   void move(int from, int to) => _order.move(from, to);
 
   void setName(String id, String name) => _fields.set('$id/name', name);

@@ -80,12 +80,14 @@ class TaskState {
 
 class TasksState {
   final List<TaskState> tasks;
+  final bool muted;
 
-  TasksState({required this.tasks});
+  TasksState({required this.tasks, this.muted = false});
 
-  TasksState copyWith({List<TaskState>? tasks}) {
+  TasksState copyWith({List<TaskState>? tasks, bool? muted}) {
     return TasksState(
       tasks: tasks ?? this.tasks,
+      muted: muted ?? this.muted,
     );
   }
 }
@@ -113,6 +115,21 @@ class RemoveTaskEvent extends TasksEvent {
   RemoveTaskEvent({required this.index});
 }
 
+/// Puts a removed task back, to undo [RemoveTaskEvent].
+class RestoreTaskEvent extends TasksEvent {
+  final int index;
+  final ValueKey<String> id;
+
+  RestoreTaskEvent({required this.index, required this.id});
+}
+
+/// Marks the task the user is working in, which keyboard shortcuts act on.
+class FocusTaskEvent extends TasksEvent {
+  final int index;
+
+  FocusTaskEvent({required this.index});
+}
+
 class MoveTaskEvent extends TasksEvent {
   final int fromIndex;
   final int toIndex;
@@ -138,21 +155,33 @@ class ResumeTimerEvent extends TasksEvent {
   ResumeTimerEvent({required this.index});
 }
 
+/// Restarts the countdown with its current length.
 class ResetTimerEvent extends TasksEvent {
   final int index;
 
   ResetTimerEvent({required this.index});
 }
 
+/// Clears the total time tracked on a task.
+class ResetTotalEvent extends TasksEvent {
+  final int index;
+
+  ResetTotalEvent({required this.index});
+}
+
+class ToggleMuteEvent extends TasksEvent {}
+
 class UpdateTimerEvent extends TasksEvent {
   UpdateTimerEvent();
 }
 
+/// Renames a task. It names the task by id, because a name is saved a moment after typing stops,
+/// by which time the task may have moved.
 class UpdateTaskNameEvent extends TasksEvent {
-  final int index;
+  final ValueKey<String> id;
   final String newName;
 
-  UpdateTaskNameEvent({required this.index, required this.newName});
+  UpdateTaskNameEvent({required this.id, required this.newName});
 }
 
 class UpdateTaskTimerEvent extends TasksEvent {
@@ -173,11 +202,20 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   String? _focusId;
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
+  bool _muted = false;
+  final StreamController<String> _timeUp = StreamController<String>.broadcast();
+
+  /// The name of each task whose countdown runs out, as it happens.
+  Stream<String> get timeUp => _timeUp.stream;
 
   TasksBloc() : super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>(_onAddNextTask);
     on<RemoveTaskEvent>(_onRemoveTask);
+    on<RestoreTaskEvent>(_onRestoreTask);
+    on<FocusTaskEvent>(_onFocusTask);
+    on<ResetTotalEvent>(_onResetTotal);
+    on<ToggleMuteEvent>(_onToggleMute);
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
     on<StopTimerEvent>(_onStopTimer);
@@ -194,7 +232,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
   }
 
-  TasksState _view() => TasksState(tasks: _doc?.tasks(focusId: _focusId) ?? []);
+  TasksState _view() =>
+      TasksState(tasks: _doc?.tasks(focusId: _focusId) ?? [], muted: _muted);
 
   /// Applies [change] to the document, then shows and saves the result.
   void _edit(Emitter<TasksState> emit, void Function(TaskDocument doc) change) {
@@ -211,17 +250,18 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     return index >= 0 && index < ids.length ? ids[index] : null;
   }
 
-  /// Focuses the first task and starts its timer, as removing or moving a task does.
-  void _focusFirst(TaskDocument doc) {
-    final first = _idAt(0);
-    if (first == null) return;
-    _focusId = first;
-    doc.setRunning(first, true);
+  /// Starts the timer of [id] and pauses every other one, so only one task runs at a time.
+  void _runOnly(TaskDocument doc, String id) {
+    for (final other in doc.ids) {
+      if (other != id) doc.setRunning(other, false);
+    }
+    doc.setRunning(id, true);
   }
 
   void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      doc.insert(0, event.id.value, running: true);
+      doc.insert(0, event.id.value);
+      _runOnly(doc, event.id.value);
       _focusId = event.id.value;
     });
   }
@@ -234,17 +274,34 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) {
+    final id = _idAt(event.index);
+    if (id == null) return;
     _edit(emit, (doc) {
+      // A removed task stays paused, so undoing the removal doesn't count the time it was gone.
+      doc.setRunning(id, false);
       doc.removeAt(event.index);
-      _focusFirst(doc);
+      if (_focusId == id) _focusId = _idAt(min(event.index, doc.ids.length - 1));
     });
   }
 
-  void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
+  void _onRestoreTask(RestoreTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      doc.move(event.fromIndex, event.toIndex);
-      _focusFirst(doc);
+      if (doc.ids.contains(event.id.value)) return;
+      doc.restore(min(event.index, doc.ids.length), event.id.value);
+      _focusId = event.id.value;
     });
+  }
+
+  void _onFocusTask(FocusTaskEvent event, Emitter<TasksState> emit) {
+    final id = _idAt(event.index);
+    if (id == null || id == _focusId) return;
+    _focusId = id;
+    emit(_view());
+    _saveState();
+  }
+
+  void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) => doc.move(event.fromIndex, event.toIndex));
   }
 
   void _onStartTimer(StartTimerEvent event, Emitter<TasksState> emit) {
@@ -252,7 +309,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     if (id == null) return;
     _edit(emit, (doc) {
       _focusId = id;
-      doc.setRunning(id, true);
+      _runOnly(doc, id);
     });
   }
 
@@ -265,35 +322,47 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
     final id = _idAt(event.index);
     if (id == null) return;
-    _edit(emit, (doc) => doc.setRunning(id, true));
+    _edit(emit, (doc) {
+      _focusId = id;
+      _runOnly(doc, id);
+    });
   }
 
   void _onResetTimer(ResetTimerEvent event, Emitter<TasksState> emit) {
     final id = _idAt(event.index);
     if (id == null) return;
-    final now = nowSeconds();
     _lastRemaining.remove(id);
-    _edit(emit, (doc) {
-      doc.setTimer(id, 20 * 60, now);
-      doc.setTotalResetAt(id, now);
-    });
+    _edit(emit,
+        (doc) => doc.setTimer(id, doc.task(id).timerLengthSeconds, nowSeconds()));
+  }
+
+  void _onResetTotal(ResetTotalEvent event, Emitter<TasksState> emit) {
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _edit(emit, (doc) => doc.setTotalResetAt(id, nowSeconds()));
+  }
+
+  void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
+    _muted = !_muted;
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setBool('muted', _muted));
   }
 
   void _onUpdateTimer(UpdateTimerEvent event, Emitter<TasksState> emit) {
     final view = _view();
     final now = nowSeconds();
-    for (int i = 0; i < view.tasks.length; i++) {
-      final task = view.tasks[i];
+    for (final task in view.tasks) {
       final remaining = task.remainingSecondsAt(now);
       final previous = _lastRemaining[task.id.value];
       _lastRemaining[task.id.value] = remaining;
       if (previous == null || previous == remaining) continue;
 
-      // Check if timer has reached zero
       if (previous > 0 && remaining <= 0) {
+        _timeUp.add(task.name);
         _playAlertSound();
-      }
-      if (i == 0 && (previous / 1800).floor() != (remaining / 1800).floor()) {
+      } else if ((previous / 1800).floor() != (remaining / 1800).floor()) {
+        // Every 30 minutes of a running task.
         _playAlertSound(alertType: 'REMINDER');
       }
     }
@@ -302,9 +371,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) => doc.setName(id, event.newName));
+    _edit(emit, (doc) => doc.setName(event.id.value, event.newName));
   }
 
   void _onUpdateTaskTimer(
@@ -316,12 +383,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _playAlertSound({String? alertType}) async {
+    if (_muted) return;
     switch (alertType) {
       case 'REMINDER':
-        await _audioPlayer.play(AssetSource('alert.mp3'));
+        await _audioPlayer.play(AssetSource('bmb-reminder.mp3'));
 
       default:
-        await _audioPlayer.play(AssetSource('bmb-reminder.mp3'));
+        await _audioPlayer.play(AssetSource('alert.mp3'));
     }
   }
 
@@ -339,6 +407,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     if (_doc != null) return;
     final prefs = await SharedPreferences.getInstance();
     if (_doc != null) return;
+    _muted = prefs.getBool('muted') ?? false;
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');
@@ -414,6 +483,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   @override
   Future<void> close() {
     tick?.cancel();
+    _timeUp.close();
     return super.close();
   }
 }
