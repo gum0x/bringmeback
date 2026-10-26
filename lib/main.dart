@@ -108,8 +108,8 @@ class _TasksStackState extends State<TasksStack> {
                   buildWhen: (a, b) => a.muted != b.muted,
                   builder: (context, state) => IconButton(
                     tooltip: state.muted ? 'Turn sounds on' : 'Mute sounds',
-                    icon: Icon(
-                        state.muted ? Icons.volume_off : Icons.volume_up),
+                    icon:
+                        Icon(state.muted ? Icons.volume_off : Icons.volume_up),
                     onPressed: () => tasksBloc.add(ToggleMuteEvent()),
                   ),
                 ),
@@ -126,8 +126,7 @@ class _TasksStackState extends State<TasksStack> {
               icon: const Icon(Icons.add),
               label: const Text('New task'),
             ),
-            body: BlocBuilder<TasksBloc, TasksState>(
-                builder: (context, state) {
+            body: BlocBuilder<TasksBloc, TasksState>(builder: (context, state) {
               if (state.tasks.isEmpty) return const _EmptyState();
               return ReorderableListView.builder(
                 buildDefaultDragHandles: false,
@@ -204,16 +203,27 @@ class _TasksStackState extends State<TasksStack> {
 }
 
 /// Removes the task at [index] and offers to bring it back.
-void removeTask(BuildContext context, int index) {
+void removeTask(BuildContext context, int index) =>
+    _takeOffTask(context, index, done: false);
+
+/// Takes the task at [index] off the list as done and offers to bring it back.
+void markTaskDone(BuildContext context, int index) =>
+    _takeOffTask(context, index, done: true);
+
+void _takeOffTask(BuildContext context, int index, {required bool done}) {
   final tasksBloc = context.read<TasksBloc>();
   final tasks = tasksBloc.state.tasks;
   if (index < 0 || index >= tasks.length) return;
   final task = tasks[index];
-  tasksBloc.add(RemoveTaskEvent(index: index));
+  tasksBloc
+      .add(done ? DoneTaskEvent(index: index) : RemoveTaskEvent(index: index));
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
+  final what = done ? 'Done' : 'Deleted';
   messenger.showSnackBar(SnackBar(
-    content: Text(task.name.isEmpty ? 'Task deleted' : 'Deleted "${task.name}"'),
+    content: Text(task.name.isEmpty
+        ? (done ? 'Task done' : 'Task deleted')
+        : '$what: ${task.name}'),
     action: SnackBarAction(
       label: 'Undo',
       onPressed: () =>
@@ -241,7 +251,7 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Add what you are working on with New task. '
-              'Its timer starts right away.',
+              'The top task is the one being timed.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge,
             ),
@@ -266,7 +276,7 @@ class Task extends StatefulWidget {
   State<Task> createState() => _TaskState();
 }
 
-enum _TaskAction { restartCountdown, resetTotal, delete }
+enum _TaskAction { addAfter, restartCountdown, resetTotal, delete }
 
 class _TaskState extends State<Task> {
   late TextEditingController _controller;
@@ -331,9 +341,8 @@ class _TaskState extends State<Task> {
   void _saveName() {
     if (!(_debounce?.isActive ?? false)) return;
     _debounce?.cancel();
-    context
-        .read<TasksBloc>()
-        .add(UpdateTaskNameEvent(id: widget.task.id, newName: _controller.text));
+    context.read<TasksBloc>().add(
+        UpdateTaskNameEvent(id: widget.task.id, newName: _controller.text));
   }
 
   /// Applies the minutes typed, or puts back the current length when they aren't a valid number.
@@ -351,7 +360,7 @@ class _TaskState extends State<Task> {
 
   Widget _buildMinutesField() {
     return SizedBox(
-      width: 96,
+      width: 84,
       child: TextField(
         controller: _minutesController,
         focusNode: _minutesFocusNode,
@@ -381,49 +390,81 @@ class _TaskState extends State<Task> {
         keyboardType: TextInputType.text,
         textInputAction: TextInputAction.done,
         maxLines: null,
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
+        decoration: InputDecoration(
+          border: const OutlineInputBorder(),
           hintText: "What are you working on?",
+          // Lighter and in italics, so the hint doesn't pass for a name already typed.
+          hintStyle: TextStyle(
+            fontStyle: FontStyle.italic,
+            color: Theme.of(context)
+                .colorScheme
+                .onSurfaceVariant
+                .withValues(alpha: 0.55),
+          ),
         ),
         onSubmitted: (_) => _saveName(),
         onChanged: (value) {
           if (_debounce?.isActive ?? false) _debounce?.cancel();
           _debounce = Timer(const Duration(milliseconds: 500), () {
-            tasksBloc.add(
-                UpdateTaskNameEvent(id: widget.task.id, newName: value));
+            tasksBloc
+                .add(UpdateTaskNameEvent(id: widget.task.id, newName: value));
           });
         });
   }
 
-  Widget _buildActions(TasksBloc tasksBloc) {
+  void _addAfter(TasksBloc tasksBloc) {
+    final taskId = newId();
+    tasksBloc.add(AddNextTaskEvent(
+        index: widget.index, name: "", id: ValueKey<String>(taskId)));
+  }
+
+  /// The task's buttons. Only the top task, the one being worked on, has a play/pause button; in
+  /// [compact] layouts "add after" moves into the menu to leave room for the clock.
+  Widget _buildActions(TasksBloc tasksBloc, {required bool compact}) {
     final running = widget.task.running;
+    final current = widget.index == 0;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton.filledTonal(
-          tooltip: running ? 'Pause timer' : 'Start timer',
-          onPressed: () {
-            if (running) {
-              tasksBloc.add(StopTimerEvent(index: widget.index));
-            } else {
-              tasksBloc.add(ResumeTimerEvent(index: widget.index));
-            }
-          },
-          icon: Icon(running ? Icons.pause : Icons.play_arrow),
-        ),
+        if (current)
+          IconButton.filledTonal(
+            tooltip: running ? 'Pause (logs a break)' : 'Resume work',
+            onPressed: () {
+              if (running) {
+                tasksBloc.add(StopTimerEvent(index: widget.index));
+              } else {
+                tasksBloc.add(ResumeTimerEvent(index: widget.index));
+              }
+            },
+            icon: Icon(running ? Icons.pause : Icons.play_arrow),
+          )
+        else if (!compact)
+          // An invisible stand-in, so the buttons of every task line up.
+          const Visibility(
+            visible: false,
+            maintainSize: true,
+            maintainAnimation: true,
+            maintainState: true,
+            child: IconButton.filledTonal(
+                onPressed: null, icon: Icon(Icons.circle)),
+          ),
         IconButton(
-          tooltip: 'Add task after this (Ctrl+Shift+N)',
-          onPressed: () {
-            final taskId = newId();
-            tasksBloc.add(AddNextTaskEvent(
-                index: widget.index, name: "", id: ValueKey<String>(taskId)));
-          },
-          icon: const Icon(Icons.playlist_add),
+          tooltip: 'Mark as done',
+          onPressed: () => markTaskDone(context, widget.index),
+          icon: const Icon(Icons.check_circle_outline),
         ),
+        if (!compact)
+          IconButton(
+            tooltip: 'Add task after this (Ctrl+Shift+N)',
+            onPressed: () => _addAfter(tasksBloc),
+            icon: const Icon(Icons.playlist_add),
+          ),
         PopupMenuButton<_TaskAction>(
           tooltip: 'More actions',
           onSelected: (action) {
             switch (action) {
+              case _TaskAction.addAfter:
+                _addAfter(tasksBloc);
               case _TaskAction.restartCountdown:
                 tasksBloc.add(ResetTimerEvent(index: widget.index));
               case _TaskAction.resetTotal:
@@ -433,6 +474,13 @@ class _TaskState extends State<Task> {
             }
           },
           itemBuilder: (context) => [
+            if (compact)
+              const PopupMenuItem(
+                value: _TaskAction.addAfter,
+                child: ListTile(
+                    leading: Icon(Icons.playlist_add),
+                    title: Text('Add task after this')),
+              ),
             const PopupMenuItem(
               value: _TaskAction.restartCountdown,
               child: ListTile(
@@ -477,14 +525,20 @@ class _TaskState extends State<Task> {
         ),
       ),
     );
+    final current = widget.index == 0;
     final clocks = TaskClock(
       remainingSeconds: task.taskTimerSeconds,
       totalSeconds: task.totalTaskTimerSeconds,
+      paused: current && !task.running,
     );
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: task.running ? scheme.primaryContainer : null,
+      color: current
+          ? (task.running
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest)
+          : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: task.inFocus
@@ -508,7 +562,7 @@ class _TaskState extends State<Task> {
                   _buildMinutesField(),
                   const SizedBox(width: 12),
                   Expanded(child: clocks),
-                  _buildActions(tasksBloc),
+                  _buildActions(tasksBloc, compact: true),
                 ]),
               ],
             );
@@ -523,7 +577,7 @@ class _TaskState extends State<Task> {
               const SizedBox(width: 16),
               SizedBox(width: 132, child: clocks),
               const SizedBox(width: 8),
-              _buildActions(tasksBloc),
+              _buildActions(tasksBloc, compact: false),
             ],
           );
         }),
@@ -536,11 +590,14 @@ class _TaskState extends State<Task> {
 class TaskClock extends StatelessWidget {
   final int remainingSeconds;
   final int totalSeconds;
+  // The task is the current one but work is paused.
+  final bool paused;
 
   const TaskClock({
     super.key,
     required this.remainingSeconds,
     required this.totalSeconds,
+    this.paused = false,
   });
 
   @override
@@ -563,7 +620,7 @@ class TaskClock extends StatelessWidget {
           ),
         ),
         Text(
-          'Total ${formatClock(totalSeconds)}',
+          'Total ${formatClock(totalSeconds)}${paused ? ' · Paused' : ''}',
           style: theme.textTheme.bodySmall?.copyWith(fontFeatures: tabular),
         ),
       ],

@@ -1,8 +1,9 @@
 # bringmeback
 A Pomodoro timer, stopwatch, and task manager to help you stay focused.
 
-Only one task's timer runs at a time: starting one pauses the others. Deleted tasks can be brought
-back with Undo.
+Keep tasks in the order you will do them. The top task is the one you are working on, and it is the
+only one whose timer runs. When it's done, mark it done and the next one takes over. Pausing logs a
+break, so the time between tasks is kept too. Done and deleted tasks can be brought back with Undo.
 
 ## Keyboard shortcuts
 
