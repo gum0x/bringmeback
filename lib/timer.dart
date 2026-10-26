@@ -23,3 +23,14 @@ String intToHours(int seconds) {
   }
   return hours;
 }
+
+/// A duration as a clock, "19:56" under an hour and "1:05:10" from an hour on. The sign is
+/// dropped; callers show overtime their own way.
+String formatClock(int seconds) {
+  final s = seconds.abs();
+  final hours = s ~/ 3600;
+  final minutes = (s % 3600) ~/ 60;
+  final secs = (s % 60).toString().padLeft(2, '0');
+  if (hours == 0) return '${minutes.toString().padLeft(2, '0')}:$secs';
+  return '$hours:${minutes.toString().padLeft(2, '0')}:$secs';
+}

@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-final addOnTopButton = find.widgetWithIcon(ElevatedButton, Icons.add);
+final addOnTopButton = find.widgetWithText(FloatingActionButton, 'New task');
 final taskCards = find.byType(Task);
 
 Finder inTask(int index, Finder finder) =>
@@ -19,36 +19,51 @@ Finder inTask(int index, Finder finder) =>
 Finder nameField(int index) => inTask(
     index,
     find.byWidgetPredicate((w) =>
-        w is TextField && w.decoration?.hintText == 'Task description here'));
+        w is TextField && w.decoration?.hintText == 'What are you working on?'));
 
 Finder minutesField(int index) => inTask(
     index,
     find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.labelText == 'min'));
+        (w) => w is TextField && w.decoration?.labelText == 'Minutes'));
 
 Finder taskButton(int index, IconData icon) =>
-    inTask(index, find.widgetWithIcon(FloatingActionButton, icon));
+    inTask(index, find.widgetWithIcon(IconButton, icon));
+
+/// Picks an entry from a task's "More actions" menu.
+Future<void> taskMenu(WidgetTester tester, int index, String entry) async {
+  await tester.tap(inTask(index, find.byTooltip('More actions')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(entry));
+  await tester.pumpAndSettle();
+}
 
 String nameOf(WidgetTester tester, int index) =>
     tester.widget<TextField>(nameField(index)).controller!.text;
 
-/// The clock as shown on screen, e.g. "00 : 19 : 58". The first clock in a task is the countdown,
-/// the second the total time tracked.
-String clockText(WidgetTester tester, int index, int clock) {
-  final widget = inTask(index, find.byType(TaskWidget)).at(clock);
+String minutesText(WidgetTester tester, int index) =>
+    tester.widget<TextField>(minutesField(index)).controller!.text;
+
+/// A clock as shown on screen, e.g. "Left 19:58" or "Total 00:02". The first line of a task's
+/// clock is the countdown, the second the total time tracked.
+String clockText(WidgetTester tester, int index, int line) {
+  final clock = inTask(index, find.byType(TaskClock));
   return tester
-      .widgetList<Text>(
-          find.descendant(of: widget, matching: find.byType(Text)))
-      .map((t) => t.data)
-      .join(' ');
+      .widgetList<Text>(find.descendant(of: clock, matching: find.byType(Text)))
+      .elementAt(line)
+      .data!;
 }
 
 String countdown(WidgetTester tester, int index) => clockText(tester, index, 0);
 String total(WidgetTester tester, int index) => clockText(tester, index, 1);
 
-/// "00 : 19 : 58" as seconds. Timing checks allow a few seconds of slack for slow machines.
-int seconds(String clock) =>
-    clock.split(' : ').map(int.parse).fold(0, (sum, part) => sum * 60 + part);
+/// "Left 19:58" or "Total 1:00:02" as seconds. Timing checks allow a few seconds of slack for slow
+/// machines.
+int seconds(String clock) => RegExp(r'[\d:]+')
+    .firstMatch(clock)!
+    .group(0)!
+    .split(':')
+    .map(int.parse)
+    .fold(0, (sum, part) => sum * 60 + part);
 
 /// Lets real time pass while the app keeps rendering, so its timers tick.
 Future<void> wait(WidgetTester tester, Duration duration) async {
@@ -59,7 +74,7 @@ Future<void> wait(WidgetTester tester, Duration duration) async {
 }
 
 Future<void> startApp(WidgetTester tester) async {
-  await tester.pumpWidget(App());
+  await tester.pumpWidget(const App());
   await tester.pumpAndSettle();
 }
 
@@ -92,6 +107,7 @@ void main() {
   testWidgets('a new task starts on top and its timer runs', (tester) async {
     await startApp(tester);
     expect(taskCards, findsNothing);
+    expect(find.text('No tasks yet'), findsOneWidget);
 
     await tester.tap(addOnTopButton);
     await tester.pumpAndSettle();
@@ -110,6 +126,14 @@ void main() {
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), isEmpty);
     expect(nameOf(tester, 1), 'Write the report');
+    // Only one task runs at a time: the new one pauses the one below.
+    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expect(taskButton(1, Icons.play_arrow), findsOneWidget);
+
+    await tester.tap(taskButton(1, Icons.play_arrow));
+    await tester.pumpAndSettle();
+    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
+    expect(taskButton(1, Icons.pause), findsOneWidget);
   });
 
   testWidgets('pausing a task stops its clocks and resuming restarts them',
@@ -141,9 +165,38 @@ void main() {
     await tester.tap(addOnTopButton);
     await tester.pumpAndSettle();
 
+    // Clearing the field on the way to a new number is fine; the change applies on Enter.
+    await tester.enterText(minutesField(0), '');
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
     await tester.enterText(minutesField(0), '5');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(seconds(countdown(tester, 0)), inInclusiveRange(5 * 60 - 3, 5 * 60));
+    expect(minutesText(tester, 0), '5');
+
+    // An invalid length is dropped and the field shows the current one again.
+    await tester.enterText(minutesField(0), '0');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(minutesText(tester, 0), '5');
+    expect(seconds(countdown(tester, 0)), inInclusiveRange(5 * 60 - 5, 5 * 60));
+  });
+
+  testWidgets('the countdown can be restarted and the total reset',
+      (tester) async {
+    await startApp(tester);
+    await tester.tap(addOnTopButton);
+    await tester.pumpAndSettle();
+    await wait(tester, const Duration(milliseconds: 2500));
+    expect(seconds(total(tester, 0)), greaterThanOrEqualTo(2));
+
+    await tester.tap(taskButton(0, Icons.pause));
+    await tester.pumpAndSettle();
+    await taskMenu(tester, 0, 'Restart countdown');
+    expect(seconds(countdown(tester, 0)), 20 * 60);
+    await taskMenu(tester, 0, 'Reset total time');
+    expect(seconds(total(tester, 0)), 0);
   });
 
   testWidgets('tasks can be added below another task and deleted',
@@ -153,7 +206,7 @@ void main() {
     await tester.pumpAndSettle();
     await typeName(tester, 0, 'First');
 
-    await tester.tap(taskButton(0, Icons.add));
+    await tester.tap(taskButton(0, Icons.playlist_add));
     await tester.pumpAndSettle();
     await typeName(tester, 1, 'Second');
     expect(taskCards, findsNWidgets(2));
@@ -161,15 +214,22 @@ void main() {
     // A task added below waits its turn instead of starting.
     expect(taskButton(1, Icons.play_arrow), findsOneWidget);
 
-    await tester.tap(taskButton(0, Icons.delete));
-    await tester.pumpAndSettle();
+    await taskMenu(tester, 0, 'Delete task');
     expect(taskCards, findsOneWidget);
     expect(nameOf(tester, 0), 'Second');
-    // The task that moves to the top starts running.
-    expect(taskButton(0, Icons.pause), findsOneWidget);
+    // Deleting doesn't start another task's timer.
+    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
 
-    await tester.tap(taskButton(0, Icons.delete));
+    // The deletion can be undone, and the task comes back where it was, paused.
+    await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
+    expect(taskCards, findsNWidgets(2));
+    expect(nameOf(tester, 0), 'First');
+    expect(nameOf(tester, 1), 'Second');
+    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
+
+    await taskMenu(tester, 1, 'Delete task');
+    await taskMenu(tester, 0, 'Delete task');
     expect(taskCards, findsNothing);
   });
 
@@ -203,6 +263,13 @@ void main() {
     expect(nameOf(tester, 1), 'Top');
 
     await press([LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyD]);
+    expect(taskCards, findsNWidgets(2));
+    expect(nameOf(tester, 0), 'Top');
+
+    // Alt variants, for browsers that keep Ctrl+N and Ctrl+D.
+    await press([LogicalKeyboardKey.altLeft, LogicalKeyboardKey.keyN]);
+    expect(taskCards, findsNWidgets(3));
+    await press([LogicalKeyboardKey.altLeft, LogicalKeyboardKey.keyD]);
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), 'Top');
   });
