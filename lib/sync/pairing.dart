@@ -7,10 +7,12 @@ import 'package:cryptography/cryptography.dart';
 /// Devices pair by sharing one 32-byte group secret, shown as a QR code or a text code.
 /// Every group key is derived from it, as in secure-share:
 ///   group secret  --HKDF-->  signalling password (encrypts offers and answers on public relays)
-///                 --HKDF-->  group key (AES-256-GCM, every payload between devices)
+///                 --HKDF-->  group key (AES-256-GCM, seals signalling messages on the relays)
 ///                 --HKDF-->  topic key (HMAC, names the relay topic without revealing the group)
+///                 --HKDF-->  Noise PSK (proves group membership in the Noise handshake)
 ///                 --HKDF-->  group fingerprint (shown on both devices so people can compare them)
-/// Each device also has its own Ed25519 signing key, so a change can be traced to the device that made it.
+/// Each device also has its own X25519 static key for Noise (Noise_IKpsk1_25519_ChaChaPoly_SHA256, the
+/// suite secure-share is moving to). Data between devices goes through the Noise channel, not the group key.
 
 const _codePrefix = 'bmb1-';
 const _secretLength = 32;
@@ -21,7 +23,7 @@ const _macLength = 16;
 
 final Random _random = Random.secure();
 final _aes = AesGcm.with256bits();
-final _ed25519 = Ed25519();
+final _x25519 = X25519();
 
 Uint8List randomBytes(int length) =>
     Uint8List.fromList(List.generate(length, (_) => _random.nextInt(256)));
@@ -75,6 +77,7 @@ class PairingCode {
         signalingPassword: _b64(await _derive(secret, 'signaling')),
         groupKey: SecretKey(await _derive(secret, 'group')),
         topicKey: SecretKey(await _derive(secret, 'topic')),
+        noisePsk: await _derive(secret, 'noise-psk'),
         fingerprint: _fingerprint(await _derive(secret, 'fingerprint', 6)),
       );
 }
@@ -89,12 +92,14 @@ class GroupKeys {
   final String signalingPassword;
   final SecretKey groupKey;
   final SecretKey topicKey;
+  final Uint8List noisePsk;
   final String fingerprint;
 
   GroupKeys(
       {required this.signalingPassword,
       required this.groupKey,
       required this.topicKey,
+      required this.noisePsk,
       required this.fingerprint});
 
   /// A relay topic for `label` that only group members can compute.
@@ -122,20 +127,18 @@ class GroupKeys {
   }
 }
 
-/// This device's own signing key. The seed is stored with the app's other data.
+/// This device's static X25519 key pair for the Noise handshake. The seed is stored with the app's other data.
 class DeviceIdentity {
   final Uint8List seed;
-  final SimpleKeyPair _keyPair;
   final Uint8List publicKey;
 
-  DeviceIdentity._(this.seed, this._keyPair, this.publicKey);
+  DeviceIdentity._(this.seed, this.publicKey);
 
   static Future<DeviceIdentity> fromSeed(List<int> seed) async {
     if (seed.length != 32) throw FormatException('Invalid device key');
-    final keyPair = await _ed25519.newKeyPairFromSeed(seed);
+    final keyPair = await _x25519.newKeyPairFromSeed(seed);
     final publicKey = await keyPair.extractPublicKey();
-    return DeviceIdentity._(
-        Uint8List.fromList(seed), keyPair, Uint8List.fromList(publicKey.bytes));
+    return DeviceIdentity._(Uint8List.fromList(seed), Uint8List.fromList(publicKey.bytes));
   }
 
   static Future<DeviceIdentity> generate() => fromSeed(randomBytes(32));
@@ -146,18 +149,4 @@ class DeviceIdentity {
 
   /// The public key as text, how other devices name this one.
   String get id => _b64(publicKey);
-
-  Future<Uint8List> sign(List<int> message) async =>
-      Uint8List.fromList((await _ed25519.sign(message, keyPair: _keyPair)).bytes);
-}
-
-/// Checks a signature made by the device whose [DeviceIdentity.id] is `deviceId`.
-Future<bool> verifySignature(String deviceId, List<int> message, List<int> signature) async {
-  try {
-    final publicKey = SimplePublicKey(_unb64(deviceId), type: KeyPairType.ed25519);
-    return await _ed25519.verify(message,
-        signature: Signature(signature, publicKey: publicKey));
-  } on Object {
-    return false;
-  }
 }

@@ -13,6 +13,7 @@ void main() {
     expect(kb.signalingPassword, ka.signalingPassword);
     expect(await kb.topic('signal'), await ka.topic('signal'));
     expect(await ka.groupKey.extractBytes(), await kb.groupKey.extractBytes());
+    expect(kb.noisePsk, ka.noisePsk);
   });
 
   test('keys are different per group and per purpose', () async {
@@ -20,6 +21,8 @@ void main() {
     final b = await PairingCode.generate().deriveKeys();
     expect(a.fingerprint, isNot(b.fingerprint));
     expect(await a.groupKey.extractBytes(), isNot(await a.topicKey.extractBytes()));
+    expect(a.noisePsk, isNot(await a.topicKey.extractBytes()));
+    expect(a.noisePsk, isNot(b.noisePsk));
     expect(await a.topic('x'), isNot(await a.topic('y')));
   });
 
@@ -47,16 +50,11 @@ void main() {
     await expectLater(keys.open([1, 2, 3]), throwsFormatException);
   });
 
-  test('device signatures verify only for the signing device', () async {
+  test('a device key survives a save and reload', () async {
     final device = await DeviceIdentity.generate();
     final restored = await DeviceIdentity.decode(device.encode());
     expect(restored.id, device.id);
-    final msg = utf8.encode('change');
-    final sig = await restored.sign(msg);
-    expect(await verifySignature(device.id, msg, sig), isTrue);
-    expect(await verifySignature(device.id, utf8.encode('other'), sig), isFalse);
-    final stranger = await DeviceIdentity.generate();
-    expect(await verifySignature(stranger.id, msg, sig), isFalse);
-    expect(await verifySignature('not-a-key', msg, sig), isFalse);
+    expect(device.publicKey.length, 32);
+    expect((await DeviceIdentity.generate()).id, isNot(device.id));
   });
 }
