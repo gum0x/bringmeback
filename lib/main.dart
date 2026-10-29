@@ -3,6 +3,8 @@ import 'package:bringmeback/timer.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'sync/sync_cubit.dart';
+import 'sync/sync_page.dart';
 import 'dart:async';
 
 void main() {
@@ -14,8 +16,11 @@ class App extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-        create: (_) => TasksBloc()..add(LoadStateEvent()),
+    return MultiBlocProvider(
+        providers: [
+          BlocProvider(create: (_) => TasksBloc()..add(LoadStateEvent())),
+          BlocProvider(create: (_) => SyncCubit()..load()),
+        ],
         child: MaterialApp(
           title: 'bringmeback',
           theme: ThemeData(colorSchemeSeed: Colors.blue),
@@ -112,6 +117,12 @@ class _TasksStackState extends State<TasksStack> {
                         Icon(state.muted ? Icons.volume_off : Icons.volume_up),
                     onPressed: () => tasksBloc.add(ToggleMuteEvent()),
                   ),
+                ),
+                IconButton(
+                  tooltip: 'Devices',
+                  icon: const Icon(Icons.devices),
+                  onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SyncPage())),
                 ),
                 IconButton(
                   tooltip: 'Keyboard shortcuts',
