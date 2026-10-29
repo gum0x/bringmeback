@@ -13,7 +13,11 @@ import 'tasks_bloc.dart';
 /// - `fields`: one last-writer-wins map for every task field, keyed `<taskId>/<field>`. Time entries
 ///   are keyed `<taskId>/e/<start>` with the end as value (null while running).
 ///
-/// A removed task leaves the order but keeps its fields, so its history stays in the document.
+/// A removed task leaves the order but keeps its fields, so its history stays in the document. A task
+/// marked done leaves the order the same way, with `<taskId>/doneAt` set.
+///
+/// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
+/// never in the order.
 class TaskDocument {
   final CRDTDocument doc;
   final CRDTFugueMovableListHandler<String> _order;
@@ -76,6 +80,42 @@ class TaskDocument {
   }
 
   void removeAt(int index) => _order.delete(index);
+
+  /// Puts a removed or done task back at [index]; its fields never left the document.
+  void restore(int index, String id) => doc.runInTransaction(() {
+        _order.insert(index, id);
+        if (_fields.value['$id/doneAt'] != null) _fields.set('$id/doneAt', null);
+      });
+
+  /// Takes the task at [index] off the list as done, keeping when it was finished.
+  void markDone(int index, String id) => doc.runInTransaction(() {
+        _fields.set('$id/doneAt', nowSeconds());
+        _order.delete(index);
+      });
+
+  int? doneAt(String id) => _fields.value['$id/doneAt'] as int?;
+
+  /// The ids of every pause logged, in no particular order.
+  List<String> get pauseIds => [
+        for (final MapEntry(:key, :value) in _fields.value.entries)
+          if (key.endsWith('/kind') && value == 'pause')
+            key.substring(0, key.length - '/kind'.length)
+      ];
+
+  /// Logs a pause starting now, as a hidden task whose time entry runs until [endPauses].
+  void startPause(String id) => doc.runInTransaction(() {
+        _fields
+          ..set('$id/kind', 'pause')
+          ..set('$id/name', 'Pause')
+          ..set('$id/e/${nowSeconds()}', null);
+      });
+
+  /// Ends every pause still running.
+  void endPauses() {
+    for (final id in pauseIds) {
+      setRunning(id, false);
+    }
+  }
 
   void move(int from, int to) => _order.move(from, to);
 

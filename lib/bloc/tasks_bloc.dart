@@ -80,12 +80,14 @@ class TaskState {
 
 class TasksState {
   final List<TaskState> tasks;
+  final bool muted;
 
-  TasksState({required this.tasks});
+  TasksState({required this.tasks, this.muted = false});
 
-  TasksState copyWith({List<TaskState>? tasks}) {
+  TasksState copyWith({List<TaskState>? tasks, bool? muted}) {
     return TasksState(
       tasks: tasks ?? this.tasks,
+      muted: muted ?? this.muted,
     );
   }
 }
@@ -113,6 +115,28 @@ class RemoveTaskEvent extends TasksEvent {
   RemoveTaskEvent({required this.index});
 }
 
+/// Takes a task off the list as done.
+class DoneTaskEvent extends TasksEvent {
+  final int index;
+
+  DoneTaskEvent({required this.index});
+}
+
+/// Puts a removed or done task back, to undo [RemoveTaskEvent] or [DoneTaskEvent].
+class RestoreTaskEvent extends TasksEvent {
+  final int index;
+  final ValueKey<String> id;
+
+  RestoreTaskEvent({required this.index, required this.id});
+}
+
+/// Marks the task the user is working in, which keyboard shortcuts act on.
+class FocusTaskEvent extends TasksEvent {
+  final int index;
+
+  FocusTaskEvent({required this.index});
+}
+
 class MoveTaskEvent extends TasksEvent {
   final int fromIndex;
   final int toIndex;
@@ -138,21 +162,33 @@ class ResumeTimerEvent extends TasksEvent {
   ResumeTimerEvent({required this.index});
 }
 
+/// Restarts the countdown with its current length.
 class ResetTimerEvent extends TasksEvent {
   final int index;
 
   ResetTimerEvent({required this.index});
 }
 
+/// Clears the total time tracked on a task.
+class ResetTotalEvent extends TasksEvent {
+  final int index;
+
+  ResetTotalEvent({required this.index});
+}
+
+class ToggleMuteEvent extends TasksEvent {}
+
 class UpdateTimerEvent extends TasksEvent {
   UpdateTimerEvent();
 }
 
+/// Renames a task. It names the task by id, because a name is saved a moment after typing stops,
+/// by which time the task may have moved.
 class UpdateTaskNameEvent extends TasksEvent {
-  final int index;
+  final ValueKey<String> id;
   final String newName;
 
-  UpdateTaskNameEvent({required this.index, required this.newName});
+  UpdateTaskNameEvent({required this.id, required this.newName});
 }
 
 class UpdateTaskTimerEvent extends TasksEvent {
@@ -173,11 +209,21 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   String? _focusId;
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
+  bool _muted = false;
+  final StreamController<String> _timeUp = StreamController<String>.broadcast();
+
+  /// The name of each task whose countdown runs out, as it happens.
+  Stream<String> get timeUp => _timeUp.stream;
 
   TasksBloc() : super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>(_onAddNextTask);
     on<RemoveTaskEvent>(_onRemoveTask);
+    on<DoneTaskEvent>(_onDoneTask);
+    on<RestoreTaskEvent>(_onRestoreTask);
+    on<FocusTaskEvent>(_onFocusTask);
+    on<ResetTotalEvent>(_onResetTotal);
+    on<ToggleMuteEvent>(_onToggleMute);
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
     on<StopTimerEvent>(_onStopTimer);
@@ -194,7 +240,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
   }
 
-  TasksState _view() => TasksState(tasks: _doc?.tasks(focusId: _focusId) ?? []);
+  TasksState _view() =>
+      TasksState(tasks: _doc?.tasks(focusId: _focusId) ?? [], muted: _muted);
 
   /// Applies [change] to the document, then shows and saves the result.
   void _edit(Emitter<TasksState> emit, void Function(TaskDocument doc) change) {
@@ -211,89 +258,140 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     return index >= 0 && index < ids.length ? ids[index] : null;
   }
 
-  /// Focuses the first task and starts its timer, as removing or moving a task does.
-  void _focusFirst(TaskDocument doc) {
-    final first = _idAt(0);
-    if (first == null) return;
-    _focusId = first;
-    doc.setRunning(first, true);
+  /// Whether work is under way: the top task's timer runs, rather than a pause or nothing.
+  bool _working(TaskDocument doc) => doc.ids.any((id) => doc.task(id).running);
+
+  /// Only the top task is the one being worked on, so only its timer may run. Running it ends any
+  /// pause being logged.
+  void _runTop(TaskDocument doc, bool run) {
+    for (final (i, id) in doc.ids.indexed) {
+      doc.setRunning(id, run && i == 0);
+    }
+    if (run && doc.ids.isNotEmpty) doc.endPauses();
   }
 
   void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      doc.insert(0, event.id.value, running: true);
+      doc.insert(0, event.id.value);
+      _runTop(doc, true);
       _focusId = event.id.value;
     });
   }
 
   void _onAddNextTask(AddNextTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
+      final working = _working(doc);
       doc.insert(min(event.index + 1, doc.ids.length), event.id.value);
+      _runTop(doc, working);
       _focusId = event.id.value;
     });
   }
 
-  void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) {
+  /// Takes the task at [index] off the list with [takeOff]. When it was being worked on, work
+  /// carries on with the task that moves up.
+  void _takeOff(Emitter<TasksState> emit, int index,
+      void Function(TaskDocument doc, String id) takeOff) {
+    final id = _idAt(index);
+    if (id == null) return;
     _edit(emit, (doc) {
-      doc.removeAt(event.index);
-      _focusFirst(doc);
+      final working = _working(doc);
+      // A task taken off stays paused, so undoing doesn't count the time it was gone.
+      doc.setRunning(id, false);
+      takeOff(doc, id);
+      _runTop(doc, working);
+      if (_focusId == id) _focusId = _idAt(min(index, doc.ids.length - 1));
     });
   }
 
+  void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) =>
+      _takeOff(emit, event.index, (doc, id) => doc.removeAt(event.index));
+
+  void _onDoneTask(DoneTaskEvent event, Emitter<TasksState> emit) =>
+      _takeOff(emit, event.index, (doc, id) => doc.markDone(event.index, id));
+
+  void _onRestoreTask(RestoreTaskEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) {
+      if (doc.ids.contains(event.id.value)) return;
+      final working = _working(doc);
+      doc.restore(min(event.index, doc.ids.length), event.id.value);
+      _runTop(doc, working);
+      _focusId = event.id.value;
+    });
+  }
+
+  void _onFocusTask(FocusTaskEvent event, Emitter<TasksState> emit) {
+    final id = _idAt(event.index);
+    if (id == null || id == _focusId) return;
+    _focusId = id;
+    emit(_view());
+    _saveState();
+  }
+
+  /// Moving a task to the top makes it the one being worked on.
   void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
+      final working = _working(doc);
       doc.move(event.fromIndex, event.toIndex);
-      _focusFirst(doc);
+      _runTop(doc, working);
     });
   }
+
+  // Starting, pausing and resuming act on the top task, the only one with a running timer.
 
   void _onStartTimer(StartTimerEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) {
-      _focusId = id;
-      doc.setRunning(id, true);
-    });
+    if (_idAt(0) == null) return;
+    _edit(emit, (doc) => _runTop(doc, true));
   }
 
+  /// Pauses the work and logs the pause, so the time between tasks is kept too.
   void _onStopTimer(StopTimerEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) => doc.setRunning(id, false));
+    _edit(emit, (doc) {
+      if (!_working(doc)) return;
+      _runTop(doc, false);
+      doc.startPause(newId());
+    });
   }
 
   void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) => doc.setRunning(id, true));
+    if (_idAt(0) == null) return;
+    _edit(emit, (doc) => _runTop(doc, true));
   }
 
   void _onResetTimer(ResetTimerEvent event, Emitter<TasksState> emit) {
     final id = _idAt(event.index);
     if (id == null) return;
-    final now = nowSeconds();
     _lastRemaining.remove(id);
-    _edit(emit, (doc) {
-      doc.setTimer(id, 20 * 60, now);
-      doc.setTotalResetAt(id, now);
-    });
+    _edit(emit,
+        (doc) => doc.setTimer(id, doc.task(id).timerLengthSeconds, nowSeconds()));
+  }
+
+  void _onResetTotal(ResetTotalEvent event, Emitter<TasksState> emit) {
+    final id = _idAt(event.index);
+    if (id == null) return;
+    _edit(emit, (doc) => doc.setTotalResetAt(id, nowSeconds()));
+  }
+
+  void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
+    _muted = !_muted;
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setBool('muted', _muted));
   }
 
   void _onUpdateTimer(UpdateTimerEvent event, Emitter<TasksState> emit) {
     final view = _view();
     final now = nowSeconds();
-    for (int i = 0; i < view.tasks.length; i++) {
-      final task = view.tasks[i];
+    for (final task in view.tasks) {
       final remaining = task.remainingSecondsAt(now);
       final previous = _lastRemaining[task.id.value];
       _lastRemaining[task.id.value] = remaining;
       if (previous == null || previous == remaining) continue;
 
-      // Check if timer has reached zero
       if (previous > 0 && remaining <= 0) {
+        _timeUp.add(task.name);
         _playAlertSound();
-      }
-      if (i == 0 && (previous / 1800).floor() != (remaining / 1800).floor()) {
+      } else if ((previous / 1800).floor() != (remaining / 1800).floor()) {
+        // Every 30 minutes of a running task.
         _playAlertSound(alertType: 'REMINDER');
       }
     }
@@ -302,9 +400,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
-    final id = _idAt(event.index);
-    if (id == null) return;
-    _edit(emit, (doc) => doc.setName(id, event.newName));
+    _edit(emit, (doc) => doc.setName(event.id.value, event.newName));
   }
 
   void _onUpdateTaskTimer(
@@ -316,12 +412,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _playAlertSound({String? alertType}) async {
+    if (_muted) return;
     switch (alertType) {
       case 'REMINDER':
-        await _audioPlayer.play(AssetSource('alert.mp3'));
+        await _audioPlayer.play(AssetSource('bmb-reminder.mp3'));
 
       default:
-        await _audioPlayer.play(AssetSource('bmb-reminder.mp3'));
+        await _audioPlayer.play(AssetSource('alert.mp3'));
     }
   }
 
@@ -339,6 +436,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     if (_doc != null) return;
     final prefs = await SharedPreferences.getInstance();
     if (_doc != null) return;
+    _muted = prefs.getBool('muted') ?? false;
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');
@@ -371,6 +469,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       }
     }
 
+    // Earlier versions let any task run; now only the top one may.
+    _runTop(doc, _working(doc));
     _doc = doc;
     emit(_view());
     await _saveState();
@@ -414,6 +514,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   @override
   Future<void> close() {
     tick?.cancel();
+    _timeUp.close();
     return super.close();
   }
 }
