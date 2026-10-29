@@ -109,10 +109,10 @@ packages:
     dependency: "direct main"
     description:
       name: crdt_lf
-      sha256: c4448d4e44e5e21de5b389f86c45913c552e190d73ac860d8aac78c34cebb469
+      sha256: a0a2cd48e8224bffe90f9405047d2a75bc01d46fb60e0416973dfd52523125e3
       url: "https://pub.dev"
     source: hosted
-    version: "5.1.2"
+    version: "5.2.0"
   crypto:
     dependency: transitive
     description:
