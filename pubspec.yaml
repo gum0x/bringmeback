@@ -1,7 +1,7 @@
 name: bringmeback
 description: "A Pomodoro timer, stopwatch, and task manager to help you stay focused."
 publish_to: 'none'
-version: 0.1.0
+version: 0.2.0+2
 
 environment:
   sdk: '>=3.4.4 <4.0.0'

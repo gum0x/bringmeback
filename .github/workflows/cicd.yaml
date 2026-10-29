@@ -53,6 +53,11 @@ jobs:
         channel: 'stable'
         cache: true
 
+    - name: Read app version
+      id: version
+      shell: bash
+      run: echo "version=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)" >> "$GITHUB_OUTPUT"
+
     - name: Install dependencies
       run: flutter pub get
 
@@ -65,7 +70,7 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: release-app-${{ matrix.target }}
+        name: bringmeback-${{ steps.version.outputs.version }}-${{ matrix.target }}
         path: ${{ matrix.artifact_path }}
         if-no-files-found: error
         retention-days: 14
