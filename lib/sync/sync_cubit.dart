@@ -2,6 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'pairing.dart';
+import 'symbolon.dart';
 
 /// Whether this device is in a sync group, and the keys for it. Live sync itself comes in a later step,
 /// so for now this only stores the pairing.
@@ -11,7 +12,10 @@ class SyncState {
   final String? code;
   final GroupKeys? keys;
 
-  const SyncState({this.device, this.pairing, this.code, this.keys});
+  /// False in builds that can't sync yet, such as the web app.
+  final bool supported;
+
+  const SyncState({this.device, this.pairing, this.code, this.keys, this.supported = true});
 
   bool get paired => pairing != null;
 }
@@ -23,14 +27,19 @@ class SyncCubit extends Cubit<SyncState> {
   SyncCubit() : super(const SyncState());
 
   Future<void> load() async {
+    if (!syncSupported) {
+      emit(const SyncState(supported: false));
+      return;
+    }
+    await loadSymbolon();
     final prefs = await SharedPreferences.getInstance();
     final storedDevice = prefs.getString(_deviceKey);
     final DeviceIdentity device;
     if (storedDevice == null) {
-      device = await DeviceIdentity.generate();
+      device = DeviceIdentity.generate();
       await prefs.setString(_deviceKey, device.encode());
     } else {
-      device = await DeviceIdentity.decode(storedDevice);
+      device = DeviceIdentity.decode(storedDevice);
     }
     final storedCode = prefs.getString(_pairingKey);
     PairingCode? pairing;
@@ -70,5 +79,5 @@ class SyncCubit extends Cubit<SyncState> {
               device: device,
               pairing: pairing,
               code: await pairing.encode(),
-              keys: await pairing.deriveKeys());
+              keys: pairing.deriveKeys());
 }

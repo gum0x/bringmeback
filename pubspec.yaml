@@ -8,11 +8,14 @@ environment:
 
 dependencies:
   audioplayers: ^6.8.1
+  bmb_core:
+    path: rust_builder
   crdt_lf: 5.1.2
   cryptography: 2.9.0
   flutter:
     sdk: flutter
   flutter_bloc: ^9.1.1
+  flutter_rust_bridge: 2.13.0
   qr_flutter: 4.1.0
   shared_preferences: ^2.5.6
 

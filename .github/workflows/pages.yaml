@@ -9,6 +9,8 @@ on:
       - 'lib/**'
       - 'assets/**'
       - 'web/**'
+      - 'rust/**'
+      - 'rust_builder/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/pages.yaml'
@@ -39,6 +41,10 @@ jobs:
 
     - name: Install dependencies
       run: flutter pub get
+
+    # The unit tests call Symbolon through the native library, which they load from rust/target/release.
+    - name: Build the Rust library for tests
+      run: cargo build --release --manifest-path rust/Cargo.toml
 
     - name: Run tests
       run: flutter test

@@ -12,6 +12,8 @@ on:
       - 'assets/**'
       - 'linux/**'
       - 'web/**'
+      - 'rust/**'
+      - 'rust_builder/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/e2e.yaml'

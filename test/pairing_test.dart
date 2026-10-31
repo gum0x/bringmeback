@@ -1,29 +1,30 @@
 import 'dart:convert';
 
 import 'package:bringmeback/sync/pairing.dart';
+import 'package:bringmeback/sync/symbolon.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+// Needs the native library: run `cargo build --release` in rust/ first.
 void main() {
+  setUpAll(loadSymbolon);
+
   test('a code read on another device gives the same keys', () async {
     final a = PairingCode.generate();
     final b = await PairingCode.parse(await a.encode());
-    final ka = await a.deriveKeys();
-    final kb = await b.deriveKeys();
+    final ka = a.deriveKeys();
+    final kb = b.deriveKeys();
     expect(kb.fingerprint, ka.fingerprint);
-    expect(kb.signalingPassword, ka.signalingPassword);
-    expect(await kb.topic('signal'), await ka.topic('signal'));
-    expect(await ka.groupKey.extractBytes(), await kb.groupKey.extractBytes());
-    expect(kb.noisePsk, ka.noisePsk);
+    expect(kb.topic('signal'), ka.topic('signal'));
+    expect(kb.open(ka.seal([1, 2, 3])), [1, 2, 3]);
   });
 
-  test('keys are different per group and per purpose', () async {
-    final a = await PairingCode.generate().deriveKeys();
-    final b = await PairingCode.generate().deriveKeys();
+  test('keys are different per group and per label', () {
+    final a = PairingCode.generate().deriveKeys();
+    final b = PairingCode.generate().deriveKeys();
     expect(a.fingerprint, isNot(b.fingerprint));
-    expect(await a.groupKey.extractBytes(), isNot(await a.topicKey.extractBytes()));
-    expect(a.noisePsk, isNot(await a.topicKey.extractBytes()));
-    expect(a.noisePsk, isNot(b.noisePsk));
-    expect(await a.topic('x'), isNot(await a.topic('y')));
+    expect(a.fingerprint, matches(RegExp(r'^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$')));
+    expect(a.topic('x'), isNot(a.topic('y')));
+    expect(a.topic('x'), isNot(b.topic('x')));
   });
 
   test('bad codes are rejected', () async {
@@ -36,25 +37,37 @@ void main() {
     expect((await PairingCode.parse('  $code\n')).secret.length, 32);
   });
 
-  test('sealed payloads open only with the same key and context', () async {
-    final keys = await PairingCode.generate().deriveKeys();
-    final other = await PairingCode.generate().deriveKeys();
+  test('sealed payloads open only with the same key and context', () {
+    final keys = PairingCode.generate().deriveKeys();
+    final other = PairingCode.generate().deriveKeys();
     final msg = utf8.encode('hello');
-    final sealed = await keys.seal(msg, aad: utf8.encode('changes'));
-    expect(await keys.open(sealed, aad: utf8.encode('changes')), msg);
-    expect(await keys.seal(msg), isNot(await keys.seal(msg)));
-    await expectLater(keys.open(sealed, aad: utf8.encode('offer')), throwsA(anything));
-    await expectLater(other.open(sealed, aad: utf8.encode('changes')), throwsA(anything));
-    final tampered = [...sealed]..[20] ^= 1;
-    await expectLater(keys.open(tampered, aad: utf8.encode('changes')), throwsA(anything));
-    await expectLater(keys.open([1, 2, 3]), throwsFormatException);
+    final sealed = keys.seal(msg, aad: utf8.encode('changes'));
+    expect(keys.open(sealed, aad: utf8.encode('changes')), msg);
+    expect(keys.seal(msg), isNot(keys.seal(msg)));
+    expect(() => keys.open(sealed, aad: utf8.encode('offer')), throwsA(anything));
+    expect(() => other.open(sealed, aad: utf8.encode('changes')), throwsA(anything));
+    final tampered = [...sealed]..[30] ^= 1;
+    expect(() => keys.open(tampered, aad: utf8.encode('changes')), throwsA(anything));
+    expect(() => keys.open([1, 2, 3]), throwsA(anything));
   });
 
-  test('a device key survives a save and reload', () async {
-    final device = await DeviceIdentity.generate();
-    final restored = await DeviceIdentity.decode(device.encode());
+  test('a device key survives a save and reload', () {
+    final device = DeviceIdentity.generate();
+    final restored = DeviceIdentity.decode(device.encode());
     expect(restored.id, device.id);
     expect(device.publicKey.length, 32);
-    expect((await DeviceIdentity.generate()).id, isNot(device.id));
+    expect(DeviceIdentity.generate().id, isNot(device.id));
+  });
+
+  test('a device key saved by the earlier version still loads', () {
+    // An X25519 seed from the `cryptography` package, and the public key it gave (RFC 7748 vector).
+    final seed = base64Url.encode(List.generate(32, (i) => 0)).replaceAll('=', '');
+    expect(DeviceIdentity.decode(seed).id, isNotEmpty);
+    final alicePrivate = _hex('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a');
+    expect(DeviceIdentity.fromPrivate(alicePrivate).publicKey,
+        _hex('8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a'));
   });
 }
+
+List<int> _hex(String s) =>
+    [for (var i = 0; i < s.length; i += 2) int.parse(s.substring(i, i + 2), radix: 16)];

@@ -16,7 +16,12 @@ class SyncPage extends StatelessWidget {
       body: BlocBuilder<SyncCubit, SyncState>(
         builder: (context, state) => ListView(
           padding: const EdgeInsets.all(16),
-          children: state.device == null
+          children: !state.supported
+              ? const [
+                  Text('Syncing from the browser is coming soon. '
+                      'Use the desktop or phone app to pair your devices for now.')
+                ]
+              : state.device == null
               ? const [Center(child: CircularProgressIndicator())]
               : state.paired
                   ? _paired(context, state)
