@@ -10,6 +10,7 @@ on:
       - 'assets/**'
       - 'web/**'
       - 'rust/**'
+      - 'tool/build_symbolon_web.sh'
       - 'rust_builder/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
@@ -48,6 +49,10 @@ jobs:
 
     - name: Run tests
       run: flutter test
+
+    # The web app calls Symbolon through its JavaScript binding, built from the commit rust/Cargo.toml pins.
+    - name: Build Symbolon for the web
+      run: ./tool/build_symbolon_web.sh
 
     # The site lives under /<repo>/. CanvasKit is bundled instead of loaded from Google's CDN.
     - name: Build web app

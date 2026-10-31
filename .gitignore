@@ -44,3 +44,6 @@ app.*.map.json
 
 # Windows download metadata
 *:Zone.Identifier
+
+# Built by tool/build_symbolon_web.sh
+/web/symbolon/

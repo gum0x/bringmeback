@@ -805,7 +805,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "symbolon"
 version = "0.1.0"
-source = "git+https://github.com/common-sec/symbolon?rev=c603f955fca450345e163efc699cf48ae66bb2de#c603f955fca450345e163efc699cf48ae66bb2de"
+source = "git+https://github.com/common-sec/symbolon?rev=5efd580dcef1ad8603e3eacd6dc94b5c5051db70#5efd580dcef1ad8603e3eacd6dc94b5c5051db70"
 dependencies = [
  "chacha20poly1305",
  "getrandom",

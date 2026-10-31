@@ -276,11 +276,12 @@ fn wire__crate__api__symbolon__GroupKeys_new_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_context = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_secret = <Vec<u8>>::sse_decode(&mut deserializer);
             deserializer.end();
             transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                 (move || {
-                    let output_ok = crate::api::symbolon::GroupKeys::new(api_secret)?;
+                    let output_ok = crate::api::symbolon::GroupKeys::new(api_context, api_secret)?;
                     std::result::Result::Ok(output_ok)
                 })(),
             )

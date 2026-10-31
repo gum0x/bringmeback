@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
-import '../src/rust/api/symbolon.dart' as symbolon;
+import 'symbolon.dart';
 
 /// Devices pair by sharing one 32-byte group secret, shown as a QR code or a text code. Symbolon
 /// (github.com/common-sec/symbolon) derives every group key from it: the seal key for signalling messages
@@ -16,6 +16,9 @@ const _codePrefix = 'bmb1-';
 const _secretLength = 32;
 const _checkLength = 2;
 const _salt = 'bmb/v1';
+
+/// Separates bringmeback's keys from other apps using Symbolon with the same secret.
+const _context = 'bringmeback/v1';
 
 final Random _random = Random.secure();
 
@@ -69,7 +72,7 @@ class PairingCode {
       _codePrefix + _b64([...secret, ...await _derive(secret, 'check', _checkLength)]);
 
   /// Every key of the group, derived by Symbolon. Call [loadSymbolon] first.
-  GroupKeys deriveKeys() => GroupKeys._(symbolon.GroupKeys(secret: secret));
+  GroupKeys deriveKeys() => GroupKeys._(symbolon.groupKeys(utf8.encode(_context), secret));
 }
 
 /// Six bytes as "1a2b-3c4d-5e6f", short enough to compare by eye.
@@ -80,7 +83,7 @@ String _fingerprint(List<int> bytes) {
 
 /// The group's keys. They stay inside Symbolon; only results come out.
 class GroupKeys {
-  final symbolon.GroupKeys inner;
+  final SymbolonGroupKeys inner;
 
   GroupKeys._(this.inner);
 
@@ -88,33 +91,33 @@ class GroupKeys {
   String get fingerprint => _fingerprint(inner.fingerprint());
 
   /// A relay topic for `label` that only group members can compute.
-  String topic(String label) => _b64(inner.topic(label: utf8.encode(label)));
+  String topic(String label) => _b64(inner.topic(utf8.encode(label)));
 
   /// Encrypts a signalling message for the relays. `aad` is authenticated but not encrypted, for context
   /// such as the message type, so a payload can't be replayed as something else.
   Uint8List seal(List<int> plaintext, {List<int> aad = const []}) =>
-      inner.seal(plaintext: plaintext, aad: aad);
+      inner.seal(plaintext, aad);
 
   /// Decrypts a [seal]ed buffer. Throws if it was altered or sealed with another key or `aad`.
   /// The result is still untrusted peer data and must be validated by the caller.
   Uint8List open(List<int> sealed, {List<int> aad = const []}) =>
-      inner.open(sealed: sealed, aad: aad);
+      inner.open(sealed, aad);
 }
 
 /// This device's static X25519 key for the Noise handshake. The private key is stored with the app's
 /// other data. Older versions stored an X25519 seed, which is the same 32 bytes.
 class DeviceIdentity {
-  final symbolon.DeviceKey key;
+  final SymbolonDeviceKey key;
   final Uint8List publicKey;
 
-  DeviceIdentity._(this.key) : publicKey = key.publicKey();
+  DeviceIdentity._(this.key) : publicKey = key.publicKey;
 
   static DeviceIdentity fromPrivate(List<int> privateKey) {
     if (privateKey.length != 32) throw FormatException('Invalid device key');
-    return DeviceIdentity._(symbolon.DeviceKey.fromPrivate(privateKey: privateKey));
+    return DeviceIdentity._(symbolon.deviceKeyFromPrivate(privateKey));
   }
 
-  static DeviceIdentity generate() => DeviceIdentity._(symbolon.DeviceKey.generate());
+  static DeviceIdentity generate() => DeviceIdentity._(symbolon.generateDeviceKey());
 
   static DeviceIdentity decode(String text) => fromPrivate(_unb64(text));
 

@@ -34,8 +34,9 @@ abstract class GroupKeys implements RustOpaqueInterface {
   /// Six bytes to show on every device so people can compare them.
   Uint8List fingerprint();
 
-  factory GroupKeys({required List<int> secret}) =>
-      RustLib.instance.api.crateApiSymbolonGroupKeysNew(secret: secret);
+  factory GroupKeys({required List<int> context, required List<int> secret}) =>
+      RustLib.instance.api
+          .crateApiSymbolonGroupKeysNew(context: context, secret: secret);
 
   Uint8List open({required List<int> sealed, required List<int> aad});
 

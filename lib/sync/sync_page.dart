@@ -18,8 +18,8 @@ class SyncPage extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: !state.supported
               ? const [
-                  Text('Syncing from the browser is coming soon. '
-                      'Use the desktop or phone app to pair your devices for now.')
+                  Text('Sync could not start on this device, '
+                      'because its encryption library did not load.')
                 ]
               : state.device == null
               ? const [Center(child: CircularProgressIndicator())]

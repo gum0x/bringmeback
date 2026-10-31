@@ -13,6 +13,7 @@ on:
       - 'linux/**'
       - 'web/**'
       - 'rust/**'
+      - 'tool/build_symbolon_web.sh'
       - 'rust_builder/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
@@ -78,6 +79,10 @@ jobs:
 
     - name: Install dependencies
       run: flutter pub get
+
+    # The web app calls Symbolon through its JavaScript binding, built from the commit rust/Cargo.toml pins.
+    - name: Build Symbolon for the web
+      run: ./tool/build_symbolon_web.sh
 
     # The runner image ships Chrome with a matching ChromeDriver.
     - name: Start ChromeDriver

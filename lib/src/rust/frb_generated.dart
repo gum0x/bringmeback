@@ -93,7 +93,8 @@ abstract class RustLibApi extends BaseApi {
 
   Uint8List crateApiSymbolonGroupKeysFingerprint({required GroupKeys that});
 
-  GroupKeys crateApiSymbolonGroupKeysNew({required List<int> secret});
+  GroupKeys crateApiSymbolonGroupKeysNew(
+      {required List<int> context, required List<int> secret});
 
   Uint8List crateApiSymbolonGroupKeysOpen(
       {required GroupKeys that,
@@ -317,10 +318,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  GroupKeys crateApiSymbolonGroupKeysNew({required List<int> secret}) {
+  GroupKeys crateApiSymbolonGroupKeysNew(
+      {required List<int> context, required List<int> secret}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_list_prim_u_8_loose(context, serializer);
         sse_encode_list_prim_u_8_loose(secret, serializer);
         return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
       },
@@ -330,7 +333,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_AnyhowException,
       ),
       constMeta: kCrateApiSymbolonGroupKeysNewConstMeta,
-      argValues: [secret],
+      argValues: [context, secret],
       apiImpl: this,
     ));
   }
@@ -338,7 +341,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSymbolonGroupKeysNewConstMeta =>
       const TaskConstMeta(
         debugName: "GroupKeys_new",
-        argNames: ["secret"],
+        argNames: ["context", "secret"],
       );
 
   @override

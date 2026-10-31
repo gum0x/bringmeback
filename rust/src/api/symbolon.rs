@@ -1,4 +1,5 @@
-//! The parts of Symbolon that bringmeback calls from Dart. Group keys stay inside Rust: Dart only
+//! The parts of Symbolon that bringmeback calls from Dart on desktop and phones. The web build uses
+//! Symbolon's JavaScript binding, which has the same objects. Group keys stay inside Rust: Dart only
 //! ever sees public values (topics, fingerprints, public keys) and the device's own private key, which
 //! it has to store.
 
@@ -9,14 +10,12 @@ use symbolon::handshake::{self, Handshake, StaticKeypair};
 use symbolon::keys::{KeySchedule, Purpose};
 use symbolon::seal::Sealer;
 
-/// Separates bringmeback's keys from any other app using Symbolon with the same secret.
-const CONTEXT: &[u8] = b"bringmeback/v1";
-
 fn key32(bytes: &[u8]) -> Result<[u8; 32]> {
     bytes.try_into().map_err(|_| anyhow!("expected 32 bytes"))
 }
 
-/// Every key of a sync group, derived from its 32-byte group secret.
+/// Every key of a sync group, derived from its 32-byte group secret. `context` names the app and protocol
+/// version, so the same secret gives other apps different keys.
 #[frb(opaque)]
 pub struct GroupKeys {
     keys: KeySchedule,
@@ -24,8 +23,8 @@ pub struct GroupKeys {
 
 impl GroupKeys {
     #[frb(sync)]
-    pub fn new(secret: Vec<u8>) -> Result<GroupKeys> {
-        Ok(Self { keys: KeySchedule::new(CONTEXT, &secret)? })
+    pub fn new(context: Vec<u8>, secret: Vec<u8>) -> Result<GroupKeys> {
+        Ok(Self { keys: KeySchedule::new(&context, &secret)? })
     }
 
     /// A relay topic only group members can compute.

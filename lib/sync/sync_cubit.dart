@@ -12,7 +12,7 @@ class SyncState {
   final String? code;
   final GroupKeys? keys;
 
-  /// False in builds that can't sync yet, such as the web app.
+  /// False when Symbolon could not be loaded, so this device can't sync.
   final bool supported;
 
   const SyncState({this.device, this.pairing, this.code, this.keys, this.supported = true});
@@ -27,11 +27,13 @@ class SyncCubit extends Cubit<SyncState> {
   SyncCubit() : super(const SyncState());
 
   Future<void> load() async {
-    if (!syncSupported) {
+    try {
+      await loadSymbolon();
+    } on Object {
+      // Without Symbolon there is no sync, but the rest of the app works.
       emit(const SyncState(supported: false));
       return;
     }
-    await loadSymbolon();
     final prefs = await SharedPreferences.getInstance();
     final storedDevice = prefs.getString(_deviceKey);
     final DeviceIdentity device;
