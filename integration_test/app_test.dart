@@ -7,7 +7,7 @@ import 'dart:convert';
 
 import 'package:bringmeback/main.dart';
 import 'package:bringmeback/sync/pairing.dart';
-import 'package:bringmeback/sync/symbolon.dart';
+import 'package:symbolon_flutter/symbolon_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';

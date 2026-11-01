@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
-import 'symbolon.dart';
+import 'package:symbolon_flutter/symbolon_flutter.dart';
 
 /// Devices pair by sharing one 32-byte group secret, shown as a QR code or a text code. Symbolon
 /// (github.com/common-sec/symbolon) derives every group key from it: the seal key for signalling messages

@@ -1,12 +1,13 @@
 import 'dart:convert';
 
 import 'package:bringmeback/sync/pairing.dart';
-import 'package:bringmeback/sync/symbolon.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// Needs the native library: run `cargo build --release` in rust/ first.
+import 'symbolon_native.dart';
+
+// Needs the native library: run `tool/build_symbolon.sh native` first.
 void main() {
-  setUpAll(loadSymbolon);
+  setUpAll(loadSymbolonForTests);
 
   test('a code read on another device gives the same keys', () async {
     final a = PairingCode.generate();

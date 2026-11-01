@@ -1,12 +1,14 @@
 import 'dart:convert';
 
 import 'package:bringmeback/sync/pairing.dart';
-import 'package:bringmeback/sync/symbolon.dart';
+import 'package:symbolon_flutter/symbolon_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'symbolon_native.dart';
 
 // Two devices of the same group run the Noise handshake in memory.
 void main() {
-  setUpAll(loadSymbolon);
+  setUpAll(loadSymbolonForTests);
 
   final prologue = utf8.encode('bringmeback test');
 

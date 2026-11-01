@@ -9,8 +9,7 @@ on:
       - 'assets/**'
       - 'windows/**'
       - 'macos/**'
-      - 'rust/**'
-      - 'rust_builder/**'
+      - 'tool/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - 'analysis_options.yaml'
@@ -58,9 +57,9 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
 
-    # The unit tests call Symbolon through the native library, which they load from rust/target/release.
-    - name: Build the Rust library for tests
-      run: cargo build --release --manifest-path rust/Cargo.toml
+    # The unit tests call Symbolon's native library, built from the package pubspec.yaml pins.
+    - name: Build Symbolon for tests
+      run: ./tool/build_symbolon.sh native
 
     - name: Run tests
       run: flutter test

@@ -22,18 +22,3 @@ updates:
     groups:
       pub-minor-patch:
         update-types: [minor, patch]
-    # The Dart package and the Rust crate must stay on the same version, and the generated code with them.
-    ignore:
-      - dependency-name: flutter_rust_bridge
-
-  - package-ecosystem: cargo
-    directory: /rust
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 7
-    ignore:
-      - dependency-name: flutter_rust_bridge
-    groups:
-      cargo-minor-patch:
-        update-types: [minor, patch]

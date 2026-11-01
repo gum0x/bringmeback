@@ -9,9 +9,7 @@ on:
       - 'lib/**'
       - 'assets/**'
       - 'web/**'
-      - 'rust/**'
-      - 'tool/build_symbolon_web.sh'
-      - 'rust_builder/**'
+      - 'tool/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/pages.yaml'
@@ -43,16 +41,16 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
 
-    # The unit tests call Symbolon through the native library, which they load from rust/target/release.
-    - name: Build the Rust library for tests
-      run: cargo build --release --manifest-path rust/Cargo.toml
+    # The unit tests call Symbolon's native library, built from the package pubspec.yaml pins.
+    - name: Build Symbolon for tests
+      run: ./tool/build_symbolon.sh native
 
     - name: Run tests
       run: flutter test
 
-    # The web app calls Symbolon through its JavaScript binding, built from the commit rust/Cargo.toml pins.
+    # The web app calls Symbolon's JavaScript binding, built from the package pubspec.yaml pins.
     - name: Build Symbolon for the web
-      run: ./tool/build_symbolon_web.sh
+      run: ./tool/build_symbolon.sh web
 
     # The site lives under /<repo>/. CanvasKit is bundled instead of loaded from Google's CDN.
     - name: Build web app

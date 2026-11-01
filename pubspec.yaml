@@ -8,14 +8,18 @@ environment:
 
 dependencies:
   audioplayers: ^6.8.1
-  bmb_core:
-    path: rust_builder
   crdt_lf: 5.1.2
   cryptography: 2.9.0
   flutter:
     sdk: flutter
   flutter_bloc: ^9.1.1
-  flutter_rust_bridge: 2.13.0
+  # Symbolon's Dart package, pinned to a reviewed commit. tool/build_symbolon_web.sh builds the web
+  # binding from the same commit.
+  symbolon_flutter:
+    git:
+      url: https://github.com/common-sec/symbolon
+      path: flutter
+      ref: 46eec29e023c2b50168b5dd5606131fb99491813
   qr_flutter: 4.1.0
   shared_preferences: ^2.5.6
 

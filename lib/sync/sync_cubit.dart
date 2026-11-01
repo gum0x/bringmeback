@@ -2,7 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'pairing.dart';
-import 'symbolon.dart';
+import 'package:symbolon_flutter/symbolon_flutter.dart';
 
 /// Whether this device is in a sync group, and the keys for it. Live sync itself comes in a later step,
 /// so for now this only stores the pairing.
