@@ -10,7 +10,7 @@ crate-type = ["cdylib", "staticlib"]
 flutter_rust_bridge = "=2.13.0"
 anyhow = "1"
 # Pinned to a reviewed commit; bump deliberately.
-symbolon = { git = "https://github.com/common-sec/symbolon", rev = "5efd580dcef1ad8603e3eacd6dc94b5c5051db70" }
+symbolon = { git = "https://github.com/common-sec/symbolon", rev = "6ad8923f1fcb3324f4f829177feacbc685cd6329" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
