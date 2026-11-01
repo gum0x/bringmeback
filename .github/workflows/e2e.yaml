@@ -80,6 +80,7 @@ jobs:
 
     # The web app calls Symbolon's JavaScript binding, built from the package pubspec.yaml pins.
     - name: Build Symbolon for the web
+      shell: bash
       run: ./tool/build_symbolon.sh web
 
     # The runner image ships Chrome with a matching ChromeDriver.

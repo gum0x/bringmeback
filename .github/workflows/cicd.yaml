@@ -59,6 +59,7 @@ jobs:
 
     # The unit tests call Symbolon's native library, built from the package pubspec.yaml pins.
     - name: Build Symbolon for tests
+      shell: bash
       run: ./tool/build_symbolon.sh native
 
     - name: Run tests

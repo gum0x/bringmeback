@@ -43,6 +43,7 @@ jobs:
 
     # The unit tests call Symbolon's native library, built from the package pubspec.yaml pins.
     - name: Build Symbolon for tests
+      shell: bash
       run: ./tool/build_symbolon.sh native
 
     - name: Run tests
@@ -50,6 +51,7 @@ jobs:
 
     # The web app calls Symbolon's JavaScript binding, built from the package pubspec.yaml pins.
     - name: Build Symbolon for the web
+      shell: bash
       run: ./tool/build_symbolon.sh web
 
     # The site lives under /<repo>/. CanvasKit is bundled instead of loaded from Google's CDN.
