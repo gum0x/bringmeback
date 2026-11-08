@@ -12,7 +12,7 @@ import 'symbolon_native.dart';
 void main() {
   setUpAll(loadSymbolonForTests);
 
-  final prologue = utf8.encode('bmb/v1 topic');
+  final prologue = utf8.encode('bringmeback/v1 topic');
 
   /// Two linked devices; `signal` carries offers and answers between them directly.
   Future<(PeerLink, PeerLink)> pair(
@@ -87,7 +87,7 @@ void main() {
   test('another group, another prologue or another device never connects', () async {
     final cases = <Future<(PeerLink, PeerLink)> Function(FakeNetwork)>[
       (n) async => pair(n, responderKeys: PairingCode.generate().deriveKeys()),
-      (n) => pair(n, responderPrologue: utf8.encode('bmb/v1 other')),
+      (n) => pair(n, responderPrologue: utf8.encode('bringmeback/v1 other')),
       (n) => pair(n, claimed: DeviceIdentity.generate()),
     ];
     for (final make in cases) {

@@ -60,7 +60,7 @@ class SyncCubit extends Cubit<SyncState> {
   static const _liveKey = 'liveSync';
 
   /// Bound into every Noise handshake together with the group's topic.
-  static const _prologue = 'bmb/v1';
+  static const _prologue = 'bringmeback/v1';
   static const _firstRetry = Duration(seconds: 5);
   static const _maxRetry = Duration(minutes: 5);
 
