@@ -3,7 +3,11 @@
 //
 //   flutter test integration_test -d linux
 //   flutter drive --driver=test_driver/integration_test.dart --target=integration_test/app_test.dart -d web-server
+import 'dart:convert';
+
 import 'package:bringmeback/main.dart';
+import 'package:bringmeback/sync/pairing.dart';
+import 'package:symbolon_flutter/symbolon_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -358,5 +362,27 @@ void main() {
     expect(taskButton(0, Icons.pause), findsOneWidget);
     expect(playPause(1), findsNothing);
     expect(seconds(total(tester, 0)), greaterThanOrEqualTo(1));
+  });
+
+  // On the web this runs Symbolon's JavaScript binding, and elsewhere its native library.
+  testWidgets('devices can start a group and run the handshake', (tester) async {
+    await startApp(tester);
+    await tester.tap(find.byTooltip('Devices'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start a new group'));
+    await tester.pumpAndSettle();
+    expect(find.text('Group fingerprint'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\n')), findsOneWidget);
+
+    await loadSymbolon();
+    final keys = PairingCode.generate().deriveKeys();
+    final a = DeviceIdentity.generate(), b = DeviceIdentity.generate();
+    final prologue = utf8.encode('e2e');
+    final initiator = symbolon.initiator(a.key, b.publicKey, keys.inner, prologue);
+    final responder = symbolon.responder(b.key, keys.inner, prologue);
+    responder.readMessage(initiator.writeMessage([]));
+    initiator.readMessage(responder.writeMessage([]));
+    final sent = initiator.intoChannel().encrypt(utf8.encode('hello'));
+    expect(utf8.decode(responder.intoChannel().decrypt(sent)), 'hello');
   });
 }

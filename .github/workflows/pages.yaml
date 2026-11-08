@@ -9,6 +9,7 @@ on:
       - 'lib/**'
       - 'assets/**'
       - 'web/**'
+      - 'tool/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/pages.yaml'
@@ -40,8 +41,18 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
 
+    # The unit tests call Symbolon's native library, built from the package pubspec.yaml pins.
+    - name: Build Symbolon for tests
+      shell: bash
+      run: ./tool/build_symbolon.sh native
+
     - name: Run tests
       run: flutter test
+
+    # The web app calls Symbolon's JavaScript binding, downloaded from the release pubspec.yaml pins.
+    - name: Build Symbolon for the web
+      shell: bash
+      run: ./tool/build_symbolon.sh web
 
     # The site lives under /<repo>/. CanvasKit is bundled instead of loaded from Google's CDN.
     - name: Build web app

@@ -9,6 +9,7 @@ on:
       - 'assets/**'
       - 'windows/**'
       - 'macos/**'
+      - 'tool/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - 'analysis_options.yaml'
@@ -55,6 +56,11 @@ jobs:
 
     - name: Install dependencies
       run: flutter pub get
+
+    # The unit tests call Symbolon's native library, built from the package pubspec.yaml pins.
+    - name: Build Symbolon for tests
+      shell: bash
+      run: ./tool/build_symbolon.sh native
 
     - name: Run tests
       run: flutter test

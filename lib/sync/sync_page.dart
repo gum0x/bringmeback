@@ -16,7 +16,12 @@ class SyncPage extends StatelessWidget {
       body: BlocBuilder<SyncCubit, SyncState>(
         builder: (context, state) => ListView(
           padding: const EdgeInsets.all(16),
-          children: state.device == null
+          children: !state.supported
+              ? const [
+                  Text('Sync could not start on this device, '
+                      'because its encryption library did not load.')
+                ]
+              : state.device == null
               ? const [Center(child: CircularProgressIndicator())]
               : state.paired
                   ? _paired(context, state)

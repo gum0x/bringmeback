@@ -12,6 +12,7 @@ on:
       - 'assets/**'
       - 'linux/**'
       - 'web/**'
+      - 'tool/**'
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/e2e.yaml'
@@ -76,6 +77,11 @@ jobs:
 
     - name: Install dependencies
       run: flutter pub get
+
+    # The web app calls Symbolon's JavaScript binding, downloaded from the release pubspec.yaml pins.
+    - name: Build Symbolon for the web
+      shell: bash
+      run: ./tool/build_symbolon.sh web
 
     # The runner image ships Chrome with a matching ChromeDriver.
     - name: Start ChromeDriver
