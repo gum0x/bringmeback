@@ -19,7 +19,7 @@ dependencies:
     git:
       url: https://github.com/common-sec/symbolon
       path: flutter
-      ref: 42f2520e05630299aa4595b5c8747ee70171ecb0
+      ref: v0.2.0
   qr_flutter: 4.1.0
   shared_preferences: ^2.5.6
   web_socket_channel: ^3.0.3

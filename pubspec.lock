@@ -536,8 +536,8 @@ packages:
     dependency: "direct main"
     description:
       path: flutter
-      ref: "42f2520e05630299aa4595b5c8747ee70171ecb0"
-      resolved-ref: "42f2520e05630299aa4595b5c8747ee70171ecb0"
+      ref: "v0.2.0"
+      resolved-ref: b6d9337e22706a00fcce8a2c8635ab4e5ea2086f
       url: "https://github.com/common-sec/symbolon"
     source: git
     version: "0.1.0"
