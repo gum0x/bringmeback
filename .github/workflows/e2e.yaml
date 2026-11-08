@@ -78,7 +78,7 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
 
-    # The web app calls Symbolon's JavaScript binding, built from the package pubspec.yaml pins.
+    # The web app calls Symbolon's JavaScript binding, downloaded from the release pubspec.yaml pins.
     - name: Build Symbolon for the web
       shell: bash
       run: ./tool/build_symbolon.sh web
