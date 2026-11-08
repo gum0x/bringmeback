@@ -7,15 +7,24 @@ class SyncConfig {
 
   final List<Uri> relays;
 
-  const SyncConfig({required this.relays});
+  /// STUN or TURN servers for direct connections. None by default: devices then connect only on the
+  /// same network, and no server outside the group learns their addresses.
+  final List<Uri> iceServers;
 
-  /// The default relays, or the comma-separated list in `--dart-define=SYNC_RELAYS=wss://a,wss://b`
-  /// when a build sets one.
+  const SyncConfig({required this.relays, this.iceServers = const []});
+
+  /// The defaults, or the comma-separated lists a build sets with
+  /// `--dart-define=SYNC_RELAYS=wss://a,wss://b` and `--dart-define=SYNC_ICE_SERVERS=stun:host:3478`.
   factory SyncConfig.fromEnvironment() {
-    const override = String.fromEnvironment('SYNC_RELAYS');
-    final relays = override.isEmpty
-        ? defaultRelays
-        : override.split(',').map((r) => r.trim()).where((r) => r.isNotEmpty);
-    return SyncConfig(relays: [for (final r in relays) Uri.parse(r)]);
+    const relays = String.fromEnvironment('SYNC_RELAYS');
+    const iceServers = String.fromEnvironment('SYNC_ICE_SERVERS');
+    return SyncConfig(
+        relays: relays.isEmpty ? [for (final r in defaultRelays) Uri.parse(r)] : _uris(relays),
+        iceServers: _uris(iceServers));
   }
+
+  static List<Uri> _uris(String list) => [
+        for (final u in list.split(',').map((u) => u.trim()))
+          if (u.isNotEmpty) Uri.parse(u)
+      ];
 }

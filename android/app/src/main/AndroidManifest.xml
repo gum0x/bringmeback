@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Relays and direct connections between the group's devices. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="bringmeback"
         android:name="${applicationName}"
