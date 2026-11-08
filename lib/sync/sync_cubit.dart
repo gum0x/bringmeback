@@ -7,10 +7,7 @@ import 'package:symbolon_flutter/symbolon_flutter.dart';
 
 import 'pairing.dart';
 import 'signalling.dart';
-
-/// Public relays that only carry sealed, ephemeral signalling (see [Signalling]). Any of them is
-/// enough; more of them only make it likelier that two devices share one that is up.
-const defaultRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+import 'sync_config.dart';
 
 /// Whether this device is in a sync group, the keys for it, and which of the group's devices are
 /// online. The data exchange between them comes in a later step.
@@ -56,14 +53,16 @@ class SyncCubit extends Cubit<SyncState> {
   static const _liveKey = 'liveSync';
 
   final RelayConnector _connect;
+  final SyncConfig _config;
   Signalling? _signalling;
   StreamSubscription<SymbolonSignal>? _signals;
 
   /// Sessions heard from in this run, so each gets one announce back and no more.
   final _answered = <String>{};
 
-  SyncCubit({RelayConnector connect = webSocketRelay})
+  SyncCubit({RelayConnector connect = webSocketRelay, SyncConfig? config})
       : _connect = connect,
+        _config = config ?? SyncConfig.fromEnvironment(),
         super(const SyncState());
 
   Future<void> load() async {
@@ -115,7 +114,7 @@ class SyncCubit extends Cubit<SyncState> {
     final signalling = Signalling(
         group: state.keys!.inner,
         device: state.device!.publicKey,
-        relays: [for (final r in defaultRelays) Uri.parse(r)],
+        relays: _config.relays,
         connect: _connect);
     _signalling = signalling;
     _signals = signalling.signals.listen(_heard);
