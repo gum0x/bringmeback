@@ -15,9 +15,8 @@ import 'package:symbolon_flutter/symbolon_flutter.dart';
 const _codePrefix = 'bmb1-';
 const _secretLength = 32;
 const _checkLength = 2;
-const _salt = 'bmb/v1';
-
-/// Separates bringmeback's keys from other apps using Symbolon with the same secret.
+/// Separates bringmeback's keys from other apps using Symbolon with the same secret, and salts the
+/// pairing code's typo check.
 const _context = 'bringmeback/v1';
 
 final Random _random = Random.secure();
@@ -32,7 +31,7 @@ Uint8List _unb64(String text) => base64Url.decode(base64Url.normalize(text));
 /// Only for the typo check in the pairing code, which needs no secrecy. Group keys come from Symbolon.
 Future<Uint8List> _derive(List<int> secret, String info, [int length = 32]) async {
   final key = await Hkdf(hmac: Hmac.sha256(), outputLength: length).deriveKey(
-      secretKey: SecretKey(secret), nonce: utf8.encode(_salt), info: utf8.encode(info));
+      secretKey: SecretKey(secret), nonce: utf8.encode(_context), info: utf8.encode(info));
   return Uint8List.fromList(await key.extractBytes());
 }
 

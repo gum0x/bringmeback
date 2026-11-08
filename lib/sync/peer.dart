@@ -257,7 +257,7 @@ class WebRtcTransport implements PeerTransport {
       ],
     });
     final dc = await pc.createDataChannel(
-        'bmb',
+        'bringmeback',
         RTCDataChannelInit()
           ..negotiated = true
           ..id = 0
