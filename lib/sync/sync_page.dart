@@ -87,9 +87,12 @@ class SyncPage extends StatelessWidget {
                 : state.online.length == 1
                     ? '1 other device online'
                     : '${state.online.length} other devices online'),
-            subtitle: state.online.isEmpty
-                ? const Text('Open bringmeback on another device in this group.')
-                : null,
+            subtitle: Text(state.online.isEmpty
+                ? 'Open bringmeback on another device in this group.'
+                : state.connected.length == state.online.length
+                    ? 'Connected directly, end to end encrypted.'
+                    : '${state.connected.length} of ${state.online.length} connected directly. '
+                        'Devices connect only when they are on the same network.'),
           ),
         const SizedBox(height: 16),
         OutlinedButton(

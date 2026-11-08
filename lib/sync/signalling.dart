@@ -50,6 +50,9 @@ class Signalling {
     }
   }
 
+  /// The group's relay topic, which the Noise prologue also binds.
+  Uint8List get topic => _box.topic;
+
   /// Signals from the group's other devices, to this session or to everyone.
   Stream<SymbolonSignal> get signals => _incoming.stream;
 
@@ -229,5 +232,5 @@ class _Relay {
 
 final _random = Random.secure();
 
-String _randomId() => List.generate(8, (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'))
-    .join();
+String _randomId() =>
+    List.generate(8, (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
