@@ -13,15 +13,16 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_bloc: ^9.1.1
-  # Symbolon's Dart package, pinned to a reviewed commit. tool/build_symbolon_web.sh builds the web
-  # binding from the same commit.
+  # Symbolon's Dart package, pinned to a release. tool/build_symbolon.sh web downloads the same
+  # release's web binding.
   symbolon_flutter:
     git:
       url: https://github.com/common-sec/symbolon
       path: flutter
-      ref: v0.1.1
+      ref: 42f2520e05630299aa4595b5c8747ee70171ecb0
   qr_flutter: 4.1.0
   shared_preferences: ^2.5.6
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

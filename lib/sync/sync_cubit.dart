@@ -1,11 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'pairing.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 
-/// Whether this device is in a sync group, and the keys for it. Live sync itself comes in a later step,
-/// so for now this only stores the pairing.
+import 'pairing.dart';
+import 'signalling.dart';
+
+/// Public relays that only carry sealed, ephemeral signalling (see [Signalling]). Any of them is
+/// enough; more of them only make it likelier that two devices share one that is up.
+const defaultRelays = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+
+/// Whether this device is in a sync group, the keys for it, and which of the group's devices are
+/// online. The data exchange between them comes in a later step.
 class SyncState {
   final DeviceIdentity? device;
   final PairingCode? pairing;
@@ -15,16 +23,48 @@ class SyncState {
   /// False when Symbolon could not be loaded, so this device can't sync.
   final bool supported;
 
-  const SyncState({this.device, this.pairing, this.code, this.keys, this.supported = true});
+  /// Whether this device looks for the group's other devices on the relays. Off by default.
+  final bool live;
+
+  /// The device ids ([DeviceIdentity.id]) of the group's other devices that are online now.
+  final Set<String> online;
+
+  const SyncState(
+      {this.device,
+      this.pairing,
+      this.code,
+      this.keys,
+      this.supported = true,
+      this.live = false,
+      this.online = const {}});
 
   bool get paired => pairing != null;
+
+  SyncState copyWith({bool? live, Set<String>? online}) => SyncState(
+      device: device,
+      pairing: pairing,
+      code: code,
+      keys: keys,
+      supported: supported,
+      live: live ?? this.live,
+      online: online ?? this.online);
 }
 
 class SyncCubit extends Cubit<SyncState> {
   static const _deviceKey = 'deviceKey';
   static const _pairingKey = 'pairingCode';
+  static const _liveKey = 'liveSync';
 
-  SyncCubit() : super(const SyncState());
+  final RelayConnector _connect;
+  Signalling? _signalling;
+  StreamSubscription<SymbolonSignal>? _signals;
+
+  /// Sessions heard from in this run, so each gets one announce back and no more.
+  final _answered = <String>{};
+
+  SyncCubit({RelayConnector connect = webSocketRelay})
+      : _connect = connect,
+        super(const SyncState());
 
   Future<void> load() async {
     try {
@@ -52,7 +92,58 @@ class SyncCubit extends Cubit<SyncState> {
         await prefs.remove(_pairingKey);
       }
     }
-    emit(await _stateFor(device, pairing));
+    final live = prefs.getBool(_liveKey) ?? false;
+    emit((await _stateFor(device, pairing)).copyWith(live: live));
+    await _restartSignalling();
+  }
+
+  /// Turns looking for the group's other devices on or off.
+  Future<void> setLive(bool live) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_liveKey, live);
+    emit(state.copyWith(live: live, online: const {}));
+    await _restartSignalling();
+  }
+
+  Future<void> _restartSignalling() async {
+    await _signals?.cancel();
+    await _signalling?.stop();
+    _signals = null;
+    _signalling = null;
+    _answered.clear();
+    if (!state.paired || !state.live) return;
+    final signalling = Signalling(
+        group: state.keys!.inner,
+        device: state.device!.publicKey,
+        relays: [for (final r in defaultRelays) Uri.parse(r)],
+        connect: _connect);
+    _signalling = signalling;
+    _signals = signalling.signals.listen(_heard);
+    signalling.start();
+  }
+
+  void _heard(SymbolonSignal signal) {
+    final device = base64Url.encode(signal.device).replaceAll('=', '');
+    switch (signal.kind) {
+      case SignalKind.announce:
+        emit(state.copyWith(online: {...state.online, device}));
+        // Announce back once, so a device that came online after this one learns about it too.
+        if (_answered.add(base64.encode(signal.from))) {
+          _signalling?.send(SignalKind.announce);
+        }
+      case SignalKind.bye:
+        emit(state.copyWith(online: {...state.online}..remove(device)));
+      case SignalKind.offer || SignalKind.answer || SignalKind.candidate:
+        // The direct connection is set up in a later step.
+        break;
+    }
+  }
+
+  @override
+  Future<void> close() async {
+    await _signals?.cancel();
+    await _signalling?.stop();
+    return super.close();
   }
 
   /// Starts a new group with this device in it.
@@ -64,14 +155,16 @@ class SyncCubit extends Cubit<SyncState> {
   Future<void> leaveGroup() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pairingKey);
-    emit(SyncState(device: state.device));
+    emit(SyncState(device: state.device, live: state.live));
+    await _restartSignalling();
   }
 
   Future<void> _join(PairingCode pairing) async {
     final next = await _stateFor(state.device!, pairing);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_pairingKey, next.code!);
-    emit(next);
+    emit(next.copyWith(live: state.live));
+    await _restartSignalling();
   }
 
   static Future<SyncState> _stateFor(DeviceIdentity device, PairingCode? pairing) async =>

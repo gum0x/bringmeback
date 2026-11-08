@@ -71,10 +71,26 @@ class SyncPage extends StatelessWidget {
           subtitle: Text('${state.keys!.fingerprint}\nIt should be the same on every device in the group.'),
           isThreeLine: true,
         ),
-        const ListTile(
-          title: Text('Sync'),
-          subtitle: Text('Devices are paired. Live sync between them is coming in the next version.'),
+        SwitchListTile(
+          title: const Text('Find my devices online'),
+          subtitle: const Text('Uses public Nostr relays to find the group\'s other devices when they '
+              'are online. The relays only see encrypted messages, never your tasks. '
+              'Syncing tasks between them is coming in the next version.'),
+          isThreeLine: true,
+          value: state.live,
+          onChanged: (on) => context.read<SyncCubit>().setLive(on),
         ),
+        if (state.live)
+          ListTile(
+            title: Text(state.online.isEmpty
+                ? 'No other device online'
+                : state.online.length == 1
+                    ? '1 other device online'
+                    : '${state.online.length} other devices online'),
+            subtitle: state.online.isEmpty
+                ? const Text('Open bringmeback on another device in this group.')
+                : null,
+          ),
         const SizedBox(height: 16),
         OutlinedButton(
             onPressed: () => _confirmLeave(context),
