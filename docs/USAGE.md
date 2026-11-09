@@ -37,6 +37,23 @@ An interruption is a new task. Press **New task** (Alt+N): it goes on top, gets 
 and the task you were on pauses one place below. When the interruption is done, mark it done and the
 task it interrupted takes over again.
 
+## Focus with Pomodoro
+
+Pick **Focus with Pomodoro** in a task's ⋮ menu to work on it in Pomodoro sessions. The task moves to
+the top, so it is the current one, and a focus view opens with a large clock, the task's name and,
+below or beside it, the rest of the list in a quiet **Up next**.
+
+- **Start** (or Space) runs a focus session, 25 minutes by default. When it ends a sound plays and a
+  short break starts on its own; after every fourth session the break is a long one.
+- The task's own timer runs during focus sessions and pauses during breaks or when you pause the clock,
+  so the breaks are logged like any other pause.
+- **Skip** (⏭) ends the session or break now; **Restart** (↺) puts it back to its full length.
+- **Mark task done** finishes the task and goes back to the list, with Undo.
+- The settings icon at the top right sets the focus, short break and long break lengths and how many
+  sessions come before a long break. They are kept on this device.
+- The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
+  carries on as it was.
+
 ## Pause and breaks
 
 Press **Pause** on the top task when you step away. The time until you press **Resume** is logged as a
