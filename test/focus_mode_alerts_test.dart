@@ -27,6 +27,8 @@ void main() {
   Future<List<String>> timeUpWith({required bool inFocus}) async {
     final tasks = TasksBloc();
     await tasks.document;
+    // Muted, so no sound is played: tests have no audio files to play it from.
+    tasks.add(ToggleMuteEvent());
     final timeUp = <String>[];
     final sub = tasks.timeUp.listen(timeUp.add);
     const id = ValueKey('task');
