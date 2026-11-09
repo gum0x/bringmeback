@@ -13,6 +13,19 @@ class FakeNetwork {
   /// Applied to every message on its way, for tests that play an attacker on the path.
   Uint8List Function(Uint8List message)? onTheWay;
 
+  /// While true, messages wait until [release].
+  bool hold = false;
+  final _held = <void Function()>[];
+
+  /// Delivers the messages held so far, in order, and stops holding.
+  void release() {
+    hold = false;
+    for (final deliver in _held) {
+      scheduleMicrotask(deliver);
+    }
+    _held.clear();
+  }
+
   Future<PeerTransport> create() async {
     final t = FakeTransport(this);
     transports.add(t);
@@ -67,9 +80,15 @@ class FakeTransport implements PeerTransport {
     final peer = _peer;
     if (closed || peer == null) throw StateError('Closed');
     final delivered = network.onTheWay?.call(message) ?? message;
-    scheduleMicrotask(() {
+    void deliver() {
       if (!peer._messages.isClosed) peer._messages.add(Uint8List.fromList(delivered));
-    });
+    }
+
+    if (network.hold) {
+      network._held.add(deliver);
+    } else {
+      scheduleMicrotask(deliver);
+    }
   }
 
   @override
