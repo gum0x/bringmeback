@@ -19,7 +19,7 @@ dependencies:
     git:
       url: https://github.com/common-sec/symbolon
       path: flutter
-      ref: v0.2.0
+      ref: v0.3.0
   qr_flutter: 4.1.0
   shared_preferences: ^2.5.6
   # Pinned: libwebrtc parses packets from anyone before the Noise handshake, so updates are

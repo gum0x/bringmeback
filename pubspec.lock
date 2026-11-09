@@ -560,11 +560,11 @@ packages:
     dependency: "direct main"
     description:
       path: flutter
-      ref: "v0.2.0"
-      resolved-ref: b6d9337e22706a00fcce8a2c8635ab4e5ea2086f
+      ref: "v0.3.0"
+      resolved-ref: "8e8884fe55b2bf8345e47892b838e6c03e885c3f"
       url: "https://github.com/common-sec/symbolon"
     source: git
-    version: "0.1.0"
+    version: "0.3.0"
   sync_http:
     dependency: transitive
     description:
