@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../alerts/alert_schedule.dart';
 import 'task_document.dart';
 
 final Random _random = Random.secure();
@@ -213,6 +214,21 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
+
+  bool _inBackground = false;
+
+  /// Whether the app is in the background with notifications standing in for its own alerts.
+  bool get inBackground => _inBackground;
+
+  set inBackground(bool value) {
+    _inBackground = value;
+    if (value) return;
+    // The timer may not have ticked in the background; alerts it passed there were notified.
+    final now = nowSeconds();
+    for (final task in _view().tasks) {
+      _lastRemaining[task.id.value] = task.remainingSecondsAt(now);
+    }
+  }
   final StreamController<String> _timeUp = StreamController<String>.broadcast();
 
   /// The name of each task whose countdown runs out, as it happens.
@@ -399,14 +415,16 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       final remaining = task.remainingSecondsAt(now);
       final previous = _lastRemaining[task.id.value];
       _lastRemaining[task.id.value] = remaining;
-      if (previous == null || previous == remaining) continue;
+      // In the background, scheduled notifications raise the alerts instead.
+      if (previous == null || _inBackground) continue;
 
-      if (previous > 0 && remaining <= 0) {
-        _timeUp.add(task.name);
-        _playAlertSound();
-      } else if ((previous / 1800).floor() != (remaining / 1800).floor()) {
-        // Every 30 minutes of a running task.
-        _playAlertSound(alertType: 'REMINDER');
+      switch (alertBetween(previous, remaining)) {
+        case AlertKind.timeUp:
+          _timeUp.add(task.name);
+          _playAlertSound();
+        case AlertKind.reminder:
+          _playAlertSound(alertType: 'REMINDER');
+        case null:
       }
     }
 
