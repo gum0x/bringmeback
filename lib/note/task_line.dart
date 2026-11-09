@@ -9,7 +9,8 @@ import 'task_dialog.dart';
 
 /// Asks for a new task in the dialog and writes it at [index]; on top as an interruption when
 /// [onTop].
-Future<void> writeTask(BuildContext context, {int index = 0, bool onTop = false}) async {
+Future<void> writeTask(BuildContext context,
+    {int index = 0, bool onTop = false}) async {
   final tasksBloc = context.read<TasksBloc>();
   if (tasksBloc.state.full) {
     showNoteFull(context);
@@ -20,7 +21,9 @@ Future<void> writeTask(BuildContext context, {int index = 0, bool onTop = false}
   final id = ValueKey<String>(newId());
   tasksBloc.add(onTop
       ? AddTaskOnTopEvent(
-          name: details.name, id: id, timerLengthSeconds: details.timerLengthSeconds)
+          name: details.name,
+          id: id,
+          timerLengthSeconds: details.timerLengthSeconds)
       : InsertTaskEvent(
           index: index,
           name: details.name,
@@ -35,17 +38,22 @@ Future<void> editTask(BuildContext context, int index) async {
   if (index < 0 || index >= tasks.length) return;
   final task = tasks[index];
   final details = await showTaskDialog(context,
-      name: task.name, timerLengthSeconds: task.timerLengthSeconds, editing: true);
+      name: task.name,
+      timerLengthSeconds: task.timerLengthSeconds,
+      editing: true);
   if (details == null) return;
   tasksBloc.add(EditTaskEvent(
-      id: task.id, name: details.name, timerLengthSeconds: details.timerLengthSeconds));
+      id: task.id,
+      name: details.name,
+      timerLengthSeconds: details.timerLengthSeconds));
 }
 
 void showNoteFull(BuildContext context) {
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
   messenger.showSnackBar(const SnackBar(
-    content: Text('This note is full. Finish or delete a task, or start a fresh note.'),
+    content: Text(
+        'This note is full. Finish or delete a task, or start a fresh note.'),
   ));
 }
 
@@ -62,7 +70,8 @@ void removeTask(BuildContext context, int index) {
     content: Text(task.name.isEmpty ? 'Task deleted' : 'Deleted: ${task.name}'),
     action: SnackBarAction(
       label: 'Undo',
-      onPressed: () => tasksBloc.add(RestoreTaskEvent(index: index, id: task.id)),
+      onPressed: () =>
+          tasksBloc.add(RestoreTaskEvent(index: index, id: task.id)),
     ),
   ));
 }
@@ -201,20 +210,25 @@ class _TaskLineState extends State<TaskLine> {
       itemBuilder: (context) => [
         const PopupMenuItem(
           value: _LineAction.edit,
-          child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit task')),
+          child: ListTile(
+              leading: Icon(Icons.edit_outlined), title: Text('Edit task')),
         ),
         const PopupMenuItem(
           value: _LineAction.restartCountdown,
-          child: ListTile(leading: Icon(Icons.restart_alt), title: Text('Restart countdown')),
+          child: ListTile(
+              leading: Icon(Icons.restart_alt),
+              title: Text('Restart countdown')),
         ),
         const PopupMenuItem(
           value: _LineAction.resetTotal,
-          child: ListTile(leading: Icon(Icons.history), title: Text('Reset total time')),
+          child: ListTile(
+              leading: Icon(Icons.history), title: Text('Reset total time')),
         ),
         PopupMenuItem(
           value: _LineAction.delete,
           child: ListTile(
-              leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+              leading:
+                  Icon(Icons.delete_outline, color: theme.colorScheme.error),
               title: const Text('Delete task')),
         ),
       ],
@@ -250,7 +264,8 @@ class _TaskLineState extends State<TaskLine> {
           child: Padding(
             padding: const EdgeInsets.all(6),
             child: Icon(Icons.drag_indicator,
-                size: 20, color: colors.faded.withValues(alpha: active ? 1 : 0.45)),
+                size: 20,
+                color: colors.faded.withValues(alpha: active ? 1 : 0.45)),
           ),
         ),
       ),
@@ -265,57 +280,66 @@ class _TaskLineState extends State<TaskLine> {
         border: Border(bottom: BorderSide(color: colors.rule)),
       ),
       padding: const EdgeInsets.symmetric(vertical: 6),
-      child: LayoutBuilder(builder: (context, constraints) => Row(
-        children: [
-          number,
-          const SizedBox(width: 4),
-          checkbox,
-          const SizedBox(width: 2),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [name, ...details],
-            ),
-          ),
-          if (playPause != null) ...[const SizedBox(width: 4), playPause],
-          tools(constraints.maxWidth < 480),
-          dragHandle,
-        ],
-      )),
+      child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+                children: [
+                  number,
+                  const SizedBox(width: 4),
+                  checkbox,
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [name, ...details],
+                    ),
+                  ),
+                  if (playPause != null) ...[
+                    const SizedBox(width: 4),
+                    playPause
+                  ],
+                  tools(constraints.maxWidth < 480),
+                  dragHandle,
+                ],
+              )),
     );
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _select,
-        child: Stack(
-          children: [
-            line,
-            if (showInsert) ...[
-              Positioned(
-                top: 1,
-                left: 14,
-                child: _InsertButton(
-                  tooltip: 'Add a task above',
-                  onPressed: () => writeTask(context, index: widget.index),
-                ),
-              ),
-              Positioned(
-                bottom: 1,
-                left: 14,
-                child: _InsertButton(
-                  tooltip: 'Add a task below',
-                  onPressed: () => writeTask(context, index: widget.index + 1),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    // Each task is its own semantics node, so its buttons move with it when tasks reorder. Without
+    // it the web engine's semantics tree goes out of step when a reorder also hides a button.
+    return Semantics(
+        container: true,
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _select,
+            child: Stack(
+              children: [
+                line,
+                if (showInsert) ...[
+                  Positioned(
+                    top: 1,
+                    left: 14,
+                    child: _InsertButton(
+                      tooltip: 'Add a task above',
+                      onPressed: () => writeTask(context, index: widget.index),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 1,
+                    left: 14,
+                    child: _InsertButton(
+                      tooltip: 'Add a task below',
+                      onPressed: () =>
+                          writeTask(context, index: widget.index + 1),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ));
   }
 }
 
@@ -340,8 +364,8 @@ class _InsertButton extends StatelessWidget {
           onTap: onPressed,
           child: Padding(
             padding: const EdgeInsets.all(1),
-            child: Icon(Icons.add, size: 16, color: scheme.onPrimary,
-                semanticLabel: tooltip),
+            child: Icon(Icons.add,
+                size: 16, color: scheme.onPrimary, semanticLabel: tooltip),
           ),
         ),
       ),
