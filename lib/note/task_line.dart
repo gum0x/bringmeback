@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
+import '../focus/focus_page.dart';
 import '../timer.dart';
 import 'paper.dart';
 import 'task_dialog.dart';
@@ -76,7 +77,7 @@ void removeTask(BuildContext context, int index) {
   ));
 }
 
-enum _LineAction { edit, restartCountdown, resetTotal, delete }
+enum _LineAction { focus, edit, restartCountdown, resetTotal, delete }
 
 /// One task written on the note: its number, a checkbox to strike it through, and its name. The
 /// current task, the first one not checked off, also shows its clocks and a play/pause button.
@@ -197,6 +198,8 @@ class _TaskLineState extends State<TaskLine> {
       icon: const Icon(Icons.more_vert, size: 20),
       onSelected: (action) {
         switch (action) {
+          case _LineAction.focus:
+            openFocus(context, widget.task.id.value);
           case _LineAction.edit:
             editTask(context, widget.index);
           case _LineAction.restartCountdown:
@@ -208,6 +211,13 @@ class _TaskLineState extends State<TaskLine> {
         }
       },
       itemBuilder: (context) => [
+        if (!task.done)
+          const PopupMenuItem(
+            value: _LineAction.focus,
+            child: ListTile(
+                leading: Icon(Icons.center_focus_strong),
+                title: Text('Focus with Pomodoro')),
+          ),
         const PopupMenuItem(
           value: _LineAction.edit,
           child: ListTile(

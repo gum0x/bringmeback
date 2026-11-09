@@ -284,6 +284,14 @@ class ResetTotalEvent extends TasksEvent {
 
 class ToggleMuteEvent extends TasksEvent {}
 
+/// Says which task, if any, is open in the Pomodoro focus view. That task's own countdown stays
+/// quiet there, with no "Time's up" or reminder, because the Pomodoro clock is the one that counts.
+class SetFocusModeEvent extends TasksEvent {
+  final String? taskId;
+
+  SetFocusModeEvent({this.taskId});
+}
+
 class UpdateTimerEvent extends TasksEvent {
   UpdateTimerEvent();
 }
@@ -321,6 +329,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
+  // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
+  // device.
+  String? _focusModeId;
   final StreamController<String> _timeUp = StreamController<String>.broadcast();
 
   /// The name of each task whose countdown runs out, as it happens.
@@ -350,6 +361,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<FocusTaskEvent>(_onFocusTask);
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
+    on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
     on<StopTimerEvent>(_onStopTimer);
@@ -577,8 +589,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     final id = _idAt(event.index);
     if (id == null) return;
     _lastRemaining.remove(id);
-    _edit(emit,
-        (doc) => doc.setTimer(id, doc.task(id).timerLengthSeconds, nowSeconds()));
+    _edit(
+        emit,
+        (doc) =>
+            doc.setTimer(id, doc.task(id).timerLengthSeconds, nowSeconds()));
   }
 
   void _onResetTotal(ResetTotalEvent event, Emitter<TasksState> emit) {
@@ -611,6 +625,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       final previous = _lastRemaining[task.id.value];
       _lastRemaining[task.id.value] = remaining;
       if (previous == null || previous == remaining) continue;
+      if (task.id.value == _focusModeId) continue;
 
       if (previous > 0 && remaining <= 0) {
         _timeUp.add(task.name);

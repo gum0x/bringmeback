@@ -27,7 +27,8 @@ class App extends StatelessWidget {
           BlocProvider(create: (_) => TasksBloc()..add(LoadStateEvent())),
           BlocProvider(
               create: (context) =>
-                  SyncCubit(document: context.read<TasksBloc>().document)..load()),
+                  SyncCubit(document: context.read<TasksBloc>().document)
+                    ..load()),
         ],
         child: MaterialApp(
           title: 'bringmeback',
