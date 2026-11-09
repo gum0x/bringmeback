@@ -22,6 +22,19 @@ break, so the time between tasks is kept too. Done and deleted tasks can be brou
 Browsers keep Ctrl+N and Ctrl+D for themselves, so use the Alt variants in the web app.
 
 
+## Run the web app in Docker
+
+Docker builds the web app and serves it, so you don't need Flutter installed. This works the same on
+Windows (Docker Desktop with Linux containers), macOS, and Linux:
+
+```sh
+docker build -t bringmeback-web .
+docker run --rm -p 8080:8080 bringmeback-web
+```
+
+Then open http://localhost:8080. The first build downloads the Flutter SDK and takes several minutes;
+later builds reuse it.
+
 ## Tests
 
 Unit tests: `flutter test`

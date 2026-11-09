@@ -1,0 +1,21 @@
+# Keep the build context small: only what `flutter build web` needs.
+.git
+.github
+.dart_tool
+.pub-cache
+.idea
+.vscode
+build
+android
+ios
+linux
+macos
+windows
+integration_test
+test
+test_driver
+docs
+web/symbolon
+Dockerfile*
+.dockerignore
+*.iml
