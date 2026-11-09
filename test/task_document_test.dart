@@ -20,20 +20,65 @@ void main() {
     expect(d.tasks().map((t) => t.name), ['first', 'second']);
     d.move(1, 0);
     expect(d.ids, ['b', 'a']);
-    d.removeAt(0);
+    d.removeAt(0, 'b');
     expect(d.ids, ['a']);
+    expect(d.status('b'), TaskStatus.deleted);
+    d.restore(1, 'b');
+    expect(d.ids, ['a', 'b']);
+    expect(d.status('b'), TaskStatus.open);
   });
 
-  test('a task marked done leaves the list and comes back on restore', () {
+  test('a task checked off stays on the note, struck through, until unchecked', () {
     final d = newDoc()
       ..insert(0, 'a')
       ..insert(1, 'b');
-    d.markDone(0, 'a');
-    expect(d.ids, ['b']);
-    expect(d.doneAt('a'), isNotNull);
-    d.restore(0, 'a');
+    d.setDone('a', true);
     expect(d.ids, ['a', 'b']);
-    expect(d.doneAt('a'), isNull);
+    expect(d.task('a').done, isTrue);
+    expect(d.status('a'), TaskStatus.done);
+    d.setDone('a', false);
+    expect(d.task('a').done, isFalse);
+    expect(d.status('a'), TaskStatus.open);
+  });
+
+  test('tearing off a note keeps it and leaves its unfinished tasks pending', () {
+    final d = newDoc()
+      ..setNoteStartedAt(100)
+      ..insert(0, 'a', name: 'write report')
+      ..insert(1, 'b', name: 'call bank', timerLengthSeconds: 600)
+      ..insert(2, 'c', name: 'buy milk');
+    d.setDone('a', true);
+    d.tearOff('n1', 200);
+
+    expect(d.ids, isEmpty);
+    expect(d.noteStartedAt, 200);
+    final note = d.notes.single;
+    expect((note.startedAt, note.closedAt), (100, 200));
+    expect(note.taskIds, ['a', 'b', 'c']);
+    expect(d.pendingIds, ['b', 'c']);
+
+    d.carry('b', 'b2', 0);
+    d.letGo('c');
+    expect(d.pendingIds, isEmpty);
+    expect(d.ids, ['b2']);
+    expect(d.task('b2').name, 'call bank');
+    expect(d.task('b2').timerLengthSeconds, 600);
+    expect(d.task('b2').carriedFrom, 'b');
+    expect(d.statuses(['a', 'b', 'c', 'b2']), {
+      'a': TaskStatus.done,
+      'b': TaskStatus.carried,
+      'c': TaskStatus.letGo,
+      'b2': TaskStatus.open,
+    });
+  });
+
+  test('every task written is listed, pauses left out', () {
+    final d = newDoc()
+      ..insert(0, 'a')
+      ..setNoteStartedAt(5);
+    d.startPause('p');
+    d.tearOff('n1', 10);
+    expect(d.allTaskIds, ['a']);
   });
 
   test('pauses are logged as hidden tasks with one time entry', () {
