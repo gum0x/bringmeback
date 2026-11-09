@@ -47,6 +47,8 @@ below or beside it, the rest of the list in a quiet **Up next**.
   short break starts on its own; after every fourth session the break is a long one.
 - The task's own timer runs during focus sessions and pauses during breaks or when you pause the clock,
   so the breaks are logged like any other pause.
+- While the focus view is open, the task's own countdown stays quiet: no "Time's up" and no
+  reminder sound. The Pomodoro clock is the one that counts. Back on the list it alerts as before.
 - **Skip** (⏭) ends the session or break now; **Restart** (↺) puts it back to its full length.
 - **Mark task done** finishes the task and goes back to the list, with Undo.
 - The settings icon at the top right sets the focus, short break and long break lengths and how many
