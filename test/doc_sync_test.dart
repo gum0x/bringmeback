@@ -90,12 +90,16 @@ void main() {
 
   test('fields of the wrong type, which only a bad device could write, read as defaults', () {
     final tasks = newDocument()..insert(0, 't', name: 'ok');
-    final bad = CRDTDocument(peerId: PeerId.generate(), documentId: 'tasks');
-    CRDTMapHandler<Object?>(bad, 'fields', handlerType: 'bmb.fields')
+    // The bad device has seen the task, so its writes come after it.
+    final bad = CRDTDocument(peerId: PeerId.generate(), documentId: 'tasks')
+      ..importChanges(tasks.doc.exportChanges());
+    final fields = CRDTMapHandler<Object?>(bad, 'fields', handlerType: 'bmb.fields');
+    fields
       ..set('t/name', 42)
       ..set('t/timerLength', 'long')
       ..set('t/e/notanumber', 5)
       ..set('t/e/100', 'end');
+    expect(fields.value['t/name'], 42);
     tasks.doc.importChanges(bad.exportChanges());
     final t = tasks.task('t');
     expect(t.name, '');
