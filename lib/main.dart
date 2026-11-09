@@ -36,6 +36,8 @@ class App extends StatelessWidget {
           theme: ThemeData(colorSchemeSeed: Colors.blue),
           darkTheme: ThemeData(
               colorSchemeSeed: Colors.blue, brightness: Brightness.dark),
+          // The app is laid out for portrait: on a wide window it stays a column in the middle.
+          builder: (context, child) => _PortraitFrame(child: child!),
           home: const TasksStack(),
         ));
   }
@@ -174,10 +176,21 @@ class _TasksStackState extends State<TasksStack> {
                   ? const SizedBox.shrink()
                   : FloatingActionButton.extended(
                       tooltip: 'New task on top (Ctrl+N)',
+                      elevation: 0,
                       onPressed: () => writeTask(context, onTop: true),
                       icon: const Icon(Icons.add),
                       label: const Text('New task'),
                     ),
+            ),
+            // New task sits at the end of the bottom bar, with the task actions.
+            floatingActionButtonLocation:
+                FloatingActionButtonLocation.endContained,
+            bottomNavigationBar: BlocBuilder<TasksBloc, TasksState>(
+              buildWhen: (a, b) =>
+                  a.needsTearOff() != b.needsTearOff() || a.loaded != b.loaded,
+              builder: (context, state) => !state.loaded || state.needsTearOff()
+                  ? const SizedBox.shrink()
+                  : const NoteToolbar(),
             ),
             body: const NoteView(),
           ),
@@ -239,4 +252,36 @@ class AddNewTaskNextIntent extends Intent {
 
 class ToggleDoneIntent extends Intent {
   const ToggleDoneIntent();
+}
+
+/// Keeps the app portrait-shaped on wide windows: a column of phone-like width in the middle, with
+/// a quiet margin on both sides.
+class _PortraitFrame extends StatelessWidget {
+  final Widget child;
+
+  const _PortraitFrame({required this.child});
+
+  static const maxWidth = 520.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: scheme.surfaceContainerHighest,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: maxWidth),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              boxShadow: [
+                BoxShadow(
+                    color: scheme.shadow.withValues(alpha: 0.12), blurRadius: 16),
+              ],
+            ),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
 }

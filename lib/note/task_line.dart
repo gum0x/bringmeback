@@ -23,16 +23,18 @@ Future<void> writeTask(BuildContext context,
   tasksBloc.add(onTop
       ? AddTaskOnTopEvent(
           name: details.name,
+          notes: details.notes,
           id: id,
           timerLengthSeconds: details.timerLengthSeconds)
       : InsertTaskEvent(
           index: index,
           name: details.name,
+          notes: details.notes,
           id: id,
           timerLengthSeconds: details.timerLengthSeconds));
 }
 
-/// Edits the name and countdown of the task at [index] in the dialog.
+/// Edits the name, details and countdown of the task at [index] in the dialog.
 Future<void> editTask(BuildContext context, int index) async {
   final tasksBloc = context.read<TasksBloc>();
   final tasks = tasksBloc.state.tasks;
@@ -40,12 +42,14 @@ Future<void> editTask(BuildContext context, int index) async {
   final task = tasks[index];
   final details = await showTaskDialog(context,
       name: task.name,
+      notes: task.notes,
       timerLengthSeconds: task.timerLengthSeconds,
       editing: true);
   if (details == null) return;
   tasksBloc.add(EditTaskEvent(
       id: task.id,
       name: details.name,
+      notes: details.notes,
       timerLengthSeconds: details.timerLengthSeconds));
 }
 
@@ -77,13 +81,105 @@ void removeTask(BuildContext context, int index) {
   ));
 }
 
-enum _LineAction { focus, edit, restartCountdown, resetTotal, delete }
+/// The task the bottom bar and the shortcuts act on: the selected one, or else the current one.
+/// -1 when the note is empty.
+int targetIndex(TasksState state) {
+  final selected = state.tasks.indexWhere((t) => t.inFocus);
+  if (selected >= 0) return selected;
+  final current = state.currentIndex;
+  return current >= 0 ? current : (state.tasks.isEmpty ? -1 : 0);
+}
 
-/// One task written on the note: its number, a checkbox to strike it through, and its name. The
-/// current task, the first one not checked off, also shows its clocks and a play/pause button.
+enum _BarAction { edit, resetTotal, delete }
+
+/// The bar at the bottom of today's note: play/pause for the current task; focus, restart and more
+/// actions for the selected task (or the current one when none is selected). New task sits at its
+/// end.
+class NoteToolbar extends StatelessWidget {
+  const NoteToolbar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    final theme = Theme.of(context);
+    return BlocBuilder<TasksBloc, TasksState>(builder: (context, state) {
+      final current = state.currentIndex;
+      final running = current >= 0 && state.tasks[current].running;
+      final target = targetIndex(state);
+      final task = target >= 0 ? state.tasks[target] : null;
+      final open = task != null && !task.done;
+      return BottomAppBar(
+        child: Row(
+          children: [
+            IconButton.filledTonal(
+              tooltip: running ? 'Pause (logs a break)' : 'Resume work',
+              onPressed: current < 0
+                  ? null
+                  : () => bloc.add(running
+                      ? StopTimerEvent(index: current)
+                      : ResumeTimerEvent(index: current)),
+              icon: Icon(running ? Icons.pause : Icons.play_arrow),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Focus with Pomodoro',
+              onPressed: open ? () => openFocus(context, task.id.value) : null,
+              icon: const Icon(Icons.center_focus_strong),
+            ),
+            IconButton(
+              tooltip: 'Restart countdown',
+              onPressed:
+                  open ? () => bloc.add(ResetTimerEvent(index: target)) : null,
+              icon: const Icon(Icons.restart_alt),
+            ),
+            PopupMenuButton<_BarAction>(
+              tooltip: 'More actions',
+              enabled: task != null,
+              onSelected: (action) {
+                switch (action) {
+                  case _BarAction.edit:
+                    editTask(context, target);
+                  case _BarAction.resetTotal:
+                    bloc.add(ResetTotalEvent(index: target));
+                  case _BarAction.delete:
+                    removeTask(context, target);
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: _BarAction.edit,
+                  child: ListTile(
+                      leading: Icon(Icons.edit_outlined),
+                      title: Text('Edit task')),
+                ),
+                const PopupMenuItem(
+                  value: _BarAction.resetTotal,
+                  child: ListTile(
+                      leading: Icon(Icons.history),
+                      title: Text('Reset total time')),
+                ),
+                PopupMenuItem(
+                  value: _BarAction.delete,
+                  child: ListTile(
+                      leading: Icon(Icons.delete_outline,
+                          color: theme.colorScheme.error),
+                      title: const Text('Delete task')),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    });
+  }
+}
+
+/// One task written on the note: its number, a checkbox to strike it through, its name and details.
+/// The current task, the first one not checked off, also shows its clocks.
 ///
-/// Pointing at a task, or tapping it to select it, shows small (+) buttons above and below it to
-/// write a new task right there, plus edit and more actions.
+/// Tap a task to select it; the bottom bar then acts on it. Double tap or double click edits it.
+/// Pointing at a task, or selecting it, shows small (+) buttons on its top and bottom edges to
+/// write a new task right there.
 class TaskLine extends StatefulWidget {
   final TaskState task;
   final int index;
@@ -118,13 +214,7 @@ class _TaskLineState extends State<TaskLine> {
     _bloc.add(SetDoneEvent(index: widget.index, done: done));
   }
 
-  void _select() {
-    if (widget.task.inFocus) {
-      editTask(context, widget.index);
-    } else {
-      _bloc.add(FocusTaskEvent(index: widget.index));
-    }
-  }
+  void _select() => _bloc.add(FocusTaskEvent(index: widget.index));
 
   @override
   Widget build(BuildContext context) {
@@ -156,17 +246,26 @@ class _TaskLineState extends State<TaskLine> {
       ),
     );
 
-    final name = StrikeText(
-      task.name.isEmpty ? 'Untitled task' : task.name,
-      struck: task.done,
-      style: theme.textTheme.titleMedium?.copyWith(
-        color: colors.ink,
-        fontWeight: widget.current ? FontWeight.w600 : FontWeight.w400,
-        fontStyle: task.name.isEmpty ? FontStyle.italic : null,
-      ),
-    );
-
     final details = <Widget>[
+      StrikeText(
+        task.name.isEmpty ? 'Untitled task' : task.name,
+        struck: task.done,
+        style: theme.textTheme.titleMedium?.copyWith(
+          color: colors.ink,
+          fontWeight: widget.current ? FontWeight.w600 : FontWeight.w400,
+          fontStyle: task.name.isEmpty ? FontStyle.italic : null,
+        ),
+      ),
+      if (task.notes.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            task.notes,
+            maxLines: task.inFocus ? 6 : 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
+          ),
+        ),
       if (widget.current)
         Padding(
           padding: const EdgeInsets.only(top: 2),
@@ -183,88 +282,6 @@ class _TaskLineState extends State<TaskLine> {
         ),
     ];
 
-    final playPause = widget.current
-        ? IconButton.filledTonal(
-            tooltip: task.running ? 'Pause (logs a break)' : 'Resume work',
-            onPressed: () => _bloc.add(task.running
-                ? StopTimerEvent(index: widget.index)
-                : ResumeTimerEvent(index: widget.index)),
-            icon: Icon(task.running ? Icons.pause : Icons.play_arrow),
-          )
-        : null;
-
-    final menu = PopupMenuButton<_LineAction>(
-      tooltip: 'More actions',
-      icon: const Icon(Icons.more_vert, size: 20),
-      onSelected: (action) {
-        switch (action) {
-          case _LineAction.focus:
-            openFocus(context, widget.task.id.value);
-          case _LineAction.edit:
-            editTask(context, widget.index);
-          case _LineAction.restartCountdown:
-            _bloc.add(ResetTimerEvent(index: widget.index));
-          case _LineAction.resetTotal:
-            _bloc.add(ResetTotalEvent(index: widget.index));
-          case _LineAction.delete:
-            removeTask(context, widget.index);
-        }
-      },
-      itemBuilder: (context) => [
-        if (!task.done)
-          const PopupMenuItem(
-            value: _LineAction.focus,
-            child: ListTile(
-                leading: Icon(Icons.center_focus_strong),
-                title: Text('Focus with Pomodoro')),
-          ),
-        const PopupMenuItem(
-          value: _LineAction.edit,
-          child: ListTile(
-              leading: Icon(Icons.edit_outlined), title: Text('Edit task')),
-        ),
-        const PopupMenuItem(
-          value: _LineAction.restartCountdown,
-          child: ListTile(
-              leading: Icon(Icons.restart_alt),
-              title: Text('Restart countdown')),
-        ),
-        const PopupMenuItem(
-          value: _LineAction.resetTotal,
-          child: ListTile(
-              leading: Icon(Icons.history), title: Text('Reset total time')),
-        ),
-        PopupMenuItem(
-          value: _LineAction.delete,
-          child: ListTile(
-              leading:
-                  Icon(Icons.delete_outline, color: theme.colorScheme.error),
-              title: const Text('Delete task')),
-        ),
-      ],
-    );
-
-    /// Edit and more actions, shown while the task is pointed at or selected. On a phone only the
-    /// menu shows, and only then, to leave the name room; tapping a selected task edits it too.
-    Widget tools(bool compact) {
-      if (compact) return active ? menu : const SizedBox.shrink();
-      return Visibility(
-        visible: active,
-        maintainSize: true,
-        maintainAnimation: true,
-        maintainState: true,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          IconButton(
-            tooltip: 'Edit task',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => editTask(context, widget.index),
-            icon: const Icon(Icons.edit_outlined, size: 20),
-          ),
-          menu,
-        ]),
-      );
-    }
-
     final dragHandle = ReorderableDragStartListener(
       index: widget.index,
       child: Tooltip(
@@ -272,88 +289,102 @@ class _TaskLineState extends State<TaskLine> {
         child: MouseRegion(
           cursor: SystemMouseCursors.grab,
           child: Padding(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(8),
             child: Icon(Icons.drag_indicator,
                 size: 20,
-                color: colors.faded.withValues(alpha: active ? 1 : 0.45)),
+                color: colors.faded.withValues(alpha: active ? 1 : 0.4)),
           ),
         ),
       ),
     );
 
     final line = Container(
-      constraints: const BoxConstraints(minHeight: 60),
+      constraints: const BoxConstraints(minHeight: 64),
       decoration: BoxDecoration(
-        color: widget.current
-            ? colors.highlight
-            : (task.inFocus ? colors.highlight.withValues(alpha: 0.08) : null),
+        // The current task is tinted; the selected one a shade deeper.
+        color: switch ((task.inFocus, widget.current)) {
+          (true, _) => colors.highlight.withValues(
+              alpha: colors.highlight.a * (widget.current ? 2 : 1.4)),
+          (false, true) => colors.highlight,
+          _ => null,
+        },
         border: Border(bottom: BorderSide(color: colors.rule)),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: LayoutBuilder(
-          builder: (context, constraints) => Row(
-                children: [
-                  number,
-                  const SizedBox(width: 4),
-                  checkbox,
-                  const SizedBox(width: 2),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [name, ...details],
-                    ),
-                  ),
-                  if (playPause != null) ...[
-                    const SizedBox(width: 4),
-                    playPause
-                  ],
-                  tools(constraints.maxWidth < 480),
-                  dragHandle,
-                ],
-              )),
-    );
-
-    // Each task is its own semantics node, so its buttons move with it when tasks reorder. Without
-    // it the web engine's semantics tree goes out of step when a reorder also hides a button.
-    return Semantics(
-        container: true,
-        child: MouseRegion(
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _select,
-            child: Stack(
-              children: [
-                line,
-                if (showInsert) ...[
-                  Positioned(
-                    top: 1,
-                    left: 14,
-                    child: _InsertButton(
-                      tooltip: 'Add a task above',
-                      onPressed: () => writeTask(context, index: widget.index),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 1,
-                    left: 14,
-                    child: _InsertButton(
-                      tooltip: 'Add a task below',
-                      onPressed: () =>
-                          writeTask(context, index: widget.index + 1),
-                    ),
-                  ),
-                ],
-              ],
+      // Room above and below for the (+) buttons on the edges.
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        children: [
+          number,
+          const SizedBox(width: 4),
+          checkbox,
+          const SizedBox(width: 2),
+          Expanded(
+            // Tapping the text selects the task, double tapping edits it. The checkbox and the drag
+            // handle stay outside, so a double tap never holds back a check off.
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              excludeFromSemantics: true,
+              onTap: _select,
+              onDoubleTap: () => editTask(context, widget.index),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: details,
+                ),
+              ),
             ),
           ),
-        ));
+          dragHandle,
+        ],
+      ),
+    );
+
+    // Each task is its own semantics node, so its parts move with it when tasks reorder. Without it
+    // the web engine's semantics tree goes out of step when a reorder also changes a task's parts.
+    return Semantics(
+      container: true,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Stack(
+          children: [
+            line,
+            if (showInsert) ...[
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _InsertButton(
+                    tooltip: 'Add a task above',
+                    onPressed: () => writeTask(context, index: widget.index),
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _InsertButton(
+                    tooltip: 'Add a task below',
+                    onPressed: () =>
+                        writeTask(context, index: widget.index + 1),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 
-/// A small round (+) at the edge of a task, to write a new task right there.
+/// A small (+) tab on the edge of a task, drawn like the note's own ink, to write a new task right
+/// there.
 class _InsertButton extends StatelessWidget {
   final String tooltip;
   final VoidCallback onPressed;
@@ -362,20 +393,20 @@ class _InsertButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = NoteColors.of(context);
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: scheme.primary,
-        shape: const CircleBorder(),
-        elevation: 1,
+        color: colors.paper,
+        shape: StadiumBorder(
+            side: BorderSide(color: colors.faded.withValues(alpha: 0.6))),
         child: InkWell(
-          customBorder: const CircleBorder(),
+          customBorder: const StadiumBorder(),
           onTap: onPressed,
           child: Padding(
-            padding: const EdgeInsets.all(1),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             child: Icon(Icons.add,
-                size: 16, color: scheme.onPrimary, semanticLabel: tooltip),
+                size: 14, color: colors.ink, semanticLabel: tooltip),
           ),
         ),
       ),
