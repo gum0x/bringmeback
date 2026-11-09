@@ -49,8 +49,9 @@ class SyncStatus {
               : '$online devices are online but not connected';
       return SyncStatus(SyncHealth.notConnected, '$what$since');
     }
-    if (!state.allInSync)
+    if (!state.allInSync) {
       return SyncStatus(SyncHealth.syncing, 'Syncing with ${devices(connected)}');
+    }
     return SyncStatus(SyncHealth.inSync, 'In sync with ${devices(connected)}');
   }
 
