@@ -3,6 +3,7 @@ import 'package:bringmeback/timer.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'focus/focus_page.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_page.dart';
 import 'dart:async';
@@ -21,7 +22,8 @@ class App extends StatelessWidget {
           BlocProvider(create: (_) => TasksBloc()..add(LoadStateEvent())),
           BlocProvider(
               create: (context) =>
-                  SyncCubit(document: context.read<TasksBloc>().document)..load()),
+                  SyncCubit(document: context.read<TasksBloc>().document)
+                    ..load()),
         ],
         child: MaterialApp(
           title: 'bringmeback',
@@ -289,7 +291,7 @@ class Task extends StatefulWidget {
   State<Task> createState() => _TaskState();
 }
 
-enum _TaskAction { addAfter, restartCountdown, resetTotal, delete }
+enum _TaskAction { focus, addAfter, restartCountdown, resetTotal, delete }
 
 class _TaskState extends State<Task> {
   late TextEditingController _controller;
@@ -482,6 +484,8 @@ class _TaskState extends State<Task> {
           tooltip: 'More actions',
           onSelected: (action) {
             switch (action) {
+              case _TaskAction.focus:
+                openFocus(context, widget.task.id.value);
               case _TaskAction.addAfter:
                 _addAfter(tasksBloc);
               case _TaskAction.restartCountdown:
@@ -493,6 +497,12 @@ class _TaskState extends State<Task> {
             }
           },
           itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: _TaskAction.focus,
+              child: ListTile(
+                  leading: Icon(Icons.center_focus_strong),
+                  title: Text('Focus with Pomodoro')),
+            ),
             if (compact)
               const PopupMenuItem(
                 value: _TaskAction.addAfter,
