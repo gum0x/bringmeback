@@ -20,22 +20,41 @@ final taskCards = find.byType(TaskLine);
 Finder inTask(int index, Finder finder) =>
     find.descendant(of: taskCards.at(index), matching: finder);
 
-Finder taskButton(int index, IconData icon) =>
-    inTask(index, find.widgetWithIcon(IconButton, icon));
-
 Finder checkbox(int index) => inTask(index, find.byType(Checkbox));
 
-/// The play/pause button, which only the current task has.
-Finder playPause(int index) => inTask(
-    index,
-    find.byWidgetPredicate((w) =>
-        w is IconButton &&
-        w.icon is Icon &&
-        {Icons.play_arrow, Icons.pause}.contains((w.icon as Icon).icon)));
+final pauseButton = find.widgetWithIcon(IconButton, Icons.pause);
+final resumeButton = find.widgetWithIcon(IconButton, Icons.play_arrow);
 
-/// Picks an entry from a task's "More actions" menu.
+/// Only the current task shows its clocks.
+Finder clocksOf(int index) => inTask(index, find.byType(TaskClock));
+
+/// Checks that the task at [index] is the current one and its timer runs.
+void expectRunning(int index) {
+  expect(clocksOf(index), findsOneWidget);
+  expect(pauseButton, findsOneWidget);
+}
+
+/// Selects a task by tapping its name, so the bottom bar acts on it.
+Future<void> select(WidgetTester tester, int index) async {
+  await tester.tap(inTask(index, find.byType(StrikeText)));
+  // A tap waits to see whether it is a double tap.
+  await wait(tester, const Duration(milliseconds: 400));
+  await tester.pumpAndSettle();
+}
+
+/// Opens a task in the dialog with a double tap.
+Future<void> doubleTapTask(WidgetTester tester, int index) async {
+  final name = inTask(index, find.byType(StrikeText));
+  await tester.tap(name);
+  await tester.pump(const Duration(milliseconds: 60));
+  await tester.tap(name);
+  await tester.pumpAndSettle();
+}
+
+/// Selects a task, then picks an entry from the bottom bar's "More actions" menu.
 Future<void> taskMenu(WidgetTester tester, int index, String entry) async {
-  await tester.tap(inTask(index, find.byTooltip('More actions')));
+  await select(tester, index);
+  await tester.tap(find.byTooltip('More actions'));
   await tester.pumpAndSettle();
   await tester.tap(find.text(entry));
   await tester.pumpAndSettle();
@@ -132,7 +151,7 @@ void main() {
     expect(nameOf(tester, 0), 'Write the report');
     expect(
         seconds(countdown(tester, 0)), inInclusiveRange(20 * 60 - 3, 20 * 60));
-    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expectRunning(0);
 
     await wait(tester, const Duration(milliseconds: 2500));
     expect(seconds(countdown(tester, 0)), lessThan(20 * 60 - 1));
@@ -143,8 +162,8 @@ void main() {
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), 'Answer the phone');
     expect(nameOf(tester, 1), 'Write the report');
-    expect(taskButton(0, Icons.pause), findsOneWidget);
-    expect(playPause(1), findsNothing);
+    expectRunning(0);
+    expect(clocksOf(1), findsNothing);
   });
 
   testWidgets('a task checked off stays on the note and hands the timer on',
@@ -159,14 +178,14 @@ void main() {
     expect(doneAt(tester, 0), isTrue);
     expect(nameOf(tester, 0), 'First');
     // The next unchecked task is now the current one, and it runs.
-    expect(playPause(0), findsNothing);
-    expect(taskButton(1, Icons.pause), findsOneWidget);
+    expect(clocksOf(0), findsNothing);
+    expectRunning(1);
     final doneTotal = total(tester, 1);
 
     await tester.tap(checkbox(1));
     await tester.pumpAndSettle();
     expect(find.text('ALL DONE'), findsOneWidget);
-    expect(playPause(1), findsNothing);
+    expect(clocksOf(1), findsNothing);
     await wait(tester, const Duration(milliseconds: 1500));
 
     // Unchecking takes the task back up as the current one.
@@ -174,7 +193,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('ALL DONE'), findsNothing);
     expect(doneAt(tester, 1), isFalse);
-    expect(playPause(1), findsOneWidget);
+    expect(clocksOf(1), findsOneWidget);
     expect(seconds(total(tester, 1)), greaterThanOrEqualTo(seconds(doneTotal)));
   });
 
@@ -196,8 +215,8 @@ void main() {
 
     expect(nameOf(tester, 0), 'Later');
     expect(nameOf(tester, 1), 'Now');
-    expect(taskButton(0, Icons.pause), findsOneWidget);
-    expect(playPause(1), findsNothing);
+    expectRunning(0);
+    expect(clocksOf(1), findsNothing);
   });
 
   testWidgets('pausing a task stops its clocks and resuming restarts them',
@@ -206,9 +225,9 @@ void main() {
     await writeTask(tester, 'Focus');
     await wait(tester, const Duration(milliseconds: 1500));
 
-    await tester.tap(taskButton(0, Icons.pause));
+    await tester.tap(pauseButton);
     await tester.pumpAndSettle();
-    expect(taskButton(0, Icons.play_arrow), findsOneWidget);
+    expect(resumeButton, findsOneWidget);
     final pausedCountdown = countdown(tester, 0);
     final pausedTotal = total(tester, 0);
 
@@ -216,9 +235,9 @@ void main() {
     expect(countdown(tester, 0), pausedCountdown);
     expect(total(tester, 0), pausedTotal);
 
-    await tester.tap(taskButton(0, Icons.play_arrow));
+    await tester.tap(resumeButton);
     await tester.pumpAndSettle();
-    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expectRunning(0);
     await wait(tester, const Duration(milliseconds: 2500));
     expect(seconds(total(tester, 0)), greaterThan(seconds(pausedTotal)));
   });
@@ -228,8 +247,7 @@ void main() {
     await writeTask(tester, 'Short one', minutes: '5');
     expect(seconds(countdown(tester, 0)), inInclusiveRange(5 * 60 - 3, 5 * 60));
 
-    await tester.tap(taskButton(0, Icons.edit_outlined));
-    await tester.pumpAndSettle();
+    await doubleTapTask(tester, 0);
     // A length that isn't a number of minutes can't be saved.
     await tester.enterText(find.widgetWithText(TextField, 'Minutes'), '0');
     await tester.pump();
@@ -237,8 +255,11 @@ void main() {
         tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed,
         isNull);
     await tester.tap(find.text('45 min'));
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Details'), 'First line\nSecond line');
     await fillTaskDialog(tester, 'Long one', save: 'Save');
     expect(nameOf(tester, 0), 'Long one');
+    expect(inTask(0, find.text('First line\nSecond line')), findsOneWidget);
     expect(seconds(countdown(tester, 0)), inInclusiveRange(45 * 60 - 3, 45 * 60));
   });
 
@@ -249,9 +270,10 @@ void main() {
     await wait(tester, const Duration(milliseconds: 2500));
     expect(seconds(total(tester, 0)), greaterThanOrEqualTo(2));
 
-    await tester.tap(taskButton(0, Icons.pause));
+    await tester.tap(pauseButton);
     await tester.pumpAndSettle();
-    await taskMenu(tester, 0, 'Restart countdown');
+    await tester.tap(find.byTooltip('Restart countdown'));
+    await tester.pumpAndSettle();
     expect(seconds(countdown(tester, 0)), 20 * 60);
     await taskMenu(tester, 0, 'Reset total time');
     expect(seconds(total(tester, 0)), 0);
@@ -264,26 +286,25 @@ void main() {
 
     // A task just written is selected, which shows its (+) buttons.
     await writeTask(tester, 'Last', opener: inTask(0, find.byTooltip('Add a task below')));
-    await tester.tap(find.text('Middle'));
-    await tester.pumpAndSettle();
+    await select(tester, 0);
     await writeTask(tester, 'First', opener: inTask(0, find.byTooltip('Add a task above')));
     expect([for (var i = 0; i < 3; i++) nameOf(tester, i)], ['First', 'Middle', 'Last']);
     // Written above the current task, First takes over the timer.
-    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expectRunning(0);
 
     await taskMenu(tester, 0, 'Delete task');
     expect(taskCards, findsNWidgets(2));
     expect(nameOf(tester, 0), 'Middle');
     // Work carries on with the task that moved up.
-    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expectRunning(0);
 
     // The deletion can be undone, and the task comes back where it was.
     await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
     expect(taskCards, findsNWidgets(3));
     expect(nameOf(tester, 0), 'First');
-    expect(taskButton(0, Icons.pause), findsOneWidget);
-    expect(playPause(1), findsNothing);
+    expectRunning(0);
+    expect(clocksOf(1), findsNothing);
   });
 
   testWidgets('keyboard shortcuts add, check off and remove tasks', (tester) async {
@@ -345,7 +366,7 @@ void main() {
     expect(nameOf(tester, 0), 'Running task');
     expect(nameOf(tester, 1), 'Done task');
     expect(doneAt(tester, 1), isTrue);
-    expect(taskButton(0, Icons.pause), findsOneWidget);
+    expectRunning(0);
     expect(seconds(total(tester, 0)), greaterThanOrEqualTo(1));
   });
 

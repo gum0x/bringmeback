@@ -17,8 +17,7 @@ class NoteView extends StatelessWidget {
       if (!state.loaded) return const SizedBox.shrink();
       if (state.needsTearOff()) return TearOffView(state: state);
       return SingleChildScrollView(
-        // Room for the floating button below the note.
-        padding: const EdgeInsets.fromLTRB(12, 20, 12, 96),
+        padding: const EdgeInsets.fromLTRB(12, 20, 12, 24),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 600),

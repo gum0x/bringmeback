@@ -70,6 +70,7 @@ class TaskDocument {
     ]..sort((a, b) => a.start.compareTo(b.start));
     return TaskState(
       name: field<String>('name', ''),
+      notes: field<String>('notes', ''),
       doneAt: fields['$id/doneAt'] is int ? fields['$id/doneAt'] as int : null,
       carriedFrom: field<String?>('carriedFrom', null),
       id: ValueKey<String>(id),
@@ -87,6 +88,7 @@ class TaskDocument {
   /// Adds a task at [index] with the given fields; [running] opens its first time entry now.
   void insert(int index, String id,
       {String name = '',
+      String notes = '',
       int timerLengthSeconds = 20 * 60,
       int? timerStartAt,
       int totalResetAt = 0,
@@ -99,6 +101,7 @@ class TaskDocument {
         ..set('$id/timerLength', timerLengthSeconds)
         ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
         ..set('$id/totalResetAt', totalResetAt);
+      if (notes.isNotEmpty) _fields.set('$id/notes', notes);
       for (final e in entries) {
         _fields.set('$id/e/${e.start}', e.end);
       }
@@ -170,7 +173,9 @@ class TaskDocument {
   void carry(String fromId, String newId, int index) => doc.runInTransaction(() {
         final from = task(fromId);
         insert(index, newId,
-            name: from.name, timerLengthSeconds: from.timerLengthSeconds);
+            name: from.name,
+            notes: from.notes,
+            timerLengthSeconds: from.timerLengthSeconds);
         _fields
           ..set('$newId/carriedFrom', fromId)
           ..set('$fromId/carriedTo', newId);
@@ -258,6 +263,8 @@ class TaskDocument {
   void move(int from, int to) => _order.move(from, to);
 
   void setName(String id, String name) => _fields.set('$id/name', name);
+
+  void setNotes(String id, String notes) => _fields.set('$id/notes', notes);
 
   void setTimer(String id, int lengthSeconds, int startAt) =>
       doc.runInTransaction(() {

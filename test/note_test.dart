@@ -2,6 +2,7 @@ import 'package:bringmeback/bloc/history.dart';
 import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
 import 'package:bringmeback/main.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -100,6 +101,8 @@ void main() {
     await writeThrough(tester, find.text('Write your first task'), 'Middle');
     await writeThrough(tester, find.byTooltip('Add a task above'), 'Above');
     await tester.tap(find.text('Middle'));
+    // A tap waits to see whether it is a double tap.
+    await tester.pump(kDoubleTapTimeout);
     await settle(tester);
     await writeThrough(tester, find.byTooltip('Add a task below'), 'Below');
     expect(names(bloc), ['Above', 'Middle', 'Below']);
@@ -107,8 +110,12 @@ void main() {
 
   noteTest('a task is edited in the dialog', (tester, bloc) async {
     await writeThrough(tester, find.text('Write your first task'), 'Draft');
-    await tester.tap(find.byTooltip('Edit task'));
+    // A double tap on the task opens it.
+    await tester.tap(find.text('Draft'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('Draft'));
     await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Details'), 'Step one\nStep two');
     await tester.enterText(find.widgetWithText(TextField, 'Task'), 'Final');
     await tester.tap(find.text('45 min'));
     await tester.pump();
@@ -116,6 +123,8 @@ void main() {
     await settle(tester);
     expect(names(bloc), ['Final']);
     expect(bloc.state.tasks.single.timerLengthSeconds, 45 * 60);
+    expect(bloc.state.tasks.single.notes, 'Step one\nStep two');
+    expect(find.text('Step one\nStep two'), findsOneWidget);
   });
 
   noteTest('the note holds a limited number of tasks', (tester, bloc) async {
@@ -181,6 +190,7 @@ void main() {
     await writeThrough(tester, find.text('Write your first task'),
         'A fairly long task name that has to wrap on a phone');
     await tester.tap(find.textContaining('A fairly long'));
+    await tester.pump(kDoubleTapTimeout);
     await settle(tester);
   });
 }

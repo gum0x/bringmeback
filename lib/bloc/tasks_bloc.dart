@@ -56,6 +56,9 @@ class TimeEntry {
 /// A task as the UI sees it, read from the [TaskDocument].
 class TaskState {
   final String name;
+
+  /// Longer details written under the name, free text over several lines.
+  final String notes;
   final ValueKey<String> id;
   // Everything about the timer is derived from entries and timestamps, so any device holding the
   // same task state shows the same running state, countdown and total, and fires the same alerts.
@@ -73,6 +76,7 @@ class TaskState {
 
   TaskState(
       {required this.name,
+      this.notes = '',
       required this.id,
       this.timerLengthSeconds = 20 * 60,
       this.timerStartAt = 0,
@@ -155,7 +159,10 @@ class AddTaskOnTopEvent extends TasksEvent {
   final ValueKey<String> id;
   final int? timerLengthSeconds;
 
-  AddTaskOnTopEvent({required this.name, required this.id, this.timerLengthSeconds});
+  final String notes;
+
+  AddTaskOnTopEvent(
+      {required this.name, required this.id, this.timerLengthSeconds, this.notes = ''});
 }
 
 /// Writes a task right after the one at [index].
@@ -176,8 +183,14 @@ class InsertTaskEvent extends TasksEvent {
   final ValueKey<String> id;
   final int? timerLengthSeconds;
 
+  final String notes;
+
   InsertTaskEvent(
-      {required this.index, required this.name, required this.id, this.timerLengthSeconds});
+      {required this.index,
+      required this.name,
+      required this.id,
+      this.timerLengthSeconds,
+      this.notes = ''});
 }
 
 /// Checks a task off, or unchecks it. Either way it stays on the note.
@@ -194,7 +207,10 @@ class EditTaskEvent extends TasksEvent {
   final String name;
   final int timerLengthSeconds;
 
-  EditTaskEvent({required this.id, required this.name, required this.timerLengthSeconds});
+  final String? notes;
+
+  EditTaskEvent(
+      {required this.id, required this.name, required this.timerLengthSeconds, this.notes});
 }
 
 /// Tears off the current note and starts an empty one. Its unfinished tasks wait to be written again
@@ -348,8 +364,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>((e, emit) => _insert(emit, e.index + 1, e.id.value,
         e.name, e.timerLengthSeconds));
-    on<InsertTaskEvent>((e, emit) =>
-        _insert(emit, e.index, e.id.value, e.name, e.timerLengthSeconds));
+    on<InsertTaskEvent>((e, emit) => _insert(
+        emit, e.index, e.id.value, e.name, e.timerLengthSeconds,
+        notes: e.notes));
     on<SetDoneEvent>((e, emit) => _setDone(emit, e.index, e.done));
     on<EditTaskEvent>(_onEditTask);
     on<TearOffNoteEvent>(_onTearOff);
@@ -438,6 +455,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       if (doc.ids.length >= noteLines) return;
       doc.insert(0, event.id.value,
           name: event.name,
+          notes: event.notes,
           timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60);
       _runTop(doc, true);
       _focusId = event.id.value;
@@ -445,12 +463,15 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _insert(Emitter<TasksState> emit, int index, String id, String name,
-      int? timerLengthSeconds) {
+      int? timerLengthSeconds,
+      {String notes = ''}) {
     _edit(emit, (doc) {
       if (doc.ids.length >= noteLines) return;
       final working = _working(doc);
       doc.insert(index.clamp(0, doc.ids.length), id,
-          name: name, timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
+          name: name,
+          notes: notes,
+          timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
       _runTop(doc, working);
       _focusId = id;
     });
@@ -475,6 +496,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _edit(emit, (doc) {
       final task = doc.task(id);
       if (task.name != event.name) doc.setName(id, event.name);
+      final notes = event.notes;
+      if (notes != null && task.notes != notes) doc.setNotes(id, notes);
       if (task.timerLengthSeconds != event.timerLengthSeconds) {
         _lastRemaining.remove(id);
         doc.setTimer(id, event.timerLengthSeconds, nowSeconds());
