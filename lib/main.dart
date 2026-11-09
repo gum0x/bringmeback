@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:bringmeback/timer.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'alerts/background_alerts.dart';
 import 'bloc/tasks_bloc.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_page.dart';
@@ -51,10 +52,16 @@ class TasksStack extends StatefulWidget {
 
 class _TasksStackState extends State<TasksStack> {
   StreamSubscription<String>? _timeUp;
+  BackgroundAlerts? _alerts;
 
   @override
   void initState() {
     super.initState();
+    final scheduler = BackgroundAlerts.platformScheduler();
+    if (scheduler != null) {
+      _alerts = BackgroundAlerts(context.read<TasksBloc>(), scheduler);
+      WidgetsBinding.instance.addObserver(_alerts!);
+    }
     _timeUp = context.read<TasksBloc>().timeUp.listen((name) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -68,6 +75,11 @@ class _TasksStackState extends State<TasksStack> {
   @override
   void dispose() {
     _timeUp?.cancel();
+    final alerts = _alerts;
+    if (alerts != null) {
+      WidgetsBinding.instance.removeObserver(alerts);
+      alerts.close();
+    }
     super.dispose();
   }
 
