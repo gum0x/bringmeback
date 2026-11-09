@@ -75,7 +75,7 @@ class SyncPage extends StatelessWidget {
           title: const Text('Find my devices online'),
           subtitle: const Text('Uses public Nostr relays to find the group\'s other devices when they '
               'are online. The relays only see encrypted messages, never your tasks. '
-              'Syncing tasks between them is coming in the next version.'),
+              'Your tasks then sync directly between devices on the same network.'),
           isThreeLine: true,
           value: state.live,
           onChanged: (on) => context.read<SyncCubit>().setLive(on),
@@ -90,7 +90,7 @@ class SyncPage extends StatelessWidget {
             subtitle: Text(state.online.isEmpty
                 ? 'Open bringmeback on another device in this group.'
                 : state.connected.length == state.online.length
-                    ? 'Connected directly, end to end encrypted.'
+                    ? 'Syncing directly, end to end encrypted.'
                     : '${state.connected.length} of ${state.online.length} connected directly. '
                         'Devices connect only when they are on the same network.'),
           ),
