@@ -19,9 +19,13 @@ String newId() => List.generate(
 int nowSeconds() =>
     DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
 
-/// How many tasks fit on a note, done ones included. A small note keeps the day focused: when it is
-/// full, finish or delete something before writing more.
-const noteLines = 10;
+/// How many tasks fit on a note unless Settings says otherwise, done ones included. A small note
+/// keeps the day focused: when it is full, finish or delete something before writing more.
+const defaultNoteLines = 10;
+
+/// The range Settings offers for the size of a note.
+const minNoteLines = 3;
+const maxNoteLines = 20;
 
 /// A day starts at 4:00, so working past midnight still counts as the same day.
 const dayStartHour = 4;
@@ -116,9 +120,13 @@ class TasksState {
   /// Whether the document has loaded.
   final bool loaded;
 
+  /// How many tasks fit on a note, set in Settings.
+  final int noteLines;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
+      this.noteLines = defaultNoteLines,
       int? noteStartedAt,
       this.pending = const [],
       this.loaded = false})
@@ -131,6 +139,7 @@ class TasksState {
       noteStartedAt: noteStartedAt,
       pending: pending,
       loaded: loaded,
+      noteLines: noteLines,
     );
   }
 
@@ -284,6 +293,14 @@ class ResetTotalEvent extends TasksEvent {
 
 class ToggleMuteEvent extends TasksEvent {}
 
+/// Sets how many tasks fit on a note. Tasks already written stay when it shrinks; only writing more
+/// waits until there is room.
+class SetNoteLinesEvent extends TasksEvent {
+  final int lines;
+
+  SetNoteLinesEvent(this.lines);
+}
+
 /// Says which task, if any, is open in the Pomodoro focus view. That task's own countdown stays
 /// quiet there, with no "Time's up" or reminder, because the Pomodoro clock is the one that counts.
 class SetFocusModeEvent extends TasksEvent {
@@ -329,6 +346,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
+  int _noteLines = defaultNoteLines;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -361,6 +379,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<FocusTaskEvent>(_onFocusTask);
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
+    on<SetNoteLinesEvent>(_onSetNoteLines);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
@@ -384,10 +403,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   TasksState _view() {
     final doc = _doc;
-    if (doc == null) return TasksState(tasks: [], muted: _muted);
+    if (doc == null) {
+      return TasksState(tasks: [], muted: _muted, noteLines: _noteLines);
+    }
     return TasksState(
       tasks: doc.tasks(focusId: _focusId),
       muted: _muted,
+      noteLines: _noteLines,
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
       loaded: true,
@@ -435,7 +457,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      if (doc.ids.length >= noteLines) return;
+      if (doc.ids.length >= _noteLines) return;
       doc.insert(0, event.id.value,
           name: event.name,
           timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60);
@@ -447,7 +469,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   void _insert(Emitter<TasksState> emit, int index, String id, String name,
       int? timerLengthSeconds) {
     _edit(emit, (doc) {
-      if (doc.ids.length >= noteLines) return;
+      if (doc.ids.length >= _noteLines) return;
       final working = _working(doc);
       doc.insert(index.clamp(0, doc.ids.length), id,
           name: name, timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
@@ -498,7 +520,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onCarry(CarryTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      if (doc.ids.length >= noteLines) return;
+      if (doc.ids.length >= _noteLines) return;
       if (!doc.pendingIds.contains(event.id)) return;
       final working = _working(doc);
       final newTaskId = newId();
@@ -601,6 +623,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _edit(emit, (doc) => doc.setTotalResetAt(id, nowSeconds()));
   }
 
+  void _onSetNoteLines(SetNoteLinesEvent event, Emitter<TasksState> emit) {
+    _noteLines = event.lines.clamp(minNoteLines, maxNoteLines);
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setInt('noteLines', _noteLines));
+  }
+
   void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
     _muted = !_muted;
     emit(_view());
@@ -678,6 +707,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _loading = true;
     final prefs = await SharedPreferences.getInstance();
     _muted = prefs.getBool('muted') ?? false;
+    _noteLines = (prefs.getInt('noteLines') ?? defaultNoteLines)
+        .clamp(minNoteLines, maxNoteLines);
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');

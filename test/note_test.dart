@@ -119,13 +119,39 @@ void main() {
   });
 
   noteTest('the note holds a limited number of tasks', (tester, bloc) async {
-    for (var i = 0; i < noteLines + 2; i++) {
+    for (var i = 0; i < defaultNoteLines + 2; i++) {
       bloc.add(InsertTaskEvent(index: i, name: 'Task $i', id: ValueKey('t$i')));
     }
     await settle(tester);
-    expect(bloc.state.tasks, hasLength(noteLines));
+    expect(bloc.state.tasks, hasLength(defaultNoteLines));
     expect(find.text('Add a task'), findsNothing);
     expect(find.textContaining('The note is full'), findsOneWidget);
+  });
+
+  noteTest('the size of the note is set in Settings and kept', (tester, bloc) async {
+    for (var i = 0; i < 4; i++) {
+      bloc.add(InsertTaskEvent(index: i, name: 'Task $i', id: ValueKey('t$i')));
+    }
+    await settle(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('$defaultNoteLines'), findsOneWidget);
+    for (var i = 0; i < defaultNoteLines - minNoteLines + 1; i++) {
+      await tester.tap(find.byTooltip('Fewer tasks per note'));
+      await settle(tester);
+    }
+    expect(bloc.state.noteLines, minNoteLines);
+    expect(find.text('$minNoteLines'), findsOneWidget);
+
+    // A smaller note keeps what is written, and takes no more.
+    expect(bloc.state.tasks, hasLength(4));
+    expect(bloc.state.full, isTrue);
+    bloc.add(InsertTaskEvent(index: 0, name: 'One more', id: const ValueKey('x')));
+    await settle(tester);
+    expect(bloc.state.tasks, hasLength(4));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('noteLines'), minNoteLines);
   });
 
   noteTest('tearing off the note carries over what is not done', (tester, bloc) async {

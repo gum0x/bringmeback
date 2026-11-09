@@ -16,8 +16,9 @@ in the order you will do it. The first task not yet checked off is the one you a
 - **Edit a task** with the pencil, or tap a selected task again. On a phone it is in the task's ⋮ menu.
 - **Reorder** by dragging the handle on the right of a task. Dragging an unchecked task above the
   current one makes it the current task.
-- **The note is small on purpose**: it holds 10 lines, done tasks included. When it is full, finish
-  or delete something, or start a fresh note.
+- **The note is small on purpose**: it holds 10 tasks, done ones included. When it is full, finish
+  or delete something, or start a fresh note. Change the size in **Settings** (the gear in the top
+  bar), from 3 to 20 tasks. Making it smaller keeps what is already written.
 
 ## A new day
 
