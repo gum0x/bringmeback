@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:crdt_lf/crdt_lf.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 
+import 'doc_sync.dart';
 import 'pairing.dart';
 import 'peer.dart';
 import 'signalling.dart';
@@ -67,6 +69,7 @@ class SyncCubit extends Cubit<SyncState> {
   final RelayConnector _connect;
   final SyncConfig _config;
   final PeerTransportFactory _newTransport;
+  DocumentSync? _sync;
   Signalling? _signalling;
   StreamSubscription<SymbolonSignal>? _signals;
 
@@ -81,14 +84,25 @@ class SyncCubit extends Cubit<SyncState> {
   final _retries = <String, Timer>{};
   final _backoff = <String, Duration>{};
 
+  /// `document` is the task document to keep in sync, once it has loaded.
   SyncCubit(
       {RelayConnector connect = webSocketRelay,
       SyncConfig? config,
-      PeerTransportFactory? transport})
+      PeerTransportFactory? transport,
+      Future<CRDTDocument>? document})
       : _connect = connect,
         _config = config ?? SyncConfig.fromEnvironment(),
         _newTransport = transport ?? _webRtc(config ?? SyncConfig.fromEnvironment()),
-        super(const SyncState());
+        super(const SyncState()) {
+    document?.then((doc) {
+      if (isClosed) return;
+      final sync = DocumentSync(doc);
+      _sync = sync;
+      for (final link in _links.values) {
+        if (link.isConnected) sync.attach(link);
+      }
+    });
+  }
 
   static PeerTransportFactory _webRtc(SyncConfig config) =>
       () => WebRtcTransport.create(config.iceServers);
@@ -182,6 +196,10 @@ class SyncCubit extends Cubit<SyncState> {
     }
   }
 
+  /// The link to a device, for tests that play a misbehaving device.
+  @visibleForTesting
+  PeerLink? linkForTests(String deviceId) => _links[deviceId];
+
   bool _initiates(List<int> remote) => symbolon.initiates(state.device!.publicKey, remote);
 
   /// Sets up a link to the device that sent `signal`: an announce (initiator) or an offer.
@@ -224,7 +242,9 @@ class SyncCubit extends Cubit<SyncState> {
     _links[id] = link;
     link.connected.then((_) {
       _backoff.remove(id);
-      if (_links[id] == link) _emit(state.copyWith(connected: {...state.connected, id}));
+      if (_links[id] != link) return;
+      _sync?.attach(link);
+      _emit(state.copyWith(connected: {...state.connected, id}));
     }, onError: (Object _) {});
     link.closed.then((_) {
       if (_links[id] != link) return;
@@ -275,6 +295,7 @@ class SyncCubit extends Cubit<SyncState> {
     await _signalling?.stop();
     _signalling = null;
     await _closeLinks();
+    await _sync?.close();
     return super.close();
   }
 

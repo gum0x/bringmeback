@@ -29,24 +29,43 @@ class TaskDocument {
         _fields =
             CRDTMapHandler<Object?>(doc, 'fields', handlerType: 'bmb.fields');
 
-  List<String> get ids => _order.value;
+  /// Task ids in order. Another device's changes are untrusted, so anything that isn't a string, or
+  /// a list that doesn't read, counts as no task.
+  List<String> get ids {
+    try {
+      return [for (final Object? id in _order.value) if (id is String) id];
+    } on Object {
+      return const [];
+    }
+  }
 
+  /// Every field, or none if the map doesn't read.
+  Map<String, Object?> get _values {
+    try {
+      return _fields.value;
+    } on Object {
+      return const {};
+    }
+  }
+
+  /// Reads a task. Fields of the wrong type, which only another device's bad changes could write,
+  /// read as their defaults.
   TaskState task(String id, {bool inFocus = false}) {
-    final fields = _fields.value;
+    final fields = _values;
+    T field<T>(String name, T fallback) => switch (fields['$id/$name']) { T v => v, _ => fallback };
     final entryPrefix = '$id/e/';
     final entries = [
       for (final MapEntry(:key, :value) in fields.entries)
-        if (key.startsWith(entryPrefix))
-          TimeEntry(
-              start: int.parse(key.substring(entryPrefix.length)),
-              end: value as int?),
+        if (key.startsWith(entryPrefix) && (value == null || value is int))
+          if (int.tryParse(key.substring(entryPrefix.length)) case final start?)
+            TimeEntry(start: start, end: value as int?),
     ]..sort((a, b) => a.start.compareTo(b.start));
     return TaskState(
-      name: fields['$id/name'] as String? ?? '',
+      name: field<String>('name', ''),
       id: ValueKey<String>(id),
-      timerLengthSeconds: fields['$id/timerLength'] as int? ?? 20 * 60,
-      timerStartAt: fields['$id/timerStartAt'] as int? ?? 0,
-      totalResetAt: fields['$id/totalResetAt'] as int? ?? 0,
+      timerLengthSeconds: field<int>('timerLength', 20 * 60),
+      timerStartAt: field<int>('timerStartAt', 0),
+      totalResetAt: field<int>('totalResetAt', 0),
       entries: entries,
       inFocus: inFocus,
     );
@@ -84,7 +103,7 @@ class TaskDocument {
   /// Puts a removed or done task back at [index]; its fields never left the document.
   void restore(int index, String id) => doc.runInTransaction(() {
         _order.insert(index, id);
-        if (_fields.value['$id/doneAt'] != null) _fields.set('$id/doneAt', null);
+        if (_values['$id/doneAt'] != null) _fields.set('$id/doneAt', null);
       });
 
   /// Takes the task at [index] off the list as done, keeping when it was finished.
@@ -93,11 +112,11 @@ class TaskDocument {
         _order.delete(index);
       });
 
-  int? doneAt(String id) => _fields.value['$id/doneAt'] as int?;
+  int? doneAt(String id) => switch (_values['$id/doneAt']) { int v => v, _ => null };
 
   /// The ids of every pause logged, in no particular order.
   List<String> get pauseIds => [
-        for (final MapEntry(:key, :value) in _fields.value.entries)
+        for (final MapEntry(:key, :value) in _values.entries)
           if (key.endsWith('/kind') && value == 'pause')
             key.substring(0, key.length - '/kind'.length)
       ];

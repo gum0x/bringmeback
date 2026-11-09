@@ -19,7 +19,9 @@ class App extends StatelessWidget {
     return MultiBlocProvider(
         providers: [
           BlocProvider(create: (_) => TasksBloc()..add(LoadStateEvent())),
-          BlocProvider(create: (_) => SyncCubit()..load()),
+          BlocProvider(
+              create: (context) =>
+                  SyncCubit(document: context.read<TasksBloc>().document)..load()),
         ],
         child: MaterialApp(
           title: 'bringmeback',
@@ -324,6 +326,12 @@ class _TaskState extends State<Task> {
     if (!_minutesFocusNode.hasFocus &&
         oldWidget.task.timerLengthSeconds != widget.task.timerLengthSeconds) {
       _minutesController.text = _lengthMinutes();
+    }
+    // A name changed elsewhere, such as on another device. Not while it's being typed here.
+    if (!_focusNode.hasFocus &&
+        !(_debounce?.isActive ?? false) &&
+        widget.task.name != _controller.text) {
+      _controller.text = widget.task.name;
     }
   }
 

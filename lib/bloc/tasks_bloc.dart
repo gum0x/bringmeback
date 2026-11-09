@@ -200,6 +200,9 @@ class UpdateTaskTimerEvent extends TasksEvent {
 
 class LoadStateEvent extends TasksEvent {}
 
+/// Changes from another device reached the document.
+class _RemoteChangesEvent extends TasksEvent {}
+
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
   Timer? tick;
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -214,6 +217,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   /// The name of each task whose countdown runs out, as it happens.
   Stream<String> get timeUp => _timeUp.stream;
+
+  final _document = Completer<CRDTDocument>();
+  bool _loading = false;
+  StreamSubscription<CRDTDocumentEvent>? _remote;
+
+  /// The task document, once loaded, for syncing with the group's other devices.
+  Future<CRDTDocument> get document => _document.future;
 
   TasksBloc() : super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
@@ -233,6 +243,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskNameEvent>(_onUpdateTaskName);
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
+    on<_RemoteChangesEvent>((event, emit) {
+      emit(_view());
+      _saveState();
+    });
 
     add(LoadStateEvent());
     tick = Timer.periodic(Duration(seconds: 1), (_) {
@@ -433,9 +447,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   Future<void> _onLoadState(
       LoadStateEvent event, Emitter<TasksState> emit) async {
-    if (_doc != null) return;
+    // LoadStateEvent can arrive twice (the app adds one too); only the first one loads.
+    if (_loading) return;
+    _loading = true;
     final prefs = await SharedPreferences.getInstance();
-    if (_doc != null) return;
     _muted = prefs.getBool('muted') ?? false;
 
     // The peer id names this install as the author of its changes; it must stay the same.
@@ -472,6 +487,12 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     // Earlier versions let any task run; now only the top one may.
     _runTop(doc, _working(doc));
     _doc = doc;
+    _remote = doc.doc.events.listen((e) {
+      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
+        add(_RemoteChangesEvent());
+      }
+    });
+    _document.complete(doc.doc);
     emit(_view());
     await _saveState();
   }
@@ -514,6 +535,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   @override
   Future<void> close() {
     tick?.cancel();
+    _remote?.cancel();
     _timeUp.close();
     return super.close();
   }
