@@ -39,18 +39,22 @@ class FocusPage extends StatefulWidget {
 class _FocusPageState extends State<FocusPage> {
   StreamSubscription<PomodoroPhase>? _phases;
   AudioPlayer? _player;
+  late final TasksBloc _tasks;
 
   @override
   void initState() {
     super.initState();
-    final tasks = context.read<TasksBloc>();
+    final tasks = _tasks = context.read<TasksBloc>();
     final index = _indexIn(tasks.state);
     if (index > 0) tasks.add(MoveTaskEvent(fromIndex: index, toIndex: 0));
+    // The Pomodoro clock replaces the task's own countdown while this view is open.
+    tasks.add(SetFocusModeEvent(taskId: widget.taskId));
     _phases = context.read<PomodoroCubit>().phaseStarted.listen(_onPhase);
   }
 
   @override
   void dispose() {
+    if (!_tasks.isClosed) _tasks.add(SetFocusModeEvent());
     _phases?.cancel();
     _player?.dispose();
     super.dispose();
