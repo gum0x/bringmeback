@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ticker.dart';
+
 /// The lengths of a Pomodoro cycle, in minutes. Kept on this device, like mute.
 class PomodoroSettings {
   final int workMinutes;
@@ -142,7 +144,7 @@ class PomodoroState {
 /// shows the right time. A phase that runs out moves on to the next one, which starts running.
 class PomodoroCubit extends Cubit<PomodoroState> {
   final DateTime Function() _now;
-  Timer? _tick;
+  SecondTicker? _tick;
   // When the running phase ends; null while paused.
   DateTime? _endsAt;
   final StreamController<PomodoroPhase> _phaseStarted =
@@ -155,7 +157,9 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   })  : _now = now ?? DateTime.now,
         super(PomodoroState.initial(settings)) {
     if (startTicking) {
-      _tick = Timer.periodic(const Duration(seconds: 1), (_) => tick());
+      // The countdown turns over at the end time's milliseconds, not the wall clock's.
+      _tick = SecondTicker(tick,
+          turnoverMs: () => (_endsAt?.millisecondsSinceEpoch ?? 0) % 1000);
     }
   }
 

@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ticker.dart';
 import 'task_document.dart';
 
 final Random _random = Random.secure();
@@ -212,7 +213,7 @@ class LoadStateEvent extends TasksEvent {}
 class _RemoteChangesEvent extends TasksEvent {}
 
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
-  Timer? tick;
+  SecondTicker? tick;
   final AudioPlayer _audioPlayer = AudioPlayer();
   // Null until the saved document has been loaded; edits before that are ignored.
   TaskDocument? _doc;
@@ -261,9 +262,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
 
     add(LoadStateEvent());
-    tick = Timer.periodic(Duration(seconds: 1), (_) {
-      add(UpdateTimerEvent());
-    });
+    tick = SecondTicker(() => add(UpdateTimerEvent()));
   }
 
   TasksState _view() =>
