@@ -78,6 +78,12 @@ below or beside it, the rest of the list in a quiet **Up next**.
 - The first focus session starts as soon as the view opens, 25 minutes by default. **Pause** (or
   Space) stops the clock and **Resume** carries on. When a session ends a sound plays and a short
   break starts on its own; after every fourth session the break is a long one.
+- **The sessions fit the task.** They are cut to the time the task has left: a task with an hour
+  left gets sessions of 25, 25 and 10 minutes, and one with 20 minutes a single 20-minute session. A
+  rest of 5 minutes or less joins the session before it. Under the clock the view shows the plan,
+  e.g. "Fits the task's 1 h: 25 + 25 + 10 min of focus, 1 h 10 min with breaks". Once the task's
+  time is used up, sessions go back to full length. A task already over its time gets full
+  sessions.
 - The task's own timer runs during focus sessions and pauses during breaks or when you pause the clock,
   so the breaks are logged like any other pause.
 - While the focus view is open, the task's own countdown stays quiet: no "Time's up" and no
