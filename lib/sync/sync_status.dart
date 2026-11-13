@@ -8,7 +8,10 @@ import 'sync_page.dart';
 
 enum SyncHealth {
   /// Not in a group, or sync is off: nothing to watch.
-  idle,
+  off,
+
+  /// No device is connected, and no Nostr relay can be reached to find one.
+  relaysDown,
 
   /// Looking for the group's other devices, and none is online.
   alone,
@@ -34,10 +37,15 @@ class SyncStatus {
     String devices(int n) => n == 1 ? '1 device' : '$n devices';
     final last = state.lastSynced;
     final since = last == null ? '' : '. Last in sync at ${_time(last)}';
-    if (!state.paired) return const SyncStatus(SyncHealth.idle, 'Devices: not in a sync group');
-    if (!state.live) return const SyncStatus(SyncHealth.idle, 'Devices: sync is off');
+    if (!state.paired) return const SyncStatus(SyncHealth.off, 'Devices: not in a sync group');
+    if (!state.live) return const SyncStatus(SyncHealth.off, 'Devices: sync is off');
     final online = state.online.length;
     final connected = state.connected.length;
+    // Devices already connected keep syncing without the relays.
+    if (connected == 0 && state.relaysUnreachable) {
+      return SyncStatus(SyncHealth.relaysDown,
+          "Can't reach any Nostr relay, so other devices can't be found$since");
+    }
     if (online == 0 && connected == 0) {
       return SyncStatus(SyncHealth.alone, 'No other device online$since');
     }
@@ -112,8 +120,9 @@ class _SyncStatusButtonState extends State<SyncStatusButton> {
       final status = _shown!;
       final colors = Theme.of(context).colorScheme;
       final (icon, color) = switch (status.health) {
-        SyncHealth.idle => (Icons.devices, null),
+        SyncHealth.off => (Icons.devices, null),
         SyncHealth.alone => (Icons.cloud_off, colors.outline),
+        SyncHealth.relaysDown => (Icons.portable_wifi_off, colors.error),
         SyncHealth.notConnected => (Icons.cloud_off, colors.error),
         SyncHealth.syncing => (Icons.cloud_sync, colors.tertiary),
         SyncHealth.inSync => (Icons.cloud_done, Colors.green),

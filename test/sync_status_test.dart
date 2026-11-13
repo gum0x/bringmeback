@@ -13,7 +13,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final cubit = SyncCubit(connect: FakeRelay().connect);
     await cubit.load();
-    expect(SyncStatus.of(cubit.state).health, SyncHealth.idle);
+    expect(SyncStatus.of(cubit.state).health, SyncHealth.off);
     await cubit.createGroup();
     expect(SyncStatus.of(cubit.state).label, 'Devices: sync is off');
     final live = cubit.state.copyWith(live: true);
@@ -24,6 +24,12 @@ void main() {
     expect(SyncStatus.of(notConnected).health, SyncHealth.notConnected);
     expect(SyncStatus.of(notConnected).label,
         '1 of 2 online devices connected. Last in sync at 09:05');
+
+    final down = live.copyWith(relaysUnreachable: true);
+    expect(SyncStatus.of(down).health, SyncHealth.relaysDown);
+    // Devices already connected keep syncing without the relays.
+    expect(SyncStatus.of(down.copyWith(online: {'b'}, connected: {'b'}, inSync: {'b'})).health,
+        SyncHealth.inSync);
 
     final syncing = live.copyWith(online: {'b'}, connected: {'b'});
     expect(SyncStatus.of(syncing).health, SyncHealth.syncing);
