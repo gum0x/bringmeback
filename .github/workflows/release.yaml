@@ -1,0 +1,144 @@
+name: Desktop release
+
+# Run by hand from the Actions tab. Builds the macOS, Windows and Linux desktop apps from the chosen
+# branch, packages them (dmg, zip, tar.gz) and attaches them to a draft GitHub Release named after
+# the version in pubspec.yaml (v<version>). Publishing the draft creates the tag, so a person
+# reviews the release before it goes out.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Read version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    # pubspec.yaml holds "version: 1.2.3+4"; the release uses the part before the build number.
+    - id: version
+      run: |
+        version=$(sed -n 's/^version: *//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+        [ -n "$version" ] || { echo "No version in pubspec.yaml" >&2; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos
+            package: macos-universal.dmg
+          - os: windows-latest
+            target: windows
+            package: windows-x64.zip
+          - os: ubuntu-latest
+            target: linux
+            package: linux-x64.tar.gz
+    env:
+      PACKAGE: bringmeback-${{ needs.version.outputs.version }}-${{ matrix.package }}
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    # GStreamer is what audioplayers plays the timer sounds with on Linux.
+    - name: Install Linux build dependencies
+      if: matrix.target == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build libgtk-3-dev \
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version: '3.47.7'
+        channel: 'stable'
+        cache: true
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Build ${{ matrix.target }} app
+      run: flutter build ${{ matrix.target }} --release
+
+    - name: Package macOS app
+      if: matrix.target == 'macos'
+      run: |
+        hdiutil create -volname bringmeback -fs HFS+ -format UDZO -ov \
+          -srcfolder build/macos/Build/Products/Release/bringmeback.app "$PACKAGE"
+
+    - name: Package Windows app
+      if: matrix.target == 'windows'
+      shell: pwsh
+      run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath $env:PACKAGE
+
+    - name: Package Linux app
+      if: matrix.target == 'linux'
+      run: tar -czf "$PACKAGE" -C build/linux/x64/release/bundle --transform 's,^\.,bringmeback,' .
+
+    - name: Upload package
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ env.PACKAGE }}
+        path: ${{ env.PACKAGE }}
+        if-no-files-found: error
+        retention-days: 7
+
+  release:
+    name: Draft GitHub Release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # create the draft release and attach the packages
+      actions: read    # download this run's packages
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+    - name: Download packages
+      run: |
+        gh run download "$GITHUB_RUN_ID" --dir dist
+        mkdir release
+        find dist -type f -name 'bringmeback-*' -exec mv {} release/ \;
+        (cd release && sha256sum bringmeback-* > SHA256SUMS.txt)
+        ls -l release
+
+    - name: Create draft release
+      run: |
+        cat > notes.md <<EOF
+        Desktop builds of bringmeback $VERSION, built from \`${GITHUB_SHA::7}\` on \`$GITHUB_REF_NAME\`.
+        The version comes from pubspec.yaml.
+
+        - **macOS**: \`bringmeback-$VERSION-macos-universal.dmg\` (Apple silicon and Intel). The app is
+          not signed or notarized: the first time, right-click it and choose Open.
+        - **Windows**: \`bringmeback-$VERSION-windows-x64.zip\`. Unzip it and run \`bringmeback.exe\`.
+          The app is not signed, so SmartScreen may ask you to confirm.
+        - **Linux**: \`bringmeback-$VERSION-linux-x64.tar.gz\`. Extract it and run \`bringmeback/bringmeback\`.
+          It needs GTK 3 and GStreamer (with the base and good plugins) installed.
+
+        \`SHA256SUMS.txt\` lists the checksum of each file.
+        EOF
+        gh release create "v$VERSION" release/* \
+          --draft --target "$GITHUB_SHA" \
+          --title "bringmeback $VERSION" --notes-file notes.md
