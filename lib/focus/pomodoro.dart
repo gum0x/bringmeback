@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ticker.dart';
+import '../timer.dart';
 
 /// The lengths of a Pomodoro cycle, in minutes. Kept on this device, like mute.
 class PomodoroSettings {
@@ -338,13 +339,6 @@ class PomodoroCubit extends Cubit<PomodoroState> {
     _phaseStarted.close();
     return super.close();
   }
-}
-
-/// Minutes as "45 min", "2 h" or "2 h 10 min".
-String formatMinutes(int minutes) {
-  final h = minutes ~/ 60, m = minutes % 60;
-  if (h == 0) return '$m min';
-  return m == 0 ? '$h h' : '$h h $m min';
 }
 
 /// What a whole cycle of [settings] adds up to, e.g. "Full cycle 2 h 10 min: 1 h 40 min of focus in

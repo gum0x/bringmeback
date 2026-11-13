@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
+import '../timer.dart';
 import 'paper.dart';
 import 'task_line.dart';
 
@@ -34,6 +35,42 @@ class NoteView extends StatelessWidget {
         ),
       );
     });
+  }
+}
+
+/// The time committed to on the note, and roughly when it will all be done. The finish is rounded
+/// up to the quarter hour, so it reads as an estimate rather than another ticking clock. Breaks are
+/// not counted.
+class _CommittedTime extends StatelessWidget {
+  final TasksState state;
+
+  const _CommittedTime({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = NoteColors.of(context);
+    final over = state.overCommitted;
+    final finish = state.finishAt();
+    final committed = formatMinutes((state.committedSeconds / 60).round());
+    final finishTime = finish == null
+        ? null
+        : TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(finish * 1000))
+            .format(context);
+    return Text.rich(
+      key: const Key('committedTime'),
+      TextSpan(children: [
+        TextSpan(
+          text: 'Committed $committed',
+          style: over
+              ? TextStyle(color: theme.colorScheme.error, fontWeight: FontWeight.w600)
+              : null,
+        ),
+        if (over) TextSpan(text: ' of ${formatMinutes(state.noteMinutes)}'),
+        if (finishTime != null) TextSpan(text: ' · done by ~$finishTime'),
+      ]),
+      style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
+    );
   }
 }
 
@@ -71,6 +108,7 @@ class _TodayNote extends StatelessWidget {
                   ].join(' · '),
                   style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
                 ),
+                if (tasks.isNotEmpty) _CommittedTime(state: state),
               ],
             ),
           ),
