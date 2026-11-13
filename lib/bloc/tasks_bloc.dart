@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ticker.dart';
 import 'task_document.dart';
 
 final Random _random = Random.secure();
@@ -358,7 +359,7 @@ class _ClearAllEvent extends TasksEvent {
 }
 
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
-  Timer? tick;
+  SecondTicker? tick;
   // Made on the first sound, so a list that never rings needs no audio player.
   AudioPlayer? _audioPlayerOrNull;
   AudioPlayer get _audioPlayer => _audioPlayerOrNull ??= AudioPlayer();
@@ -421,9 +422,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
 
     add(LoadStateEvent());
-    tick = Timer.periodic(Duration(seconds: 1), (_) {
-      add(UpdateTimerEvent());
-    });
+    tick = SecondTicker(() => add(UpdateTimerEvent()));
   }
 
   TasksState _view() {
