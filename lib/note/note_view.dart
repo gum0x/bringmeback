@@ -206,6 +206,7 @@ class _TodayNote extends StatelessWidget {
                     style: theme.textTheme.bodyLarge?.copyWith(color: colors.faded),
                   ),
                 ),
+              if (state.onBreak) BreakLine(state: state),
               list,
               nextLine,
             ],
