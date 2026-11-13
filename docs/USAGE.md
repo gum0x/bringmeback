@@ -100,15 +100,19 @@ below or beside it, the rest of the list in a quiet **Up next**.
   **Use these lengths from now on** ticked to keep them on this device for the next focus. Under them
   the view shows what a full cycle adds up to, up to the end of the long break, and how much of it
   is focus. The defaults, with the same total, are also in **Settings**, under **Pomodoro**.
-- The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
-  carries on as it was.
-- Each task remembers where its Pomodoro is: the phase, the time left and the sessions done. It is
-  kept with the task, so it syncs to your other devices like the rest of the list. Focus on the task
-  again, here or on another device, and it picks up there instead of starting over.
-- The back arrow pauses the Pomodoro. If the app closes while the focus view is open (a crash, a
-  closed tab, the phone ending the app), the next start opens the focus view again: a running clock
-  carries on as if nothing happened, a paused one waits for **Resume**. If a phase ran out while
-  nobody was looking, it waits at the start of the next one instead of running on.
+- The back arrow (or Esc) goes back to the list and pauses the Pomodoro; the task's timer carries
+  on as it was.
+- Each task remembers where its Pomodoro is: the phase, the time left, the sessions done and how far
+  along the plan for the task's time it is (the focus already counted and the length of the current
+  session). It is kept with the task, so it syncs to your other devices like the rest of the list.
+  Focus on the task again, here or on another device, and it picks up there, on the same plan,
+  instead of starting over and cutting a new one. A fresh plan is cut only when the Pomodoro starts
+  fresh.
+- If the app closes while the focus view is open (a crash, a closed tab, the phone ending the app),
+  the next start opens the focus view again: a running clock carries on as if nothing happened, a
+  paused one waits for **Resume**. If a phase ran out while nobody was looking, it waits at the
+  start of the next one instead of running on, and a focus session that ran out counts in full
+  towards the task's time.
 - With the focus view open on two devices, pausing, skipping or changing the lengths on one shows on
   the other. A Pomodoro left alone for 12 hours, or one whose task was marked done, starts fresh.
 
