@@ -288,6 +288,42 @@ class TaskDocument {
     }
   }
 
+  /// Repairs the timers after changes from a device that worked apart from this one merged in. Each
+  /// device starts and stops timers as if it were the only one, so after the merge:
+  /// - the current task can have two open time entries, when both devices checked off the task above
+  ///   it (each started it). Both would count, so its time would run twice as fast. The earliest
+  ///   stays open; each later one is closed where it starts, so it counts nothing.
+  /// - a task that is no longer the current one can still have a running timer, when one device
+  ///   started it (by checking off the task above) while the other wrote a new task on top of it.
+  ///   When the current task runs, the other task's entry is closed when the current one started:
+  ///   work moved on then.
+  ///
+  /// Every device that has both sides' changes makes the same repair, so their writes agree.
+  void mergeTimers() {
+    String? current;
+    for (final id in ids) {
+      if (doneAt(id) == null) {
+        current = id;
+        break;
+      }
+    }
+    List<TimeEntry> open(String id) => task(id).entries.where((e) => e.end == null).toList();
+    final currentOpen = current == null ? const <TimeEntry>[] : open(current);
+    final since = currentOpen.isEmpty ? null : currentOpen.first.start;
+    doc.runInTransaction(() {
+      for (final e in currentOpen.skip(1)) {
+        _fields.set('$current/e/${e.start}', e.start);
+      }
+      if (since == null) return;
+      for (final id in ids) {
+        if (id == current) continue;
+        for (final e in open(id)) {
+          _fields.set('$id/e/${e.start}', e.start > since ? e.start : since);
+        }
+      }
+    });
+  }
+
   /// Every change in the document, encoded for storage.
   String encodeChanges() => jsonEncode(
       [for (final c in doc.exportChanges()) base64Encode(c.toBytes())]);

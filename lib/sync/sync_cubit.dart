@@ -50,6 +50,21 @@ class SyncProblem {
       };
 }
 
+/// What [SyncCubit.syncNow] did, for the message the app shows.
+enum SyncNowResult {
+  /// Not in a group, or Find my devices online is off: nothing was sent.
+  off,
+
+  /// Every online device is connected: they compare their changes again now.
+  syncing,
+
+  /// Some online devices aren't connected: connecting to them now, and comparing with the rest.
+  connecting,
+
+  /// No other device is online: looking for them again on the relays.
+  looking,
+}
+
 /// Whether this device is in a sync group, the keys for it, and which of the group's devices are
 /// online and connected. The data exchange between them comes in a later step.
 class SyncState {
@@ -158,12 +173,20 @@ class SyncCubit extends Cubit<SyncState> {
   StreamSubscription<SymbolonSignal>? _signals;
   StreamSubscription<int>? _relayChanges;
   Timer? _relayCheck;
+  Timer? _autoSync;
+
+  /// How often, while looking for devices, connected devices compare their changes again and this
+  /// device says again that it is online. See [_autoSyncTick].
+  final Duration _autoSyncEvery;
 
   /// How long to wait for a first relay before saying none can be reached.
   static const relayGrace = Duration(seconds: 10);
 
   /// Sessions heard from in this run, so each gets one announce back and no more.
   final _answered = <String>{};
+
+  /// The last announce heard from each device, to connect to it again on [syncNow].
+  final _announces = <String, SymbolonSignal>{};
 
   /// Links by device id, and the devices whose link is being set up.
   final _links = <String, PeerLink>{};
@@ -186,9 +209,11 @@ class SyncCubit extends Cubit<SyncState> {
       SyncConfig? config,
       PeerTransportFactory? transport,
       Future<CRDTDocument>? document,
-      Duration staleAfter = const Duration(seconds: 20)})
+      Duration staleAfter = const Duration(seconds: 20),
+      Duration autoSyncEvery = const Duration(seconds: 30)})
       : _connect = connect,
         _staleAfter = staleAfter,
+        _autoSyncEvery = autoSyncEvery,
         _config = config ?? SyncConfig.fromEnvironment(),
         _newTransport = transport ?? _webRtc(config ?? SyncConfig.fromEnvironment()),
         super(const SyncState()) {
@@ -230,8 +255,13 @@ class SyncCubit extends Cubit<SyncState> {
   Future<void> resumed() async {
     final hiddenAt = _hiddenAt;
     _hiddenAt = null;
-    if (hiddenAt == null || DateTime.now().difference(hiddenAt) < _staleAfter) return;
-    if (isClosed || state.device == null) return;
+    if (hiddenAt == null || isClosed) return;
+    if (DateTime.now().difference(hiddenAt) < _staleAfter) {
+      // The links are trusted to be up: just compare again, in case a change got lost meanwhile.
+      _sync?.resync();
+      return;
+    }
+    if (state.device == null) return;
     _emit(state.copyWith(online: const {}));
     await _restartSignalling();
   }
@@ -282,11 +312,14 @@ class SyncCubit extends Cubit<SyncState> {
     await _signals?.cancel();
     await _relayChanges?.cancel();
     _relayCheck?.cancel();
+    _autoSync?.cancel();
+    _autoSync = null;
     await _signalling?.stop();
     _signals = null;
     _relayChanges = null;
     _signalling = null;
     _answered.clear();
+    _announces.clear();
     await _closeLinks();
     _emit(state.copyWith(
         problems: const {}, builds: const {}, relaysUp: 0, relayCount: 0, relaysUnreachable: false));
@@ -312,13 +345,64 @@ class SyncCubit extends Cubit<SyncState> {
       }
     });
     _emit(state.copyWith(relayCount: signalling.relayCount));
+    _autoSync = Timer.periodic(_autoSyncEvery, (_) {
+      if (_signalling == signalling) _autoSyncTick();
+    });
     signalling.start();
+  }
+
+  /// Keeps devices that are both online in sync without anyone pressing anything:
+  /// - connected devices compare their changes again, so a change lost on the way (or one made while
+  ///   a message was in flight) is sent again;
+  /// - this device announces itself again when it sees no other device, and answers the others'
+  ///   announces again, so two devices that missed each other's announce still find each other.
+  ///   Answers are limited to one per device per tick, so two devices that can't connect don't
+  ///   flood the relays.
+  void _autoSyncTick() {
+    _sync?.resync();
+    _answered.clear();
+    if (state.online.isEmpty && state.connected.isEmpty) _signalling?.send(SignalKind.announce);
+  }
+
+  /// The Sync now button: makes this device and every other online device of the group exchange
+  /// whatever either is missing, now, instead of waiting for the next automatic round.
+  ///
+  /// - Connected devices compare their changes again ([DocumentSync.resync]).
+  /// - An online device whose link is down is connected again at once, skipping the retry wait.
+  /// - With no other device online or connected, the relay connections are started over, as when
+  ///   the app comes back after a while, and this device announces itself again.
+  ///
+  /// Pressing it again while a sync is under way is harmless: changes are only applied once.
+  Future<SyncNowResult> syncNow() async {
+    if (isClosed || !state.paired || !state.live) return SyncNowResult.off;
+    if (state.online.isEmpty && state.connected.isEmpty) {
+      await _restartSignalling();
+      return SyncNowResult.looking;
+    }
+    _sync?.resync();
+    final waiting = state.online.difference(state.connected);
+    if (waiting.isEmpty) return SyncNowResult.syncing;
+    for (final id in waiting) {
+      _backoff.remove(id);
+      _retries.remove(id)?.cancel();
+    }
+    // Every device that hears this announce and is the one to make offers offers again at once,
+    // and this device answers theirs again.
+    _answered.clear();
+    _signalling?.send(SignalKind.announce);
+    for (final id in waiting) {
+      if (_announces[id] case final announce? when _initiates(announce.device)) {
+        unawaited(_link(announce, initiator: true));
+      }
+    }
+    return SyncNowResult.connecting;
   }
 
   void _heard(SymbolonSignal signal) {
     final device = _id(signal.device);
     switch (signal.kind) {
       case SignalKind.announce:
+        _announces[device] = signal;
         _emit(state.copyWith(online: {...state.online, device}));
         // Announce back once, so a device that came online after this one learns about it too.
         if (_answered.add(base64.encode(signal.from))) {
@@ -326,6 +410,7 @@ class SyncCubit extends Cubit<SyncState> {
         }
         if (_initiates(signal.device)) _link(signal, initiator: true);
       case SignalKind.bye:
+        _announces.remove(device);
         _retries.remove(device)?.cancel();
         _backoff.remove(device);
         _links.remove(device)?.close();

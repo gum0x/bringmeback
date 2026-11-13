@@ -467,10 +467,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
     on<_ClearAllEvent>(_onClearAll);
-    on<_RemoteChangesEvent>((event, emit) {
-      emit(_view());
-      _saveState();
-    });
+    on<_RemoteChangesEvent>((event, emit) => _edit(emit, (doc) => doc.mergeTimers()));
 
     add(LoadStateEvent());
     tick = SecondTicker(() => add(UpdateTimerEvent()));
