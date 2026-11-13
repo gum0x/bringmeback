@@ -6,6 +6,8 @@ import 'package:cryptography/cryptography.dart';
 
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 
+import 'share_link.dart';
+
 /// Devices pair by sharing one 32-byte group secret, shown as a QR code or a text code. Symbolon
 /// (github.com/common-sec/symbolon) derives every group key from it: the seal key for signalling messages
 /// on public relays, the topic key that names the relay topic, the Noise PSK that proves group membership,
@@ -43,9 +45,10 @@ class PairingCode {
 
   factory PairingCode.generate() => PairingCode._(randomBytes(_secretLength));
 
-  /// Parses a code typed, pasted or scanned on another device. Throws [FormatException].
+  /// Parses a code typed, pasted or scanned on another device, alone or in a share link. Throws
+  /// [FormatException].
   static Future<PairingCode> parse(String text) async {
-    final trimmed = text.trim();
+    final trimmed = ShareLink.parse(text)?.code ?? text.trim();
     if (!trimmed.startsWith(_codePrefix)) {
       throw FormatException('This is not a bringmeback pairing code.');
     }

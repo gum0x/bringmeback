@@ -42,6 +42,13 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
+        // Where share links point (see AndroidManifest.xml): the same address as the app's
+        // SHARE_LINK_BASE, e.g. `flutter build apk --dart-define=SHARE_LINK_BASE=https://example.com/app/
+        // -PshareLinkHost=example.com -PshareLinkPath=/app/`.
+        manifestPlaceholders += [
+            shareLinkHost: project.findProperty("shareLinkHost") ?: "gum0x.github.io",
+            shareLinkPath: project.findProperty("shareLinkPath") ?: "/bringmeback/",
+        ]
     }
 
     buildTypes {
