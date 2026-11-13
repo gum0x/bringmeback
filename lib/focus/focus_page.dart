@@ -280,6 +280,13 @@ class _ClockPanel extends StatelessWidget {
                 label: Text('${p.settings.workMinutes} min focus · '
                     '${p.settings.shortBreakMinutes} min break'),
               ),
+              Text(
+                describeCycle(p.settings),
+                key: const Key('pomodoroCycle'),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -415,6 +422,13 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
     return v == null || v <= 0 ? null : v;
   }
 
+  PomodoroSettings get _current => PomodoroSettings(
+        workMinutes: _read(_work)!,
+        shortBreakMinutes: _read(_short)!,
+        longBreakMinutes: _read(_long)!,
+        sessionsBeforeLongBreak: _read(_sessions)!,
+      );
+
   bool get _valid =>
       [_work, _short, _long, _sessions].every((c) => _read(c) != null);
 
@@ -453,6 +467,15 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
             _field('Short break', _short, 'min'),
             _field('Long break', _long, 'min'),
             _field('Long break every', _sessions, 'sessions'),
+            if (_valid)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  describeCycle(_current),
+                  key: const Key('pomodoroDialogCycle'),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
               controlAffinity: ListTileControlAffinity.leading,
@@ -470,15 +493,7 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
         ),
         FilledButton(
           onPressed: _valid
-              ? () => Navigator.pop(context, (
-                    PomodoroSettings(
-                      workMinutes: _read(_work)!,
-                      shortBreakMinutes: _read(_short)!,
-                      longBreakMinutes: _read(_long)!,
-                      sessionsBeforeLongBreak: _read(_sessions)!,
-                    ),
-                    _asDefault
-                  ))
+              ? () => Navigator.pop(context, (_current, _asDefault))
               : null,
           child: const Text('Save'),
         ),

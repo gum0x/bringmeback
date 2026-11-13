@@ -196,15 +196,24 @@ void main() {
     await tester.pump();
 
     expect(find.text('25 min focus · 5 min break'), findsOneWidget);
+    // 4 × 25 min of focus, 3 short breaks of 5 and a long one of 15.
+    expect(find.text('Full cycle 2 h 10 min: 1 h 40 min of focus in 4 sessions'),
+        findsOneWidget);
     await tester.tap(find.byKey(const Key('pomodoroLengths')));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'Focus'), '40');
+    await tester.pump();
+    expect(
+        tester.widget<Text>(find.byKey(const Key('pomodoroDialogCycle'))).data,
+        'Full cycle 3 h 10 min: 2 h 40 min of focus in 4 sessions');
     await tester.tap(find.text('Use these lengths from now on'));
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(find.text('40:00'), findsOneWidget);
     expect(find.text('40 min focus · 5 min break'), findsOneWidget);
+    expect(find.text('Full cycle 3 h 10 min: 2 h 40 min of focus in 4 sessions'),
+        findsOneWidget);
     // Unticked: the next focus still starts from the saved default.
     final saved = await tester.runAsync(PomodoroSettings.load);
     expect(saved?.workMinutes, 25);
