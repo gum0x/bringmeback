@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
 import '../focus/focus_page.dart';
 import '../timer.dart';
@@ -17,7 +18,7 @@ Future<void> writeTask(BuildContext context,
     showNoteFull(context);
     return;
   }
-  final details = await showTaskDialog(context);
+  final details = await showTaskDialog(context, categories: tasksBloc.state.categories);
   if (details == null) return;
   final id = ValueKey<String>(newId());
   tasksBloc.add(onTop
@@ -25,13 +26,15 @@ Future<void> writeTask(BuildContext context,
           name: details.name,
           notes: details.notes,
           id: id,
-          timerLengthSeconds: details.timerLengthSeconds)
+          timerLengthSeconds: details.timerLengthSeconds,
+          category: details.category)
       : InsertTaskEvent(
           index: index,
           name: details.name,
           notes: details.notes,
           id: id,
-          timerLengthSeconds: details.timerLengthSeconds));
+          timerLengthSeconds: details.timerLengthSeconds,
+          category: details.category));
 }
 
 /// Edits the name, details and countdown of the task at [index] in the dialog.
@@ -40,17 +43,25 @@ Future<void> editTask(BuildContext context, int index) async {
   final tasks = tasksBloc.state.tasks;
   if (index < 0 || index >= tasks.length) return;
   final task = tasks[index];
+  final state = tasksBloc.state;
+  final pick = task.categoryByHand
+      ? CategoryPick.hand(state.category(task.category)?.id)
+      : const CategoryPick.auto();
   final details = await showTaskDialog(context,
       name: task.name,
       notes: task.notes,
       timerLengthSeconds: task.timerLengthSeconds,
+      categories: state.categories,
+      category: pick,
+      autoCategory: task.categoryByHand ? null : state.category(task.category)?.name,
       editing: true);
   if (details == null) return;
   tasksBloc.add(EditTaskEvent(
       id: task.id,
       name: details.name,
       notes: details.notes,
-      timerLengthSeconds: details.timerLengthSeconds));
+      timerLengthSeconds: details.timerLengthSeconds,
+      category: details.category == pick ? null : details.category));
 }
 
 void showNoteFull(BuildContext context) {
@@ -246,16 +257,28 @@ class _TaskLineState extends State<TaskLine> {
       ),
     );
 
-    final details = <Widget>[
-      StrikeText(
-        task.name.isEmpty ? 'Untitled task' : task.name,
-        struck: task.done,
-        style: theme.textTheme.titleMedium?.copyWith(
-          color: colors.ink,
-          fontWeight: widget.current ? FontWeight.w600 : FontWeight.w400,
-          fontStyle: task.name.isEmpty ? FontStyle.italic : null,
-        ),
+    final name = StrikeText(
+      task.name.isEmpty ? 'Untitled task' : task.name,
+      struck: task.done,
+      style: theme.textTheme.titleMedium?.copyWith(
+        color: colors.ink,
+        fontWeight: widget.current ? FontWeight.w600 : FontWeight.w400,
+        fontStyle: task.name.isEmpty ? FontStyle.italic : null,
       ),
+    );
+    final category = context.select<TasksBloc, TaskCategory?>(
+        (bloc) => bloc.state.category(task.category));
+
+    final details = <Widget>[
+      if (category == null)
+        name
+      else
+        Wrap(
+          spacing: 8,
+          runSpacing: 2,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [name, CategoryTag(task: task, category: category)],
+        ),
       if (task.notes.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 2),
@@ -385,6 +408,64 @@ class _TaskLineState extends State<TaskLine> {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The category a task is filed under, shown next to its name for information. Tapping it changes
+/// the category, or hands it back to the categoriser.
+class CategoryTag extends StatelessWidget {
+  final TaskState task;
+  final TaskCategory category;
+
+  const CategoryTag({super.key, required this.task, required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NoteColors.of(context);
+    final theme = Theme.of(context);
+    final bloc = context.read<TasksBloc>();
+    final style = theme.textTheme.labelMedium?.copyWith(color: colors.faded);
+    return PopupMenuButton<CategoryPick>(
+      tooltip: task.categoryByHand
+          ? 'Category: ${category.name}, chosen by you. Tap to change'
+          : 'Category: ${category.name}, chosen automatically. Tap to change',
+      onSelected: (pick) =>
+          bloc.add(SetTaskCategoryEvent(id: task.id.value, category: pick)),
+      itemBuilder: (context) => [
+        for (final c in bloc.state.categories)
+          CheckedPopupMenuItem(
+            value: CategoryPick.hand(c.id),
+            checked: c.id == category.id,
+            child: Text(c.name),
+          ),
+        const PopupMenuDivider(),
+        if (task.categoryByHand)
+          const PopupMenuItem(
+            value: CategoryPick.auto(),
+            child: ListTile(
+                leading: Icon(Icons.auto_awesome), title: Text('Choose automatically')),
+          ),
+        const PopupMenuItem(
+          value: CategoryPick.hand(null),
+          child: ListTile(leading: Icon(Icons.label_off_outlined), title: Text('No category')),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: ShapeDecoration(
+          shape: StadiumBorder(side: BorderSide(color: colors.faded.withValues(alpha: 0.5))),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(task.categoryByHand ? Icons.label_outline : Icons.auto_awesome,
+                size: 12, color: colors.faded),
+            const SizedBox(width: 4),
+            Text(category.name, style: style),
           ],
         ),
       ),

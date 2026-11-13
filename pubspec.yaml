@@ -40,3 +40,4 @@ flutter:
   assets:
     - assets/alert.mp3
     - assets/bmb-reminder.mp3
+    - assets/word_vectors.bin

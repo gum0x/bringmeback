@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../category/categoriser.dart';
 import '../ticker.dart';
 import 'task_document.dart';
 
@@ -79,6 +80,12 @@ class TaskState {
   /// The task of an earlier note this one was written again from.
   final String? carriedFrom;
 
+  /// The id of the category the task is filed under, or null for none yet.
+  final String? category;
+
+  /// Whether the user chose [category] (or chose none), rather than the categoriser.
+  final bool categoryByHand;
+
   TaskState(
       {required this.name,
       this.notes = '',
@@ -89,7 +96,9 @@ class TaskState {
       this.totalResetAt = 0,
       this.inFocus = false,
       this.doneAt,
-      this.carriedFrom})
+      this.carriedFrom,
+      this.category,
+      this.categoryByHand = false})
       : entries = entries ?? [];
 
   bool get done => doneAt != null;
@@ -128,10 +137,14 @@ class TasksState {
   /// How many tasks fit on a note, set in Settings.
   final int noteLines;
 
+  /// The categories tasks are filed under, set in Settings and synced. Deleted ones left out.
+  final List<TaskCategory> categories;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
       this.noteLines = defaultNoteLines,
+      this.categories = const [],
       int? noteStartedAt,
       this.pending = const [],
       this.loaded = false})
@@ -145,7 +158,17 @@ class TasksState {
       pending: pending,
       loaded: loaded,
       noteLines: noteLines,
+      categories: categories,
     );
+  }
+
+  /// The category with [id], or null when there is none in the list.
+  TaskCategory? category(String? id) {
+    if (id == null) return null;
+    for (final c in categories) {
+      if (c.id == id) return c;
+    }
+    return null;
   }
 
   /// The index of the task being worked on: the first one not checked off, or -1.
@@ -162,6 +185,30 @@ class TasksState {
 
 abstract class TasksEvent {}
 
+/// What the user picked for a task's category.
+class CategoryPick {
+  /// The category, or null for none.
+  final String? id;
+
+  /// Whether the user chose it. When not, the categoriser picks one.
+  final bool byHand;
+
+  /// Let the categoriser pick.
+  const CategoryPick.auto()
+      : id = null,
+        byHand = false;
+
+  /// The user's own choice; [id] null for none.
+  const CategoryPick.hand(this.id) : byHand = true;
+
+  @override
+  bool operator ==(Object other) =>
+      other is CategoryPick && other.id == id && other.byHand == byHand;
+
+  @override
+  int get hashCode => Object.hash(id, byHand);
+}
+
 /// Writes a task on top of the note, as an interruption: it becomes the current task and its timer
 /// runs.
 class AddTaskOnTopEvent extends TasksEvent {
@@ -170,9 +217,14 @@ class AddTaskOnTopEvent extends TasksEvent {
   final int? timerLengthSeconds;
 
   final String notes;
+  final CategoryPick category;
 
   AddTaskOnTopEvent(
-      {required this.name, required this.id, this.timerLengthSeconds, this.notes = ''});
+      {required this.name,
+      required this.id,
+      this.timerLengthSeconds,
+      this.notes = '',
+      this.category = const CategoryPick.auto()});
 }
 
 /// Writes a task right after the one at [index].
@@ -194,13 +246,15 @@ class InsertTaskEvent extends TasksEvent {
   final int? timerLengthSeconds;
 
   final String notes;
+  final CategoryPick category;
 
   InsertTaskEvent(
       {required this.index,
       required this.name,
       required this.id,
       this.timerLengthSeconds,
-      this.notes = ''});
+      this.notes = '',
+      this.category = const CategoryPick.auto()});
 }
 
 /// Checks a task off, or unchecks it. Either way it stays on the note.
@@ -219,8 +273,15 @@ class EditTaskEvent extends TasksEvent {
 
   final String? notes;
 
+  /// The category picked in the dialog, or null to leave it as it is.
+  final CategoryPick? category;
+
   EditTaskEvent(
-      {required this.id, required this.name, required this.timerLengthSeconds, this.notes});
+      {required this.id,
+      required this.name,
+      required this.timerLengthSeconds,
+      this.notes,
+      this.category});
 }
 
 /// Tears off the current note and starts an empty one. Its unfinished tasks wait to be written again
@@ -348,6 +409,52 @@ class UpdateTaskTimerEvent extends TasksEvent {
 
 class LoadStateEvent extends TasksEvent {}
 
+/// Files a task under a category, from the task's category menu.
+class SetTaskCategoryEvent extends TasksEvent {
+  final String id;
+  final CategoryPick category;
+
+  SetTaskCategoryEvent({required this.id, required this.category});
+}
+
+/// Adds a category to the list in Settings.
+class AddCategoryEvent extends TasksEvent {
+  final String name;
+  final String keywords;
+  final String rules;
+
+  AddCategoryEvent({required this.name, this.keywords = '', this.rules = ''});
+}
+
+/// Renames a category or changes its keywords or rules.
+class EditCategoryEvent extends TasksEvent {
+  final String id;
+  final String name;
+  final String keywords;
+  final String rules;
+
+  EditCategoryEvent(
+      {required this.id, required this.name, required this.keywords, this.rules = ''});
+}
+
+class RemoveCategoryEvent extends TasksEvent {
+  final String id;
+
+  RemoveCategoryEvent({required this.id});
+}
+
+/// Brings back the default categories that were deleted.
+class RestoreDefaultCategoriesEvent extends TasksEvent {}
+
+/// The categoriser is ready to file the tasks [ids]; null when it couldn't load, and only the
+/// categories' rules apply.
+class _CategoriseEvent extends TasksEvent {
+  final List<String> ids;
+  final Categoriser? categoriser;
+
+  _CategoriseEvent(this.ids, this.categoriser);
+}
+
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
 
@@ -386,13 +493,35 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   /// The task document, once loaded, for syncing with the group's other devices.
   Future<CRDTDocument> get document => _document.future;
 
-  TasksBloc() : super(TasksState(tasks: [])) {
+  // Loads the categoriser, on first use; tests pass their own.
+  final Future<Categoriser> Function() _categoriser;
+
+  TasksBloc({Future<Categoriser> Function()? categoriser})
+      : _categoriser = categoriser ?? Categoriser.bundled,
+        super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>((e, emit) => _insert(emit, e.index + 1, e.id.value,
         e.name, e.timerLengthSeconds));
     on<InsertTaskEvent>((e, emit) => _insert(
         emit, e.index, e.id.value, e.name, e.timerLengthSeconds,
-        notes: e.notes));
+        notes: e.notes, category: e.category));
+    on<SetTaskCategoryEvent>(_onSetTaskCategory);
+    on<AddCategoryEvent>((e, emit) => _editCategories(
+        emit,
+        (doc) => doc.addCategory(newId(), e.name.trim(),
+            keywords: e.keywords.trim(), rules: e.rules.trim())));
+    on<EditCategoryEvent>((e, emit) => _editCategories(emit, (doc) {
+          final before = doc.categories().where((c) => c.id == e.id).firstOrNull;
+          // Only what changed is written, so a default category keeps following the app's defaults
+          // in the fields the user didn't touch.
+          if (before?.name != e.name.trim()) doc.setCategoryName(e.id, e.name.trim());
+          if (before?.keywords != e.keywords.trim()) doc.setCategoryKeywords(e.id, e.keywords.trim());
+          if (before?.rules != e.rules.trim()) doc.setCategoryRules(e.id, e.rules.trim());
+        }));
+    on<RemoveCategoryEvent>((e, emit) => _editCategories(emit, (doc) => doc.removeCategory(e.id)));
+    on<RestoreDefaultCategoriesEvent>(
+        (e, emit) => _editCategories(emit, (doc) => doc.restoreDefaultCategories()));
+    on<_CategoriseEvent>(_onCategorise);
     on<SetDoneEvent>((e, emit) => _setDone(emit, e.index, e.done));
     on<EditTaskEvent>(_onEditTask);
     on<TearOffNoteEvent>(_onTearOff);
@@ -434,6 +563,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       tasks: doc.tasks(focusId: _focusId),
       muted: _muted,
       noteLines: _noteLines,
+      categories: doc.categories(),
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
       loaded: true,
@@ -485,25 +615,96 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       doc.insert(0, event.id.value,
           name: event.name,
           notes: event.notes,
+          category: event.category.id,
+          categoryByHand: event.category.byHand,
           timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60);
       _runTop(doc, true);
       _focusId = event.id.value;
     });
+    if (!event.category.byHand) _categorise([event.id.value]);
   }
 
   void _insert(Emitter<TasksState> emit, int index, String id, String name,
       int? timerLengthSeconds,
-      {String notes = ''}) {
+      {String notes = '', CategoryPick category = const CategoryPick.auto()}) {
     _edit(emit, (doc) {
       if (doc.ids.length >= _noteLines) return;
       final working = _working(doc);
       doc.insert(index.clamp(0, doc.ids.length), id,
           name: name,
           notes: notes,
+          category: category.id,
+          categoryByHand: category.byHand,
           timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
       _runTop(doc, working);
       _focusId = id;
     });
+    if (!category.byHand) _categorise([id]);
+  }
+
+  /// Files the tasks [ids] whose category the user hasn't chosen, once the categoriser has loaded.
+  /// Only the device where the task was written or changed does it; the result syncs like any edit.
+  Future<void> _categorise(List<String> ids) async {
+    final doc = _doc;
+    if (ids.isEmpty || doc == null) return;
+    // With no categories there is nothing to choose from, and no need to load the vectors.
+    if (doc.categories().isEmpty && ids.every((id) => doc.task(id).category == null)) return;
+    Categoriser? categoriser;
+    try {
+      categoriser = await _categoriser();
+    } on Object catch (e) {
+      // Only the rules apply then; the user can still pick a category.
+      debugPrint('Categoriser unavailable: $e');
+    }
+    if (!isClosed) add(_CategoriseEvent(ids, categoriser));
+  }
+
+  void _onCategorise(_CategoriseEvent event, Emitter<TasksState> emit) {
+    final doc = _doc;
+    if (doc == null) return;
+    final categories = doc.categories();
+    final examples = [
+      for (final e in doc.categoryExamples()) (text: e.name, category: e.category)
+    ];
+    var changed = false;
+    for (final id in event.ids) {
+      final task = doc.task(id);
+      // Gone, or the user chose since: their choice stands.
+      if (task.categoryByHand || doc.fieldInt('$id/timerStartAt') == null) continue;
+      final pick = event.categoriser?.categorise(task.name, categories, examples: examples) ??
+          Categoriser.byRule(task.name, categories);
+      if (pick == task.category) continue;
+      doc.setTaskCategory(id, pick, byHand: false);
+      changed = true;
+    }
+    if (!changed) return;
+    emit(_view());
+    _saveState();
+  }
+
+  void _onSetTaskCategory(SetTaskCategoryEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) => _pickCategory(doc, event.id, event.category));
+  }
+
+  /// Files task [id] as the user picked: under their choice, or back to the categoriser.
+  void _pickCategory(TaskDocument doc, String id, CategoryPick pick) {
+    final task = doc.task(id);
+    if (pick.byHand) {
+      if (!task.categoryByHand || task.category != pick.id) {
+        doc.setTaskCategory(id, pick.id, byHand: true);
+      }
+    } else if (task.categoryByHand) {
+      doc.clearTaskCategory(id);
+      _categorise([id]);
+    }
+  }
+
+  /// Changes the category list, then files again the tasks on the note the user hasn't filed.
+  void _editCategories(Emitter<TasksState> emit, void Function(TaskDocument doc) change) {
+    _edit(emit, change);
+    final doc = _doc;
+    if (doc == null) return;
+    _categorise([for (final id in doc.ids) if (!doc.task(id).categoryByHand) id]);
   }
 
   /// Checking off the current task hands the timer on to the next unchecked one; unchecking a task
@@ -531,6 +732,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         _lastRemaining.remove(id);
         doc.setTimer(id, event.timerLengthSeconds, nowSeconds());
       }
+      if (event.category case final pick?) _pickCategory(doc, id, pick);
+      // A new name may belong somewhere else.
+      if (task.name != event.name && !doc.task(id).categoryByHand) _categorise([id]);
     });
   }
 
@@ -700,6 +904,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) => doc.setName(event.id.value, event.newName));
+    final task = _doc?.task(event.id.value);
+    if (task != null && !task.categoryByHand) _categorise([event.id.value]);
   }
 
   void _onUpdateTaskTimer(

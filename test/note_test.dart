@@ -174,6 +174,9 @@ void main() {
     await tester.scrollUntilVisible(find.text('Long break every'), 100);
     expect(find.text('25 min'), findsOneWidget);
     for (final tooltip in ['Longer focus', 'Longer focus', 'Shorter short break']) {
+      // Categories follow below, so the list scrolls.
+      await tester.ensureVisible(find.byTooltip(tooltip));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(tooltip));
       await tester.pumpAndSettle();
     }
