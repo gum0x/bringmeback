@@ -202,6 +202,13 @@ class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
           moreTooltip: 'More sessions before a long break',
           onChanged: (v) => _update(s.copyWith(sessionsBeforeLongBreak: v)),
         ),
+        ListTile(
+          key: const Key('pomodoroCycle'),
+          leading: const Icon(Icons.timelapse),
+          title: Text(describeCycle(s)),
+          subtitle: const Text('Every focus session, the short breaks between them '
+              'and the long break.'),
+        ),
       ],
     );
   }

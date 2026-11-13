@@ -86,8 +86,9 @@ below or beside it, the rest of the list in a quiet **Up next**.
 - **Mark task done** finishes the task and goes back to the list, with Undo.
 - The lengths under the clock (or the settings icon at the top right) set the focus, short break
   and long break lengths and how many sessions come before a long break. They apply right away; leave
-  **Use these lengths from now on** ticked to keep them on this device for the next focus. The
-  defaults are also in **Settings**, under **Pomodoro**.
+  **Use these lengths from now on** ticked to keep them on this device for the next focus. Under them
+  the view shows what a full cycle adds up to, up to the end of the long break, and how much of it
+  is focus. The defaults, with the same total, are also in **Settings**, under **Pomodoro**.
 - The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
   carries on as it was.
 

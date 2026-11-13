@@ -179,6 +179,10 @@ void main() {
     }
     expect(find.text('27 min'), findsOneWidget);
     expect(find.text('4 min'), findsOneWidget);
+    // 4 × 27 min of focus, 3 short breaks of 4 and a long one of 15.
+    await tester.scrollUntilVisible(find.byKey(const Key('pomodoroCycle')), 100);
+    expect(find.text('Full cycle 2 h 15 min: 1 h 48 min of focus in 4 sessions'),
+        findsOneWidget);
 
     final saved = await tester.runAsync(PomodoroSettings.load);
     expect(saved?.workMinutes, 27);
