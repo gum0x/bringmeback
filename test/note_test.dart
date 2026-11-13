@@ -168,6 +168,41 @@ void main() {
     expect(prefs.getInt('noteLines'), minNoteLines);
   });
 
+  noteTest('the note shows the time committed, in red past the time per note',
+      (tester, bloc) async {
+    for (var i = 0; i < 3; i++) {
+      bloc.add(InsertTaskEvent(
+          index: i, name: 'Task $i', id: ValueKey('t$i'), timerLengthSeconds: 2 * 3600));
+    }
+    await settle(tester);
+    final committed = find.byKey(const Key('committedTime'));
+    String header() => tester.widget<Text>(committed).textSpan!.toPlainText();
+    expect(header(), startsWith('Committed 6 h · done by ~'));
+    // The finish is a quarter hour, not a ticking clock.
+    expect(header(), matches(RegExp(r'~\d+:(00|15|30|45)')));
+    expect(bloc.state.overCommitted, isFalse);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('8 h'), findsOneWidget);
+    for (var i = 0; i < 5; i++) {
+      await tester.tap(find.byTooltip('Less time per note'));
+      await settle(tester);
+    }
+    expect(find.text('5 h 30 min'), findsOneWidget);
+    expect(bloc.state.noteMinutes, 5 * 60 + 30);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('noteMinutes'), 5 * 60 + 30);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(bloc.state.overCommitted, isTrue);
+    expect(header(), startsWith('Committed 6 h of 5 h 30 min · done by ~'));
+    final span = tester.widget<Text>(committed).textSpan! as TextSpan;
+    expect((span.children!.first as TextSpan).style?.color,
+        Theme.of(tester.element(committed)).colorScheme.error);
+  });
+
   noteTest('the Pomodoro lengths are set in Settings and kept', (tester, bloc) async {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();

@@ -27,6 +27,24 @@ const defaultNoteLines = 10;
 const minNoteLines = 3;
 const maxNoteLines = 20;
 
+/// How much time a note may hold unless Settings says otherwise, in minutes: the expected times of
+/// its tasks added up. More than that shows in red, as a day planned too full.
+const defaultNoteMinutes = 8 * 60;
+
+/// The range Settings offers for the time a note holds, and its step.
+const minNoteMinutes = 60;
+const maxNoteMinutes = 16 * 60;
+const noteMinutesStep = 30;
+
+/// Rounds [seconds] since the epoch up to the next quarter of an hour, so an estimate based on it
+/// doesn't tick.
+int roundUpToQuarterHour(int seconds) {
+  final time = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+  final hour = DateTime(time.year, time.month, time.day, time.hour);
+  final quarters = (time.difference(hour).inSeconds + 15 * 60 - 1) ~/ (15 * 60);
+  return hour.add(Duration(minutes: 15 * quarters)).millisecondsSinceEpoch ~/ 1000;
+}
+
 /// A day starts at 4:00, so working past midnight still counts as the same day.
 const dayStartHour = 4;
 
@@ -127,10 +145,14 @@ class TasksState {
   /// How many tasks fit on a note, set in Settings.
   final int noteLines;
 
+  /// How much time a note may hold, in minutes, set in Settings.
+  final int noteMinutes;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
       this.noteLines = defaultNoteLines,
+      this.noteMinutes = defaultNoteMinutes,
       int? noteStartedAt,
       this.pending = const [],
       this.loaded = false})
@@ -144,6 +166,7 @@ class TasksState {
       pending: pending,
       loaded: loaded,
       noteLines: noteLines,
+      noteMinutes: noteMinutes,
     );
   }
 
@@ -151,6 +174,25 @@ class TasksState {
   int get currentIndex => tasks.indexWhere((t) => !t.done);
 
   bool get full => tasks.length >= noteLines;
+
+  /// The time committed to on this note: the expected times of all its tasks, done ones included.
+  int get committedSeconds => tasks.fold(0, (sum, t) => sum + t.timerLengthSeconds);
+
+  /// Whether more time is committed than a note holds.
+  bool get overCommitted => committedSeconds > noteMinutes * 60;
+
+  /// Time still to work on what is not done: each task's countdown left, none for one over time.
+  /// Breaks are not counted.
+  int secondsLeftAt(int now) =>
+      tasks.where((t) => !t.done).fold(0, (sum, t) => sum + max(0, t.remainingSecondsAt(now)));
+
+  /// When everything on the note would be done, working on without breaks, rounded up to the
+  /// quarter hour. Null when nothing is left to do.
+  int? finishAt([int? now]) {
+    final at = now ?? nowSeconds();
+    final left = secondsLeftAt(at);
+    return left == 0 ? null : roundUpToQuarterHour(at + left);
+  }
 
   bool get allDone => tasks.isNotEmpty && tasks.every((t) => t.done);
 
@@ -317,6 +359,13 @@ class SetNoteLinesEvent extends TasksEvent {
   SetNoteLinesEvent(this.lines);
 }
 
+/// Sets how much time a note may hold, in minutes.
+class SetNoteMinutesEvent extends TasksEvent {
+  final int minutes;
+
+  SetNoteMinutesEvent(this.minutes);
+}
+
 /// Says which task, if any, is open in the Pomodoro focus view. That task's own countdown stays
 /// quiet there, with no "Time's up" or reminder, because the Pomodoro clock is the one that counts.
 class SetFocusModeEvent extends TasksEvent {
@@ -363,6 +412,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
   int _noteLines = defaultNoteLines;
+  int _noteMinutes = defaultNoteMinutes;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -397,6 +447,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
     on<SetNoteLinesEvent>(_onSetNoteLines);
+    on<SetNoteMinutesEvent>(_onSetNoteMinutes);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
@@ -421,12 +472,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   TasksState _view() {
     final doc = _doc;
     if (doc == null) {
-      return TasksState(tasks: [], muted: _muted, noteLines: _noteLines);
+      return TasksState(
+          tasks: [], muted: _muted, noteLines: _noteLines, noteMinutes: _noteMinutes);
     }
     return TasksState(
       tasks: doc.tasks(focusId: _focusId),
       muted: _muted,
       noteLines: _noteLines,
+      noteMinutes: _noteMinutes,
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
       loaded: true,
@@ -653,6 +706,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         .then((prefs) => prefs.setInt('noteLines', _noteLines));
   }
 
+  void _onSetNoteMinutes(SetNoteMinutesEvent event, Emitter<TasksState> emit) {
+    _noteMinutes = event.minutes.clamp(minNoteMinutes, maxNoteMinutes);
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setInt('noteMinutes', _noteMinutes));
+  }
+
   void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
     _muted = !_muted;
     emit(_view());
@@ -732,6 +792,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _muted = prefs.getBool('muted') ?? false;
     _noteLines = (prefs.getInt('noteLines') ?? defaultNoteLines)
         .clamp(minNoteLines, maxNoteLines);
+    _noteMinutes = (prefs.getInt('noteMinutes') ?? defaultNoteMinutes)
+        .clamp(minNoteMinutes, maxNoteMinutes);
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');

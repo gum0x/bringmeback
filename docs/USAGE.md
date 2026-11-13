@@ -28,6 +28,11 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
 - **The note is small on purpose**: it holds 10 tasks, done ones included. When it is full, finish
   or delete something, or start a fresh note. Change the size in **Settings** (the gear in the top
   bar), from 3 to 20 tasks. Making it smaller keeps what is already written.
+- **Committed time**: under the date, the note adds up the expected times of all its tasks, and says
+  roughly when everything will be done if you work on without breaks, e.g. "Committed 3 h 20 min ·
+  done by ~14:45". The finish is rounded up to the quarter hour, so it doesn't tick like another
+  clock. A note holds 8 hours by default; when you commit more, the time turns red. Change it in
+  **Settings → Time per note**.
 
 ## A new day
 
