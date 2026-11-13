@@ -271,11 +271,20 @@ class _TaskLineState extends State<TaskLine> {
           padding: const EdgeInsets.only(top: 2),
           child: TaskClock(
             remainingSeconds: task.taskTimerSeconds,
+            lengthSeconds: task.timerLengthSeconds,
             totalSeconds: task.totalTaskTimerSeconds,
             paused: !task.running,
           ),
         )
-      else if (task.done && task.doneAt != null)
+      else if (!task.done)
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: PlannedTime(
+            remainingSeconds: task.taskTimerSeconds,
+            lengthSeconds: task.timerLengthSeconds,
+          ),
+        )
+      else if (task.doneAt != null)
         Text(
           'Done ${TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(task.doneAt! * 1000)).format(context)}',
           style: theme.textTheme.bodySmall?.copyWith(color: colors.faded),
@@ -414,10 +423,39 @@ class _InsertButton extends StatelessWidget {
   }
 }
 
-/// The countdown left, or the time over it, and the total time tracked on the current task.
+/// How long a task waiting its turn is expected to take, and how much of that is left when it has
+/// already been worked on.
+class PlannedTime extends StatelessWidget {
+  final int remainingSeconds;
+  final int lengthSeconds;
+
+  const PlannedTime(
+      {super.key, required this.remainingSeconds, required this.lengthSeconds});
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+      color: NoteColors.of(context).faded,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final planned = formatClock(lengthSeconds);
+    final text = switch (remainingSeconds) {
+      final r when r == lengthSeconds => 'Expected $planned',
+      final r when r < 0 => 'Expected $planned · +${formatClock(r)} over',
+      final r => 'Left ${formatClock(r)} of $planned',
+    };
+    return Text(text, style: style);
+  }
+}
+
+/// The countdown left, or the time over it, the time expected, and the total time tracked on the
+/// current task.
 class TaskClock extends StatelessWidget {
   final int remainingSeconds;
   final int totalSeconds;
+
+  /// How long the task is expected to take; left out when 0.
+  final int lengthSeconds;
   // Work on the task is paused.
   final bool paused;
 
@@ -425,6 +463,7 @@ class TaskClock extends StatelessWidget {
     super.key,
     required this.remainingSeconds,
     required this.totalSeconds,
+    this.lengthSeconds = 0,
     this.paused = false,
   });
 
@@ -444,7 +483,8 @@ class TaskClock extends StatelessWidget {
         Text(
           over
               ? '+${formatClock(remainingSeconds)} over'
-              : 'Left ${formatClock(remainingSeconds)}',
+              : 'Left ${formatClock(remainingSeconds)}'
+                  '${lengthSeconds > 0 ? ' of ${formatClock(lengthSeconds)}' : ''}',
           style: small?.copyWith(
             color: over ? theme.colorScheme.error : colors.ink,
             fontWeight: over ? FontWeight.bold : FontWeight.w500,

@@ -13,6 +13,8 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
   the countdown length; Enter in the name saves.
 - **New task** (at the end of the bottom bar, or Alt+N) writes a task on top, as an interruption: it
   takes the timer, and the task you were on waits one line below.
+- **Every task shows its time**: the one waiting shows how long it is expected to take, or the time
+  left if you already worked on it; the current one counts down, then shows how far over it is.
 - **Check a task off** with its checkbox. It stays on the note, struck through, with the time it was
   done. Uncheck it if you checked it by mistake. When every task is checked off, the note gets an
   "All done" stamp.
@@ -72,16 +74,18 @@ Select a task and press **Focus with Pomodoro** in the bottom bar to work on it 
 the top, so it is the current one, and a focus view opens with a large clock, the task's name and,
 below or beside it, the rest of the list in a quiet **Up next**.
 
-- **Start** (or Space) runs a focus session, 25 minutes by default. When it ends a sound plays and a
-  short break starts on its own; after every fourth session the break is a long one.
+- The first focus session starts as soon as the view opens, 25 minutes by default. **Pause** (or
+  Space) stops the clock and **Resume** carries on. When a session ends a sound plays and a short
+  break starts on its own; after every fourth session the break is a long one.
 - The task's own timer runs during focus sessions and pauses during breaks or when you pause the clock,
   so the breaks are logged like any other pause.
 - While the focus view is open, the task's own countdown stays quiet: no "Time's up" and no
   reminder sound. The Pomodoro clock is the one that counts. Back on the list it alerts as before.
 - **Skip** (⏭) ends the session or break now; **Restart** (↺) puts it back to its full length.
 - **Mark task done** finishes the task and goes back to the list, with Undo.
-- The settings icon at the top right sets the focus, short break and long break lengths and how many
-  sessions come before a long break. They are kept on this device.
+- The lengths under the clock (or the settings icon at the top right) set the focus, short break
+  and long break lengths and how many sessions come before a long break. They apply right away; leave
+  **Use these lengths from now on** ticked to keep them on this device for the next focus.
 - The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
   carries on as it was.
 
