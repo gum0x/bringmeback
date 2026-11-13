@@ -25,6 +25,7 @@ dependencies:
   # Pinned: libwebrtc parses packets from anyone before the Noise handshake, so updates are
   # deliberate and kept current.
   flutter_webrtc: 1.6.3
+  web: ^1.1.1
   web_socket_channel: ^3.0.3
 
 dev_dependencies:

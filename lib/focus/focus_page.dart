@@ -49,7 +49,13 @@ class _FocusPageState extends State<FocusPage> {
     if (index > 0) tasks.add(MoveTaskEvent(fromIndex: index, toIndex: 0));
     // The Pomodoro clock replaces the task's own countdown while this view is open.
     tasks.add(SetFocusModeEvent(taskId: widget.taskId));
-    _phases = context.read<PomodoroCubit>().phaseStarted.listen(_onPhase);
+    final pomodoro = context.read<PomodoroCubit>();
+    _phases = pomodoro.phaseStarted.listen(_onPhase);
+    // Opening the focus view is the decision to focus: the first session starts right away. After
+    // the first frame, so the task has moved on top and the listener below sees the start.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !pomodoro.isClosed) pomodoro.start();
+    });
   }
 
   @override
@@ -98,13 +104,14 @@ class _FocusPageState extends State<FocusPage> {
 
   Future<void> _editSettings() async {
     final cubit = context.read<PomodoroCubit>();
-    final updated = await showDialog<PomodoroSettings>(
+    final result = await showDialog<(PomodoroSettings, bool)>(
       context: context,
       builder: (_) => PomodoroSettingsDialog(settings: cubit.state.settings),
     );
-    if (updated == null) return;
+    if (result == null) return;
+    final (updated, asDefault) = result;
     cubit.updateSettings(updated);
-    await updated.save();
+    if (asDefault) await updated.save();
   }
 
   void _markDone() {
@@ -119,8 +126,7 @@ class _FocusPageState extends State<FocusPage> {
       content: Text(name.isEmpty ? 'Task done' : 'Done: $name'),
       action: SnackBarAction(
         label: 'Undo',
-        onPressed: () => tasks.add(RestoreTaskEvent(
-            index: index, id: ValueKey<String>(widget.taskId))),
+        onPressed: () => tasks.add(SetDoneEvent(index: index, done: false)),
       ),
     ));
     Navigator.of(context).pop();
@@ -159,12 +165,14 @@ class _FocusPageState extends State<FocusPage> {
                 final task = tasks.tasks[index];
                 final others = [
                   for (final (i, t) in tasks.tasks.indexed)
-                    if (i != index) t
+                    // Done tasks stay on the note, struck through; only what is left is next.
+                    if (i != index && !t.done) t
                 ];
                 return LayoutBuilder(builder: (context, constraints) {
                   final clock = _ClockPanel(
                     taskName: task.name,
                     onDone: _markDone,
+                    onEditLengths: _editSettings,
                   );
                   final list = _UpNext(tasks: others);
                   if (constraints.maxWidth >= 840) {
@@ -195,8 +203,12 @@ class _FocusPageState extends State<FocusPage> {
 class _ClockPanel extends StatelessWidget {
   final String taskName;
   final VoidCallback onDone;
+  final VoidCallback onEditLengths;
 
-  const _ClockPanel({required this.taskName, required this.onDone});
+  const _ClockPanel(
+      {required this.taskName,
+      required this.onDone,
+      required this.onEditLengths});
 
   @override
   Widget build(BuildContext context) {
@@ -261,7 +273,21 @@ class _ClockPanel extends StatelessWidget {
                     : '${p.completedSessions} done',
                 style: theme.textTheme.bodyMedium,
               ),
-              const SizedBox(height: 16),
+              TextButton.icon(
+                key: const Key('pomodoroLengths'),
+                onPressed: onEditLengths,
+                icon: const Icon(Icons.tune, size: 18),
+                label: Text('${p.settings.workMinutes} min focus · '
+                    '${p.settings.shortBreakMinutes} min break'),
+              ),
+              Text(
+                describeCycle(p.settings),
+                key: const Key('pomodoroCycle'),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -361,7 +387,8 @@ class _TaskGone extends StatelessWidget {
   }
 }
 
-/// Edits the Pomodoro lengths. Returns the new settings, or null when cancelled.
+/// Edits the Pomodoro lengths. Returns the new settings and whether to keep them as the default for
+/// the next focus, or null when cancelled.
 class PomodoroSettingsDialog extends StatefulWidget {
   final PomodoroSettings settings;
 
@@ -380,6 +407,7 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
       TextEditingController(text: '${widget.settings.longBreakMinutes}');
   late final _sessions =
       TextEditingController(text: '${widget.settings.sessionsBeforeLongBreak}');
+  bool _asDefault = true;
 
   @override
   void dispose() {
@@ -393,6 +421,13 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
     final v = int.tryParse(c.text);
     return v == null || v <= 0 ? null : v;
   }
+
+  PomodoroSettings get _current => PomodoroSettings(
+        workMinutes: _read(_work)!,
+        shortBreakMinutes: _read(_short)!,
+        longBreakMinutes: _read(_long)!,
+        sessionsBeforeLongBreak: _read(_sessions)!,
+      );
 
   bool get _valid =>
       [_work, _short, _long, _sessions].every((c) => _read(c) != null);
@@ -432,6 +467,22 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
             _field('Short break', _short, 'min'),
             _field('Long break', _long, 'min'),
             _field('Long break every', _sessions, 'sessions'),
+            if (_valid)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  describeCycle(_current),
+                  key: const Key('pomodoroDialogCycle'),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _asDefault,
+              onChanged: (v) => setState(() => _asDefault = v ?? false),
+              title: const Text('Use these lengths from now on'),
+            ),
           ],
         ),
       ),
@@ -442,14 +493,7 @@ class _PomodoroSettingsDialogState extends State<PomodoroSettingsDialog> {
         ),
         FilledButton(
           onPressed: _valid
-              ? () => Navigator.pop(
-                  context,
-                  PomodoroSettings(
-                    workMinutes: _read(_work)!,
-                    shortBreakMinutes: _read(_short)!,
-                    longBreakMinutes: _read(_long)!,
-                    sessionsBeforeLongBreak: _read(_sessions)!,
-                  ))
+              ? () => Navigator.pop(context, (_current, _asDefault))
               : null,
           child: const Text('Save'),
         ),
