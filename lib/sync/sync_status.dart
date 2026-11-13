@@ -98,6 +98,15 @@ class _SyncStatusButtonState extends State<SyncStatusButton> {
 
   @override
   Widget build(BuildContext context) {
+    // The task view also runs without sync, as in tests that don't load Symbolon.
+    if (context.read<SyncCubit?>() == null) {
+      return IconButton(
+        tooltip: 'Devices',
+        icon: const Icon(Icons.devices),
+        onPressed: () =>
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SyncPage())),
+      );
+    }
     return BlocBuilder<SyncCubit, SyncState>(builder: (context, state) {
       _update(SyncStatus.of(state));
       final status = _shown!;
