@@ -10,7 +10,9 @@ import 'peer.dart';
 ///
 /// When a link connects, each side sends its version vector, and the other answers with every change
 /// the vector doesn't cover. After that, each change made here goes to every link as it happens.
-/// Changes travel only inside the links' Noise channel.
+/// After taking in changes, a side sends its vector again, so each side knows when the other has
+/// caught up: a link is in sync while both vectors are the same. Changes travel only inside the
+/// links' Noise channel.
 ///
 /// Wire format, inside each Noise message: one flags byte (bit 0 set when more fragments follow) and
 /// the fragment. Fragments join into one message: a type byte, then
@@ -34,13 +36,35 @@ class DocumentSync {
   final CRDTDocument _doc;
   final _links = <PeerLink, _Incoming>{};
   late final StreamSubscription<Change> _local;
+  final _inSync = StreamController<Set<PeerLink>>.broadcast();
+  Set<PeerLink> _lastInSync = const {};
 
   DocumentSync(this._doc) {
     _local = _doc.localChanges.listen((change) {
       for (final link in _links.keys.toList()) {
         _send(link, _changes, ChangeCodec.encodeBlobs([change.toBytes()]));
       }
+      _status();
     });
+  }
+
+  /// The links whose device has the same changes as this one, each time that may have changed.
+  /// A change made here takes every link out of sync until its device confirms it.
+  Stream<Set<PeerLink>> get inSync => _inSync.stream;
+
+  /// The links in sync now. See [inSync].
+  Set<PeerLink> get linksInSync => _lastInSync;
+
+  void _status() {
+    final ours = _doc.getVersionVector();
+    final now = {
+      for (final MapEntry(key: link, value: incoming) in _links.entries)
+        if (incoming.remote case final remote?)
+          if (remote.isStrictlyNewerOrEqualThan(ours) && ours.isStrictlyNewerOrEqualThan(remote))
+            link,
+    };
+    _lastInSync = now;
+    if (!_inSync.isClosed) _inSync.add(now);
   }
 
   /// Syncs over `link` from now until it closes. Call it once the link is connected.
@@ -48,10 +72,17 @@ class DocumentSync {
     if (link.isClosed || _links.containsKey(link)) return;
     final incoming = _Incoming();
     _links[link] = incoming;
-    incoming.subscription = link.received.listen((fragment) => _fragment(link, fragment),
-        onDone: () => _links.remove(link));
-    link.closed.then((_) => _links.remove(link)?.subscription?.cancel());
+    incoming.subscription =
+        link.received.listen((fragment) => _fragment(link, fragment), onDone: () => _drop(link));
+    link.closed.then((_) => _drop(link));
     _send(link, _vector, _doc.getVersionVector().toBytes());
+  }
+
+  void _drop(PeerLink link) {
+    final incoming = _links.remove(link);
+    if (incoming == null) return;
+    incoming.subscription?.cancel();
+    _status();
   }
 
   void _fragment(PeerLink link, Uint8List fragment) {
@@ -76,10 +107,27 @@ class DocumentSync {
     final body = Uint8List.sublistView(message, 1);
     switch (message[0]) {
       case _vector:
-        _sendChanges(link, _doc.exportChangesNewerThan(VersionVector.fromBytes(body)));
+        final remote = VersionVector.fromBytes(body);
+        _sendChanges(link, _doc.exportChangesNewerThan(remote));
+        _links[link]?.remote = remote.mutable();
+        _status();
       case _changes:
         final changes = [for (final blob in ChangeCodec.decodeBlobs(body)) Change.fromBytes(blob)];
         _doc.importChanges(changes, origin: link);
+        // The sender has what it sent.
+        final remote = _links[link]?.remote;
+        if (remote != null) {
+          for (final change in changes) {
+            remote.update(change.id.peerId, change.id.hlc);
+          }
+        }
+        // Tell every device what this one has now: the sender learns it caught this one up, and the
+        // others answer with anything that is still missing on either side.
+        final vector = _doc.getVersionVector().toBytes();
+        for (final other in _links.keys.toList()) {
+          _send(other, _vector, vector);
+        }
+        _status();
       default:
         throw const FormatException('Unknown message');
     }
@@ -119,8 +167,8 @@ class DocumentSync {
   }
 
   void _reject(PeerLink link) {
-    _links.remove(link)?.subscription?.cancel();
-    link.close();
+    _drop(link);
+    link.fail(LinkFailure.protocol);
   }
 
   Future<void> close() async {
@@ -129,12 +177,16 @@ class DocumentSync {
       await incoming.subscription?.cancel();
     }
     _links.clear();
+    await _inSync.close();
   }
 }
 
 /// The fragments of the message a link is in the middle of sending.
 class _Incoming {
   StreamSubscription<Uint8List>? subscription;
+
+  /// The other device's version vector, as it last said.
+  VersionVector? remote;
   final parts = <Uint8List>[];
   var size = 0;
 
