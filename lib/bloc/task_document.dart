@@ -96,19 +96,58 @@ class TaskDocument {
       bool running = false}) {
     doc.runInTransaction(() {
       _order.insert(index, id);
-      _fields
-        ..set('$id/name', name)
-        ..set('$id/timerLength', timerLengthSeconds)
-        ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
-        ..set('$id/totalResetAt', totalResetAt);
-      if (notes.isNotEmpty) _fields.set('$id/notes', notes);
-      for (final e in entries) {
-        _fields.set('$id/e/${e.start}', e.end);
-      }
-      if (running && !entries.any((e) => e.end == null)) {
-        _fields.set('$id/e/${nowSeconds()}', null);
-      }
+      _writeTask(id,
+          name: name,
+          notes: notes,
+          timerLengthSeconds: timerLengthSeconds,
+          timerStartAt: timerStartAt,
+          totalResetAt: totalResetAt,
+          entries: entries,
+          running: running);
     });
+  }
+
+  /// Keeps tasks with the given fields as a note torn off at [at], as note [noteId], without
+  /// touching the current note. Their unfinished ones then wait to be written again or let go, like
+  /// those of any torn-off note. Used to import tasks that don't go on the current note.
+  void addTornOffNote(String noteId, int at, List<({String id, TaskState task})> tasks) =>
+      doc.runInTransaction(() {
+        for (final (:id, :task) in tasks) {
+          _writeTask(id,
+              name: task.name,
+              notes: task.notes,
+              timerLengthSeconds: task.timerLengthSeconds,
+              timerStartAt: task.timerStartAt,
+              totalResetAt: task.totalResetAt,
+              entries: task.entries);
+          if (task.doneAt case final doneAt?) _fields.set('$id/doneAt', doneAt);
+        }
+        _fields
+          ..set('note/$noteId/ids', [for (final t in tasks) t.id].join(','))
+          ..set('note/$noteId/startedAt', at)
+          ..set('note/$noteId/closedAt', at);
+      });
+
+  void _writeTask(String id,
+      {required String name,
+      required String notes,
+      required int timerLengthSeconds,
+      required int? timerStartAt,
+      required int totalResetAt,
+      required List<TimeEntry> entries,
+      bool running = false}) {
+    _fields
+      ..set('$id/name', name)
+      ..set('$id/timerLength', timerLengthSeconds)
+      ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
+      ..set('$id/totalResetAt', totalResetAt);
+    if (notes.isNotEmpty) _fields.set('$id/notes', notes);
+    for (final e in entries) {
+      _fields.set('$id/e/${e.start}', e.end);
+    }
+    if (running && !entries.any((e) => e.end == null)) {
+      _fields.set('$id/e/${nowSeconds()}', null);
+    }
   }
 
   /// Deletes the task at [index] from the note, keeping its fields and when it was deleted.
@@ -126,6 +165,9 @@ class TaskDocument {
   /// Checks a task off, keeping when it was finished, or unchecks it. It stays on the note either way.
   void setDone(String id, bool done) =>
       _fields.set('$id/doneAt', done ? nowSeconds() : null);
+
+  /// Checks a task off as finished at [at], such as one imported already done.
+  void setDoneAt(String id, int at) => _fields.set('$id/doneAt', at);
 
   int? doneAt(String id) => switch (_values['$id/doneAt']) { int v => v, _ => null };
 

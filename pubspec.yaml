@@ -26,6 +26,7 @@ dependencies:
   # deliberate and kept current.
   flutter_webrtc: 1.6.3
   web_socket_channel: ^3.0.3
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:
@@ -33,6 +34,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   integration_test:
     sdk: flutter
+  file_selector_platform_interface: ^2.7.0
 
 flutter:
   uses-material-design: true

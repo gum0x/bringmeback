@@ -1,6 +1,12 @@
+import 'dart:convert';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../bloc/task_transfer.dart';
 import '../bloc/tasks_bloc.dart';
 import '../focus/pomodoro.dart';
 
@@ -22,6 +28,9 @@ class SettingsPage extends StatelessWidget {
               _NoteLinesTile(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
+              _Section('Tasks'),
+              _ExportTasksTile(),
+              _ImportTasksTile(),
             ],
           ),
         ),
@@ -212,4 +221,100 @@ class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
       ],
     );
   }
+}
+
+/// The kind of file tasks are exported to and imported from.
+const _tasksFiles = XTypeGroup(
+  label: 'bringmeback tasks',
+  extensions: ['json'],
+  mimeTypes: ['application/json'],
+  uniformTypeIdentifiers: ['public.json'],
+);
+
+/// A tasks file bigger than this is refused before it is read: the most tasks a file may hold fit
+/// in far less.
+const _maxTasksFileBytes = 5 * 1024 * 1024;
+
+void _tell(BuildContext context, String message) => ScaffoldMessenger.of(context)
+  ..hideCurrentSnackBar()
+  ..showSnackBar(SnackBar(content: Text(message)));
+
+/// Saves today's note and the tasks waiting from earlier notes to a file, to keep or to import on
+/// another device.
+class _ExportTasksTile extends StatelessWidget {
+  const _ExportTasksTile();
+
+  Future<void> _export(BuildContext context) async {
+    final text = context.read<TasksBloc>().exportTasksFile();
+    if (text == null) return;
+    final now = DateTime.now();
+    final day = '${now.year}-${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final name = 'bringmeback-tasks-$day.json';
+    final file = XFile.fromData(Uint8List.fromList(utf8.encode(text)),
+        mimeType: 'application/json', name: name);
+    try {
+      if (kIsWeb) {
+        // A browser downloads the file; there is no save dialog to ask where.
+        await file.saveTo(name);
+      } else {
+        final location = await getSaveLocation(
+            suggestedName: name, acceptedTypeGroups: const [_tasksFiles]);
+        if (location == null) return;
+        await file.saveTo(location.path);
+      }
+      if (context.mounted) _tell(context, 'Tasks exported to $name.');
+    } on UnimplementedError {
+      // Phones running the app natively have no save dialog: hand the text over another way.
+      await Clipboard.setData(ClipboardData(text: text));
+      if (context.mounted) {
+        _tell(context, 'Saving files isn\'t possible here, so the tasks were copied instead.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        key: const Key('exportTasks'),
+        leading: const Icon(Icons.file_download_outlined),
+        title: const Text('Export tasks'),
+        subtitle: const Text('Save today\'s note and the tasks waiting from earlier notes '
+            'to a file.'),
+        onTap: () => _export(context),
+      );
+}
+
+/// Adds the tasks of an exported file. Tasks this device already has are left out.
+class _ImportTasksTile extends StatelessWidget {
+  const _ImportTasksTile();
+
+  Future<void> _import(BuildContext context) async {
+    final bloc = context.read<TasksBloc>();
+    final picked = await openFile(acceptedTypeGroups: const [_tasksFiles]);
+    if (picked == null || !context.mounted) return;
+    final TasksFile file;
+    try {
+      if (await picked.length() > _maxTasksFileBytes) {
+        throw const FormatException('This file is too big to be a tasks file.');
+      }
+      file = parseTasksFile(await picked.readAsString());
+    } on FormatException catch (e) {
+      if (context.mounted) _tell(context, e.message);
+      return;
+    }
+    final event = ImportTasksEvent(file);
+    bloc.add(event);
+    final result = await event.result.future;
+    if (context.mounted) _tell(context, result.summary);
+  }
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        key: const Key('importTasks'),
+        leading: const Icon(Icons.file_upload_outlined),
+        title: const Text('Import tasks'),
+        subtitle: const Text('Add the tasks of an exported file. They go below what you are '
+            'doing; any that don\'t fit wait with the tasks of earlier notes.'),
+        onTap: () => _import(context),
+      );
 }

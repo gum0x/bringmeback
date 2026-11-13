@@ -9,6 +9,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'task_document.dart';
+import 'task_transfer.dart';
 
 final Random _random = Random.secure();
 
@@ -347,6 +348,15 @@ class UpdateTaskTimerEvent extends TasksEvent {
 
 class LoadStateEvent extends TasksEvent {}
 
+/// Imports the tasks of a tasks file, telling [result] what was imported. Tasks this device already
+/// has are left out, so a file can be imported twice without writing anything twice.
+class ImportTasksEvent extends TasksEvent {
+  final TasksFile file;
+  final Completer<ImportResult> result = Completer();
+
+  ImportTasksEvent(this.file);
+}
+
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
 
@@ -407,6 +417,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskNameEvent>(_onUpdateTaskName);
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
+    on<ImportTasksEvent>(_onImportTasks);
     on<_RemoteChangesEvent>((event, emit) {
       emit(_view());
       _saveState();
@@ -689,6 +700,27 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
 
     emit(view);
+  }
+
+  /// The current note and the tasks waiting from torn-off notes, as the text of a tasks file. Null
+  /// until the document has loaded.
+  String? exportTasksFile() {
+    final doc = _doc;
+    return doc == null ? null : exportTasks(doc);
+  }
+
+  Future<void> _onImportTasks(ImportTasksEvent event, Emitter<TasksState> emit) async {
+    // An import may come before the saved tasks have loaded; it waits for them.
+    await document;
+    var result = const ImportResult();
+    _edit(emit, (doc) {
+      final working = _working(doc);
+      result = importTasks(doc, event.file, noteLines: _noteLines, newId: newId);
+      // Imported tasks go below what is being worked on; if nothing was, the first one unchecked
+      // becomes the current task, but its timer only runs if work was under way.
+      _runTop(doc, working);
+    });
+    event.result.complete(result);
   }
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
