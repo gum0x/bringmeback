@@ -383,6 +383,8 @@ class _CategoryDialogState extends State<_CategoryDialog> {
               controller: _keywords,
               minLines: 1,
               maxLines: 3,
+              // Enter saves, as in the name.
+              textInputAction: TextInputAction.done,
               decoration: const InputDecoration(
                 labelText: 'Keywords',
                 hintText: 'meeting, report, client (optional)',
@@ -396,10 +398,12 @@ class _CategoryDialogState extends State<_CategoryDialog> {
               controller: _rules,
               minLines: 1,
               maxLines: 3,
+              // Enter saves, as in the name.
+              textInputAction: TextInputAction.done,
               decoration: const InputDecoration(
                 labelText: 'Always for tasks that mention',
                 hintText: 'bringmeback, Acme (optional)',
-                helperText: 'Names or phrases, separated by commas. A task that mentions one\n'
+                helperText: 'Names or phrases, separated by commas. A task that mentions one '
                     'goes here, whatever else it says.',
                 helperMaxLines: 3,
                 border: OutlineInputBorder(),
