@@ -147,7 +147,31 @@ void main() {
     expect(find.textContaining('over your limit of $defaultTaskLimit'), findsOneWidget);
   });
 
-  noteTest('past the limit, a new task asks first and can go to the backlog', (tester, bloc) async {
+  noteTest('past the limit, a new task asks first: write anyway or let it go', (tester, bloc) async {
+    await fill(tester, bloc, defaultTaskLimit);
+    await writeThrough(tester, find.text('Add a task'), 'Maybe never');
+    expect(find.text('Your note is at its limit'), findsOneWidget);
+    // The backlog is experimental and off unless turned on.
+    expect(find.text('Save to backlog'), findsNothing);
+    await tester.tap(find.text('Let it go'));
+    await settle(tester);
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit));
+    expect(bloc.state.backlog, isEmpty);
+    expect(find.textContaining('Backlog'), findsNothing);
+    final history = buildHistory(bloc.taskDocument!);
+    final dropped = history.tasks.singleWhere((t) => t.name == 'Maybe never');
+    expect(dropped.status, TaskStatus.letGo);
+    expect(dropped.day, dayOf(nowSeconds()));
+
+    await writeThrough(tester, find.text('Add a task'), 'Urgent');
+    await tester.tap(find.text('Write on note anyway'));
+    await settle(tester);
+    expect(names(bloc), contains('Urgent'));
+    expect(find.textContaining('over your limit of $defaultTaskLimit'), findsOneWidget);
+  });
+
+  noteTest('with the backlog on, a new task past the limit can go there', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
     await fill(tester, bloc, defaultTaskLimit);
     expect(bloc.state.atLimit, isTrue);
     expect(find.textContaining('at your limit of $defaultTaskLimit'), findsOneWidget);
@@ -186,6 +210,7 @@ void main() {
   });
 
   noteTest('a backlog task is written on the note, or removed', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
     bloc.add(AddToBacklogEvent(name: 'Read the paper', id: const ValueKey('b1')));
     bloc.add(AddToBacklogEvent(name: 'Fix the bike', id: const ValueKey('b2')));
     await settle(tester);
@@ -196,14 +221,15 @@ void main() {
     expect(names(bloc), ['Read the paper']);
     expect([for (final t in bloc.state.backlog) t.name], ['Fix the bike']);
 
-    await tester.tap(find.byTooltip('Remove from backlog'));
+    await tester.tap(find.byTooltip('Let it go'));
     await settle(tester);
     expect(bloc.state.backlog, isEmpty);
     expect(find.textContaining('Backlog'), findsNothing);
-    expect(bloc.taskDocument!.status('b2'), TaskStatus.deleted);
+    expect(bloc.taskDocument!.status('b2'), TaskStatus.letGo);
   });
 
   noteTest('writing from the backlog past the limit asks first', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
     await fill(tester, bloc, defaultTaskLimit);
     bloc.add(AddToBacklogEvent(name: 'Someday', id: const ValueKey('b1')));
     await settle(tester);
@@ -228,6 +254,7 @@ void main() {
   });
 
   noteTest('an unfinished task of the last note can go to the backlog', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
     bloc.add(InsertTaskEvent(index: 0, name: 'Carry me', id: const ValueKey('c1')));
     await settle(tester);
     bloc.add(TearOffNoteEvent());
@@ -243,6 +270,23 @@ void main() {
     expect(names(bloc), ['Carry me']);
     expect(bloc.state.tasks.single.id.value, isNot('c1'));
     expect(bloc.taskDocument!.status('c1'), TaskStatus.carried);
+  });
+
+  noteTest('the backlog is an experimental switch in Settings, off by default', (tester, bloc) async {
+    bloc.add(AddToBacklogEvent(name: 'Hidden', id: const ValueKey('b1')));
+    await settle(tester);
+    expect(find.textContaining('Backlog'), findsNothing);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Experimental'));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Backlog'));
+    await settle(tester);
+    expect(bloc.state.backlogEnabled, isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('experimentalBacklog'), isTrue);
+    await tester.pageBack();
+    await settle(tester);
+    expect(find.text('Backlog · 1'), findsOneWidget);
   });
 
   noteTest('the limit is set in Settings and kept', (tester, bloc) async {

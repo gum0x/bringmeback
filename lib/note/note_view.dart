@@ -24,11 +24,14 @@ class NoteView extends StatelessWidget {
             child: Column(
               children: [
                 if (state.pending.isNotEmpty) ...[
-                  CarryOverPanel(pending: state.pending, atLimit: state.atLimit),
+                  CarryOverPanel(
+                      pending: state.pending,
+                      atLimit: state.atLimit,
+                      backlogEnabled: state.backlogEnabled),
                   const SizedBox(height: 24),
                 ],
                 _TodayNote(state: state),
-                if (state.backlog.isNotEmpty) ...[
+                if (state.backlogEnabled && state.backlog.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   BacklogPanel(backlog: state.backlog),
                 ],
@@ -149,7 +152,7 @@ class _TodayNote extends StatelessWidget {
                   const SizedBox(width: 8),
                   Tooltip(
                     message: 'At your limit: a new task asks first',
-                    child: Icon(Icons.inventory_2_outlined, size: 18, color: colors.faded),
+                    child: Icon(Icons.info_outline, size: 18, color: colors.faded),
                   ),
                 ],
               ]),
@@ -250,18 +253,25 @@ class _DoneStamp extends StatelessWidget {
 class CarryOverPanel extends StatelessWidget {
   final List<TaskState> pending;
   final bool atLimit;
+  final bool backlogEnabled;
 
-  const CarryOverPanel({super.key, required this.pending, required this.atLimit});
+  const CarryOverPanel(
+      {super.key, required this.pending, required this.atLimit, this.backlogEnabled = false});
 
   Future<void> _writeAgain(BuildContext context, TaskState task) async {
     final bloc = context.read<TasksBloc>();
     if (atLimit) {
       final choice = await askOverLimit(context, name: task.name);
       if (choice == null) return;
-      if (choice == OverLimitChoice.backlog) {
-        bloc.add(MoveToBacklogEvent(id: task.id.value));
-        if (context.mounted) showSavedToBacklog(context, task.name);
-        return;
+      switch (choice) {
+        case OverLimitChoice.backlog:
+          bloc.add(MoveToBacklogEvent(id: task.id.value));
+          if (context.mounted) showSavedToBacklog(context, task.name);
+          return;
+        case OverLimitChoice.letGo:
+          bloc.add(LetGoEvent(id: task.id.value));
+          return;
+        case OverLimitChoice.note:
       }
     }
     bloc.add(CarryTaskEvent(id: task.id.value));
@@ -306,11 +316,12 @@ class CarryOverPanel extends StatelessWidget {
                       onPressed: () => bloc.add(LetGoEvent(id: task.id.value)),
                       icon: const Icon(Icons.close),
                     ),
-                    IconButton(
-                      tooltip: 'Move to backlog',
-                      onPressed: () => bloc.add(MoveToBacklogEvent(id: task.id.value)),
-                      icon: const Icon(Icons.inventory_2_outlined),
-                    ),
+                    if (backlogEnabled)
+                      IconButton(
+                        tooltip: 'Move to backlog',
+                        onPressed: () => bloc.add(MoveToBacklogEvent(id: task.id.value)),
+                        icon: const Icon(Icons.inventory_2_outlined),
+                      ),
                     FilledButton.tonalIcon(
                       onPressed: () => _writeAgain(context, task),
                       icon: const Icon(Icons.edit_note),
@@ -344,6 +355,10 @@ class BacklogPanel extends StatelessWidget {
     final bloc = context.read<TasksBloc>();
     if (bloc.state.atLimit) {
       final choice = await askOverLimit(context, name: task.name, fromBacklog: true);
+      if (choice == OverLimitChoice.letGo) {
+        bloc.add(RemoveFromBacklogEvent(id: task.id.value));
+        return;
+      }
       if (choice != OverLimitChoice.note) return;
     }
     bloc.add(WriteFromBacklogEvent(id: task.id.value));
@@ -378,7 +393,7 @@ class BacklogPanel extends StatelessWidget {
                         style: theme.textTheme.bodyLarge),
                   ),
                   IconButton(
-                    tooltip: 'Remove from backlog',
+                    tooltip: 'Let it go',
                     onPressed: () => bloc.add(RemoveFromBacklogEvent(id: task.id.value)),
                     icon: const Icon(Icons.close),
                   ),

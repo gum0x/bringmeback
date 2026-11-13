@@ -24,6 +24,8 @@ class SettingsPage extends StatelessWidget {
             children: const [
               _Section('Today\'s note'),
               _TaskLimitTile(),
+              _Section('Experimental'),
+              _BacklogSwitch(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
               _Section('About'),
@@ -109,6 +111,26 @@ class _StepperTile extends StatelessWidget {
   }
 }
 
+/// The backlog is a trial: it may change, or move elsewhere.
+class _BacklogSwitch extends StatelessWidget {
+  const _BacklogSwitch();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => a.backlogEnabled != b.backlogEnabled,
+      builder: (context, state) => SwitchListTile(
+        title: const Text('Backlog'),
+        subtitle: const Text('Past the limit, offer to keep a new task for later, in a backlog '
+            'under the note. A trial: it may change or move.'),
+        value: state.backlogEnabled,
+        onChanged: (on) => bloc.add(SetBacklogEnabledEvent(on)),
+      ),
+    );
+  }
+}
+
 class _TaskLimitTile extends StatelessWidget {
   const _TaskLimitTile();
 
@@ -120,7 +142,7 @@ class _TaskLimitTile extends StatelessWidget {
       builder: (context, state) => _StepperTile(
         title: 'Open tasks before asking',
         subtitle: 'A short list keeps the day focused. Past this many tasks not done yet, a new '
-            'task asks first and suggests the backlog. Done tasks don\'t count.',
+            'task asks first: write it anyway, or let it go. Done tasks don\'t count.',
         value: state.taskLimit,
         min: minTaskLimit,
         max: maxTaskLimit,

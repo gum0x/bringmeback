@@ -100,7 +100,11 @@ History buildHistory(TaskDocument doc, {int? now}) {
       if (!onNotes.contains(id) &&
           statuses[id] != TaskStatus.deleted &&
           statuses[id] != TaskStatus.backlog)
-        read(id, null)
+        read(
+            id,
+            statuses[id] == TaskStatus.letGo
+                ? dayOf(doc.fieldInt('$id/letGoAt') ?? 0)
+                : null)
   ]..sort((a, b) => (b.doneAt ?? 0).compareTo(a.doneAt ?? 0));
 
   final tasks = <HistoryTask>[

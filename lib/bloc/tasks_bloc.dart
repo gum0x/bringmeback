@@ -132,10 +132,15 @@ class TasksState {
   /// Settings.
   final int taskLimit;
 
+  /// Whether the experimental backlog is on, set in Settings. Off, the backlog is hidden and the
+  /// over-limit prompt doesn't offer it.
+  final bool backlogEnabled;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
       this.taskLimit = defaultTaskLimit,
+      this.backlogEnabled = false,
       int? noteStartedAt,
       this.pending = const [],
       this.backlog = const [],
@@ -151,6 +156,7 @@ class TasksState {
       backlog: backlog,
       loaded: loaded,
       taskLimit: taskLimit,
+      backlogEnabled: backlogEnabled,
     );
   }
 
@@ -328,6 +334,23 @@ class SetTaskLimitEvent extends TasksEvent {
   SetTaskLimitEvent(this.limit);
 }
 
+/// Turns the experimental backlog on or off.
+class SetBacklogEnabledEvent extends TasksEvent {
+  final bool enabled;
+
+  SetBacklogEnabledEvent(this.enabled);
+}
+
+/// Lets go of a new task on purpose instead of writing it: it is kept in History as let go, and not
+/// written anywhere.
+class LetGoNewTaskEvent extends TasksEvent {
+  final String name;
+  final ValueKey<String> id;
+  final String notes;
+
+  LetGoNewTaskEvent({required this.name, required this.id, this.notes = ''});
+}
+
 /// Keeps a new task in the backlog, off the note.
 class AddToBacklogEvent extends TasksEvent {
   final String name;
@@ -413,6 +436,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
   int _taskLimit = defaultTaskLimit;
+  bool _backlogEnabled = false;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -447,6 +471,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
     on<SetTaskLimitEvent>(_onSetTaskLimit);
+    on<SetBacklogEnabledEvent>((e, emit) {
+      _backlogEnabled = e.enabled;
+      emit(_view());
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setBool('experimentalBacklog', _backlogEnabled));
+    });
+    on<LetGoNewTaskEvent>((e, emit) =>
+        _edit(emit, (doc) => doc.letGoNew(e.id.value, name: e.name, notes: e.notes)));
     on<AddToBacklogEvent>((e, emit) => _edit(
         emit,
         (doc) => doc.addToBacklog(e.id.value,
@@ -483,12 +515,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   TasksState _view() {
     final doc = _doc;
     if (doc == null) {
-      return TasksState(tasks: [], muted: _muted, taskLimit: _taskLimit);
+      return TasksState(
+          tasks: [], muted: _muted, taskLimit: _taskLimit, backlogEnabled: _backlogEnabled);
     }
     return TasksState(
       tasks: doc.tasks(focusId: _focusId),
       muted: _muted,
       taskLimit: _taskLimit,
+      backlogEnabled: _backlogEnabled,
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
       backlog: [for (final id in doc.backlogIds) doc.task(id)],
@@ -841,6 +875,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     // over.
     _taskLimit = (prefs.getInt('taskLimit') ?? defaultTaskLimit)
         .clamp(minTaskLimit, maxTaskLimit);
+    _backlogEnabled = prefs.getBool('experimentalBacklog') ?? false;
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');

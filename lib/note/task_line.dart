@@ -20,14 +20,20 @@ Future<void> writeTask(BuildContext context,
   if (tasksBloc.state.atLimit) {
     final choice = await askOverLimit(context, name: details.name);
     if (choice == null || !context.mounted) return;
-    if (choice == OverLimitChoice.backlog) {
-      tasksBloc.add(AddToBacklogEvent(
-          name: details.name,
-          notes: details.notes,
-          id: id,
-          timerLengthSeconds: details.timerLengthSeconds));
-      showSavedToBacklog(context, details.name);
-      return;
+    switch (choice) {
+      case OverLimitChoice.backlog:
+        tasksBloc.add(AddToBacklogEvent(
+            name: details.name,
+            notes: details.notes,
+            id: id,
+            timerLengthSeconds: details.timerLengthSeconds));
+        showSavedToBacklog(context, details.name);
+        return;
+      case OverLimitChoice.letGo:
+        tasksBloc.add(LetGoNewTaskEvent(name: details.name, notes: details.notes, id: id));
+        showLetGo(context, details.name);
+        return;
+      case OverLimitChoice.note:
     }
   }
   tasksBloc.add(onTop
@@ -64,16 +70,35 @@ Future<void> editTask(BuildContext context, int index) async {
 }
 
 /// What to do with a task that would take the note over its limit.
-enum OverLimitChoice { backlog, note }
+enum OverLimitChoice {
+  /// Keep it for later, off the note (experimental).
+  backlog,
+
+  /// Write it on the note anyway.
+  note,
+
+  /// Don't do it: drop it on purpose. Not everything can be done, and choosing what not to do is
+  /// part of keeping the day focused. History keeps it as let go.
+  letGo,
+}
 
 /// Asks whether a task goes on the note even though it already holds as many unfinished tasks as
-/// the limit, or into the backlog for later. Null when cancelled. [fromBacklog] is for a task already
-/// in the backlog, which then stays there.
+/// the limit, is let go on purpose, or, with the experimental backlog on, kept there for later.
+/// Null when cancelled. [fromBacklog] is for a task already in the backlog, which then stays
+/// there unless let go.
 Future<OverLimitChoice?> askOverLimit(BuildContext context,
     {required String name, bool fromBacklog = false}) {
   final state = context.read<TasksBloc>().state;
   final open = state.openCount;
   final title = name.trim().isEmpty ? 'This task' : '"${name.trim()}"';
+  final offerBacklog = state.backlogEnabled && !fromBacklog;
+  final question = fromBacklog
+      ? '$title can stay in the backlog until you have room. Or write it on the note anyway, '
+          'or let it go: not everything has to be done.'
+      : offerBacklog
+          ? 'Save $title to the backlog for later, write it on the note anyway, or let it go? '
+              'Not everything has to be done.'
+          : 'Write $title on the note anyway, or let it go? Not everything has to be done.';
   return showDialog<OverLimitChoice>(
     context: context,
     builder: (context) => AlertDialog(
@@ -83,18 +108,19 @@ Future<OverLimitChoice?> askOverLimit(BuildContext context,
           : 'Your note is at its limit'),
       content: Text(
           'You have $open ${open == 1 ? 'task' : 'tasks'} not done yet, and your limit is '
-          '${state.taskLimit}. A short list keeps the day focused.\n\n'
-          '${fromBacklog ? '$title can stay in the backlog until you have room, or you can write '
-              'it on the note anyway.' : 'Save $title to the backlog for later, or write it on the '
-              'note anyway?'}'),
+          '${state.taskLimit}. A short list keeps the day focused.\n\n$question'),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel')),
+        TextButton.icon(
+            onPressed: () => Navigator.pop(context, OverLimitChoice.letGo),
+            icon: const Icon(Icons.do_not_disturb_on_outlined),
+            label: const Text('Let it go')),
         TextButton(
             onPressed: () => Navigator.pop(context, OverLimitChoice.note),
             child: const Text('Write on note anyway')),
-        if (!fromBacklog)
+        if (offerBacklog)
           FilledButton.icon(
               onPressed: () => Navigator.pop(context, OverLimitChoice.backlog),
               icon: const Icon(Icons.inventory_2_outlined),
@@ -102,6 +128,16 @@ Future<OverLimitChoice?> askOverLimit(BuildContext context,
       ],
     ),
   );
+}
+
+void showLetGo(BuildContext context, String name) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(SnackBar(
+    content: Text(name.trim().isEmpty
+        ? 'Let go. Not everything has to be done.'
+        : 'Let go: ${name.trim()}. Not everything has to be done.'),
+  ));
 }
 
 void showSavedToBacklog(BuildContext context, String name) {

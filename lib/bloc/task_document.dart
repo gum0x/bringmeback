@@ -203,6 +203,20 @@ class TaskDocument {
     });
   }
 
+  /// Lets go of a new task [id] on purpose, without writing it on the note: History keeps it as let
+  /// go on the day it was dropped.
+  void letGoNew(String id, {String name = '', String notes = ''}) {
+    doc.runInTransaction(() {
+      _fields
+        ..set('$id/name', name)
+        ..set('$id/timerLength', 20 * 60)
+        ..set('$id/timerStartAt', nowSeconds())
+        ..set('$id/totalResetAt', 0)
+        ..set('$id/letGoAt', nowSeconds());
+      if (notes.isNotEmpty) _fields.set('$id/notes', notes);
+    });
+  }
+
   /// Moves the unfinished task [id] of an earlier note to the backlog.
   void moveToBacklog(String id) => _fields.set('$id/backlogAt', nowSeconds());
 
@@ -217,15 +231,10 @@ class TaskDocument {
         }
       });
 
-  /// Takes the task [id] out of the backlog without writing it: let go when it came from a
-  /// torn-off note, deleted otherwise.
+  /// Takes the task [id] out of the backlog without writing it: it is let go, on purpose.
   void removeFromBacklog(String id) => doc.runInTransaction(() {
         _fields.set('$id/backlogAt', null);
-        if (_onNotes().contains(id)) {
-          letGo(id);
-        } else {
-          _fields.set('$id/deletedAt', nowSeconds());
-        }
+        letGo(id);
       });
 
   /// Tasks in the backlog, oldest first.
