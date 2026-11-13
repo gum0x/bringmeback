@@ -11,6 +11,7 @@ import '../version/build_info.dart';
 import 'doc_sync.dart';
 import 'pairing.dart';
 import 'peer.dart';
+import 'relays.dart';
 import 'signalling.dart';
 import 'sync_config.dart';
 
@@ -83,6 +84,13 @@ class SyncState {
   /// True when no relay could be reached for a while: then no device can be found.
   final bool relaysUnreachable;
 
+  /// The relays saved on this device.
+  final RelayList relays;
+
+  /// The relays the link that opened the app names (`?relays=…`), used instead of [relays] while
+  /// not empty.
+  final List<String> linkRelays;
+
   const SyncState(
       {this.device,
       this.pairing,
@@ -96,9 +104,14 @@ class SyncState {
       this.builds = const {},
       this.relaysUp = 0,
       this.relayCount = 0,
-      this.relaysUnreachable = false});
+      this.relaysUnreachable = false,
+      this.relays = const RelayList(published: []),
+      this.linkRelays = const []});
 
   bool get paired => pairing != null;
+
+  /// The relays this device looks for the group's other devices on.
+  List<String> get activeRelays => linkRelays.isNotEmpty ? linkRelays : relays.active;
 
   SyncState copyWith(
           {bool? live,
@@ -108,7 +121,9 @@ class SyncState {
           Map<String, BuildInfo>? builds,
           int? relaysUp,
           int? relayCount,
-          bool? relaysUnreachable}) =>
+          bool? relaysUnreachable,
+          RelayList? relays,
+          List<String>? linkRelays}) =>
       SyncState(
           device: device,
           pairing: pairing,
@@ -122,13 +137,16 @@ class SyncState {
           builds: builds ?? this.builds,
           relaysUp: relaysUp ?? this.relaysUp,
           relayCount: relayCount ?? this.relayCount,
-          relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable);
+          relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable,
+          relays: relays ?? this.relays,
+          linkRelays: linkRelays ?? this.linkRelays);
 }
 
 class SyncCubit extends Cubit<SyncState> {
   static const _deviceKey = 'deviceKey';
   static const _pairingKey = 'pairingCode';
   static const _liveKey = 'liveSync';
+  static const _relaysKey = 'syncRelays';
 
   /// Bound into every Noise handshake together with the group's topic.
   static const _prologue = 'bringmeback/v1';
@@ -165,15 +183,21 @@ class SyncCubit extends Cubit<SyncState> {
   /// iOS freezes a hidden Safari tab, and its sockets die without a close the app ever sees.
   final Duration _staleAfter;
 
-  /// `document` is the task document to keep in sync, once it has loaded.
+  /// The relays named by the link the app was opened with, until [load] puts them in the state.
+  final List<String> _linkRelays;
+
+  /// `document` is the task document to keep in sync, once it has loaded. `link` is the address the
+  /// app was opened with; on the web that is the page's address, whose `relays=` it uses.
   SyncCubit(
       {RelayConnector connect = webSocketRelay,
       SyncConfig? config,
       PeerTransportFactory? transport,
       Future<CRDTDocument>? document,
+      Uri? link,
       Duration staleAfter = const Duration(seconds: 20)})
       : _connect = connect,
         _staleAfter = staleAfter,
+        _linkRelays = relaysFromLink(link ?? (kIsWeb ? Uri.base : Uri())),
         _config = config ?? SyncConfig.fromEnvironment(),
         _newTransport = transport ?? _webRtc(config ?? SyncConfig.fromEnvironment()),
         super(const SyncState()) {
@@ -243,8 +267,71 @@ class SyncCubit extends Cubit<SyncState> {
       }
     }
     final live = prefs.getBool(_liveKey) ?? false;
-    emit((await _stateFor(device, pairing)).copyWith(live: live));
+    final relays = RelayList.decode(prefs.getString(_relaysKey), _published);
+    emit((await _stateFor(device, pairing))
+        .copyWith(live: live, relays: relays, linkRelays: _linkRelays));
     await _restartSignalling();
+  }
+
+  List<String> get _published => [for (final r in _config.relays) r.toString()];
+
+  /// Turns a published relay on or off. The last relay in use can't be turned off: returns false.
+  Future<bool> setRelayOn(String relay, {required bool on}) =>
+      _saveRelays(state.relays.turn(relay, on: on));
+
+  /// Adds a relay, given as `wss://host` or just the host. Throws [FormatException] when it isn't a
+  /// relay address.
+  Future<void> addRelay(String input) async {
+    final relay = normaliseRelay(input);
+    if (relay == null) {
+      throw const FormatException('Enter a relay address like wss://relay.example.com');
+    }
+    await _saveRelays(state.relays.add(relay));
+  }
+
+  /// Removes a relay added on this device. The last relay in use can't be removed: returns false.
+  Future<bool> removeRelay(String relay) => _saveRelays(state.relays.remove(relay));
+
+  /// Back to the published relays, all on.
+  Future<bool> resetRelays() => _saveRelays(state.relays.reset());
+
+  /// Uses the relays a link names instead of the saved ones, until [useSavedRelays]. For a link the
+  /// app gets after it started, such as one opened from the share menu.
+  Future<void> useLinkRelays(List<String> relays) async {
+    final valid = relays.map(normaliseRelay).whereType<String>().toSet().toList();
+    if (valid.isEmpty || listEquals(valid, state.linkRelays)) return;
+    await _changeRelays(state.copyWith(linkRelays: valid));
+  }
+
+  /// Saves the link's relays as this device's list: exactly those on, and stops using the link's.
+  Future<void> keepLinkRelays() async {
+    if (state.linkRelays.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final relays = state.relays.only(state.linkRelays);
+    await prefs.setString(_relaysKey, relays.encode());
+    await _changeRelays(state.copyWith(relays: relays, linkRelays: const []));
+  }
+
+  /// Stops using the link's relays for this run, and uses the saved ones.
+  Future<void> useSavedRelays() => _changeRelays(state.copyWith(linkRelays: const []));
+
+  Future<bool> _saveRelays(RelayList relays) async {
+    if (relays.active.isEmpty) return false;
+    final prefs = await SharedPreferences.getInstance();
+    if (relays.isDefault) {
+      await prefs.remove(_relaysKey);
+    } else {
+      await prefs.setString(_relaysKey, relays.encode());
+    }
+    await _changeRelays(state.copyWith(relays: relays));
+    return true;
+  }
+
+  /// Emits `next`, and reconnects when the relays in use changed.
+  Future<void> _changeRelays(SyncState next) async {
+    final changed = !listEquals(next.activeRelays, state.activeRelays);
+    _emit(next);
+    if (changed) await _restartSignalling();
   }
 
   /// Turns looking for the group's other devices on or off.
@@ -275,7 +362,7 @@ class SyncCubit extends Cubit<SyncState> {
     final signalling = Signalling(
         group: state.keys!.inner,
         device: state.device!.publicKey,
-        relays: _config.relays,
+        relays: [for (final r in state.activeRelays) Uri.parse(r)],
         connect: _connect);
     _signalling = signalling;
     _signals = signalling.signals.listen(_heard);
@@ -468,7 +555,11 @@ class SyncCubit extends Cubit<SyncState> {
   Future<void> leaveGroup() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pairingKey);
-    emit(SyncState(device: state.device, live: state.live));
+    emit(SyncState(
+        device: state.device,
+        live: state.live,
+        relays: state.relays,
+        linkRelays: state.linkRelays));
     await _restartSignalling();
   }
 
@@ -476,7 +567,7 @@ class SyncCubit extends Cubit<SyncState> {
     final next = await _stateFor(state.device!, pairing);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_pairingKey, next.code!);
-    emit(next.copyWith(live: state.live));
+    emit(next.copyWith(live: state.live, relays: state.relays, linkRelays: state.linkRelays));
     await _restartSignalling();
   }
 

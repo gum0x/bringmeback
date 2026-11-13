@@ -127,6 +127,13 @@ same network. Sync starts with the app and reconnects when you come back to it.
   it only gets the group's tasks and sends none of its own. It asks before deleting.
 - Devices sync only when they run the same sync version, shown under **This device**. When they
   don't, the Devices page says which one is older; reload the page (or update the app) there.
+- **Relays**, on the Devices page, lists the relays this device uses: the published ones, each of
+  which can be turned off, and any you add (`wss://host`, or `ws://` for one on your own network).
+  Devices only meet on a relay they both use. **Restore the published relays** undoes your changes.
+- A link can name the relays to use: add `?relays=wss://a.example,wss://b.example` to the app's
+  address (or `&relays=…` after a `#join=…` link). While the app is open from such a link it uses
+  only those relays; the Relays page offers to save them as this device's list, or to go back to
+  the saved list.
 - When sync can't work, the Devices page says why: no relay reachable, no direct connection (not
   on the same network, or a browser setting that blocks WebRTC), another version, or a failed
   handshake.

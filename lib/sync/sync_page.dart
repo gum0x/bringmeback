@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../bloc/tasks_bloc.dart';
 import '../version/build_info.dart';
 import 'pairing.dart';
+import 'relays_page.dart';
 import 'peer.dart' show syncProtocol;
 import 'sync_cubit.dart';
 
@@ -29,13 +30,13 @@ class SyncPage extends StatelessWidget {
               ? const [Center(child: CircularProgressIndicator())]
               : state.paired
                   ? _paired(context, state)
-                  : _unpaired(context),
+                  : _unpaired(context, state),
         ),
       ),
     );
   }
 
-  List<Widget> _unpaired(BuildContext context) => [
+  List<Widget> _unpaired(BuildContext context, SyncState state) => [
         const Text('Pair your devices to keep the same tasks and timers on all of them. '
             'Start a group here, then enter its code on your other device.'),
         const SizedBox(height: 16),
@@ -44,6 +45,8 @@ class SyncPage extends StatelessWidget {
             child: const Text('Start a new group')),
         const SizedBox(height: 32),
         const _JoinForm(),
+        const SizedBox(height: 16),
+        RelaysTile(state: state),
       ];
 
   List<Widget> _paired(BuildContext context, SyncState state) => [
@@ -83,13 +86,14 @@ class SyncPage extends StatelessWidget {
         ),
         SwitchListTile(
           title: const Text('Find my devices online'),
-          subtitle: const Text('Uses public Nostr relays to find the group\'s other devices when they '
+          subtitle: const Text('Uses Nostr relays to find the group\'s other devices when they '
               'are online. The relays only see encrypted messages, never your tasks. '
               'Your tasks then sync directly between devices on the same network.'),
           isThreeLine: true,
           value: state.live,
           onChanged: (on) => context.read<SyncCubit>().setLive(on),
         ),
+        RelaysTile(state: state),
         if (state.live) ..._status(context, state),
         if (state.live)
           ListTile(
