@@ -1,6 +1,8 @@
+import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
 import 'package:bringmeback/focus/pomodoro.dart';
 import 'package:bringmeback/main.dart';
+import 'package:crdt_lf/crdt_lf.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -66,88 +68,133 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  group('PomodoroMemory', () {
+  group('PomodoroRecord', () {
     final now = DateTime(2026, 11, 13, 9);
-    const state = PomodoroState(
+    const paused = PomodoroState(
         settings: settings,
         phase: PomodoroPhase.shortBreak,
         remainingSeconds: 200,
-        running: true,
+        running: false,
         completedSessions: 2);
 
-    test('keeps each task\'s clock, which comes back paused', () async {
-      await PomodoroMemory.save('a', state, now: now);
-      await PomodoroMemory.save('b', PomodoroState.initial(settings), now: now);
+    PomodoroRecord? roundTrip(PomodoroRecord r, {DateTime? at}) =>
+        PomodoroRecord.decode(r.encode(), now: at ?? now);
 
-      final a = await PomodoroMemory.load('a', now: now);
-      expect(a?.phase, PomodoroPhase.shortBreak);
-      expect(a?.remainingSeconds, 200);
-      expect(a?.completedSessions, 2);
-      expect(a?.settings, settings);
-      expect(a?.running, isFalse);
-      expect((await PomodoroMemory.load('b', now: now))?.remainingSeconds,
-          30 * 60);
-      expect(await PomodoroMemory.load('c', now: now), isNull);
+    test('a paused clock comes back as it was', () {
+      final r = roundTrip(PomodoroRecord(
+          state: paused, endsAt: null, open: true, savedAt: now))!;
+      final (clock, endsAt) = r.at(now.add(const Duration(hours: 1)));
+      expect(clock.phase, PomodoroPhase.shortBreak);
+      expect(clock.remainingSeconds, 200, reason: 'time away does not count');
+      expect(clock.completedSessions, 2);
+      expect(clock.settings, settings);
+      expect(clock.running, isFalse);
+      expect(endsAt, isNull);
+      expect(r.open, isTrue);
     });
 
-    test('forgets a clock left alone too long, or forgotten on purpose',
-        () async {
-      await PomodoroMemory.save('a', state, now: now);
-      await PomodoroMemory.save('b', state, now: now);
+    test('a running clock carries on by the wall clock', () {
+      final r = roundTrip(PomodoroRecord(
+          state: paused.copyWith(running: true),
+          endsAt: now.add(const Duration(seconds: 200)),
+          open: true,
+          savedAt: now))!;
+      final (clock, endsAt) = r.at(now.add(const Duration(seconds: 50)));
+      expect(clock.running, isTrue);
+      expect(clock.remainingSeconds, 150);
+      expect(endsAt, now.add(const Duration(seconds: 200)));
+    });
+
+    test('a running phase that ended unwatched waits at the next one', () {
+      final r = roundTrip(PomodoroRecord(
+          state: const PomodoroState(
+              settings: settings,
+              phase: PomodoroPhase.work,
+              remainingSeconds: 60,
+              running: true,
+              completedSessions: 1),
+          endsAt: now.add(const Duration(seconds: 60)),
+          open: true,
+          savedAt: now))!;
+      final (clock, endsAt) = r.at(now.add(const Duration(hours: 2)));
+      expect(clock.phase, PomodoroPhase.shortBreak);
+      expect(clock.completedSessions, 2);
+      expect(clock.remainingSeconds, 6 * 60);
+      expect(clock.running, isFalse);
+      expect(endsAt, isNull);
+    });
+
+    test('same content, same key; old or damaged reads as none', () {
+      final a = PomodoroRecord(
+          state: paused, endsAt: null, open: true, savedAt: now);
+      final b = PomodoroRecord(
+          state: paused,
+          endsAt: null,
+          open: true,
+          savedAt: now.add(const Duration(minutes: 3)));
+      expect(a.key, b.key);
       expect(
-          await PomodoroMemory.load('a',
-              now: now.add(PomodoroMemory.maxAge - const Duration(minutes: 1))),
+          PomodoroRecord(
+                  state: paused, endsAt: null, open: false, savedAt: now)
+              .key,
+          isNot(a.key));
+      expect(
+          roundTrip(a,
+              at: now.add(PomodoroRecord.maxAge - const Duration(minutes: 1))),
           isNotNull);
-      expect(
-          await PomodoroMemory.load('a', now: now.add(PomodoroMemory.maxAge)),
-          isNull);
-
-      await PomodoroMemory.forget('b');
-      expect(await PomodoroMemory.load('b', now: now), isNull);
+      expect(roundTrip(a, at: now.add(PomodoroRecord.maxAge)), isNull);
+      expect(PomodoroRecord.decode('{not json', now: now), isNull);
+      expect(PomodoroRecord.decode('{"phase":"work"}', now: now), isNull);
+      expect(PomodoroRecord.decode(null, now: now), isNull);
     });
 
-    test('leaves the saved lengths alone', () async {
-      await settings.save();
-      await PomodoroMemory.save('a', state, now: now);
-      await PomodoroMemory.setOpen('a');
-      expect(await PomodoroSettings.load(), settings);
-      expect(await PomodoroMemory.openTask(), 'a');
-      await PomodoroMemory.setOpen(null);
-      expect(await PomodoroMemory.openTask(), isNull);
-    });
-
-    test('a damaged record starts fresh instead of failing', () async {
-      SharedPreferences.setMockInitialValues({'focusClocks': '{not json'});
-      expect(await PomodoroMemory.load('a', now: now), isNull);
-      await PomodoroMemory.save('a', state, now: now);
-      expect(await PomodoroMemory.load('a', now: now), isNotNull);
+    test('syncs with the task to another device', () {
+      TaskDocument doc() => TaskDocument(
+          CRDTDocument(peerId: PeerId.generate(), documentId: 'tasks'));
+      final laptop = doc()..insert(0, 'r', name: 'Write report');
+      final phone = doc();
+      laptop.setPomodoro(
+          'r',
+          PomodoroRecord(state: paused, endsAt: null, open: true, savedAt: now)
+              .encode());
+      phone.doc.importChanges(laptop.doc.exportChanges());
+      final r = PomodoroRecord.decode(phone.task('r').pomodoro, now: now)!;
+      expect(r.state.remainingSeconds, 200);
+      expect(r.open, isTrue);
     });
   });
 
-  test('a clock picked up waits paused, then carries on from there', () {
+  test('a clock picked up keeps its state; a running one keeps running', () {
     var now = DateTime(2026, 11, 13, 9);
-    final cubit = PomodoroCubit(
-      resumeFrom: const PomodoroState(
-          settings: settings,
-          phase: PomodoroPhase.work,
-          remainingSeconds: 600,
-          running: true,
-          completedSessions: 1),
-      now: () => now,
-      startTicking: false,
-    );
-    expect(cubit.state.running, isFalse);
-    expect(cubit.state.remainingSeconds, 600);
-    now = now.add(const Duration(minutes: 5));
-    cubit.tick();
-    expect(cubit.state.remainingSeconds, 600,
-        reason: 'time away does not count');
-    cubit.start();
+    const clock = PomodoroState(
+        settings: settings,
+        phase: PomodoroPhase.work,
+        remainingSeconds: 600,
+        running: true,
+        completedSessions: 1);
+    final paused =
+        PomodoroCubit(resumeFrom: clock, now: () => now, startTicking: false);
+    expect(paused.state.running, isFalse,
+        reason: 'running needs to know when it ends');
+    final running = PomodoroCubit(
+        resumeFrom: clock,
+        endsAt: now.add(const Duration(seconds: 600)),
+        now: () => now,
+        startTicking: false);
     now = now.add(const Duration(minutes: 2));
-    cubit.tick();
-    expect(cubit.state.remainingSeconds, 480);
-    expect(cubit.state.completedSessions, 1);
-    cubit.close();
+    running.tick();
+    expect(running.state.remainingSeconds, 480);
+    expect(running.state.completedSessions, 1);
+
+    // Another device paused it.
+    running.apply(clock.copyWith(running: false, remainingSeconds: 300), null);
+    expect(running.state.running, isFalse);
+    expect(running.endsAt, isNull);
+    now = now.add(const Duration(minutes: 2));
+    running.tick();
+    expect(running.state.remainingSeconds, 300);
+    paused.close();
+    running.close();
   });
 
   testWidgets('leaving the focus view and coming back picks up where it was',
@@ -179,8 +226,7 @@ void main() {
     await tester.runAsync(bloc.close);
   });
 
-  testWidgets(
-      'after a crash the app reopens the focus view, paused where it was',
+  testWidgets('after a crash the app reopens the focus view, running on',
       (tester) async {
     var bloc = await startApp(tester);
     bloc.add(InsertTaskEvent(
@@ -203,12 +249,12 @@ void main() {
     expect(find.text('Call bank'), findsWidgets);
     expect(find.text('Session 2 of 4'), findsOneWidget);
     expect(find.text('Picked up where you left off'), findsOneWidget);
-    // Waiting for the person, and so is the task's own timer.
-    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    // Still running, as is the task's own timer.
+    expect(find.widgetWithText(FilledButton, 'Pause'), findsOneWidget);
     expect(bloc.state.tasks.first.name, 'Call bank');
-    expect(bloc.state.tasks.first.running, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
 
-    // Closed on purpose this time: the next start stays on the list.
+    // Closed on purpose this time: paused, and the next start stays on the list.
     await tester.tap(find.byType(BackButton));
     await settle(tester);
     final prefs = await tester.runAsync(SharedPreferences.getInstance);
@@ -218,6 +264,66 @@ void main() {
     SharedPreferences.setMockInitialValues(again);
     bloc = await startApp(tester);
     expect(find.byKey(const Key('pomodoroClock')), findsNothing);
+    final record = PomodoroRecord.decode(bloc.state.tasks.first.pomodoro)!;
+    expect(record.open, isFalse);
+    expect(record.state.running, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(bloc.close);
+  });
+
+  testWidgets('a paused clock reopens paused after a crash', (tester) async {
+    var bloc = await startApp(tester);
+    bloc.add(InsertTaskEvent(
+        index: 0, name: 'Write report', id: const ValueKey('r')));
+    await settle(tester);
+    await openFocusOn(tester, 'Write report');
+    await tester.tap(find.widgetWithText(FilledButton, 'Pause'));
+    await settle(tester);
+
+    final kept = await crash(tester, bloc);
+    SharedPreferences.setMockInitialValues(kept);
+    bloc = await startApp(tester);
+    expect(find.byKey(const Key('focusTaskName')), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Pause'), findsNothing);
+    expect(bloc.state.tasks.first.running, isFalse);
+
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(bloc.close);
+  });
+
+  testWidgets('a change from another device shows in the open focus view',
+      (tester) async {
+    final bloc = await startApp(tester);
+    bloc.add(InsertTaskEvent(
+        index: 0, name: 'Write report', id: const ValueKey('r')));
+    await settle(tester);
+    await openFocusOn(tester, 'Write report');
+    expect(find.widgetWithText(FilledButton, 'Pause'), findsOneWidget);
+
+    // The phone paused it in its long break, as the synced task now says.
+    bloc.add(SetPomodoroEvent(
+        taskId: 'r',
+        record: PomodoroRecord(
+                state: const PomodoroState(
+                    settings: PomodoroSettings(),
+                    phase: PomodoroPhase.longBreak,
+                    remainingSeconds: 600,
+                    running: false,
+                    completedSessions: 4),
+                endsAt: null,
+                open: true,
+                savedAt: DateTime.now())
+            .encode()));
+    await settle(tester);
+    expect(find.text('Long break'), findsOneWidget);
+    expect(find.text('10:00'), findsOneWidget);
+    expect(find.text('4 done'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Resume'), findsOneWidget);
+
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
     await tester.pumpWidget(const SizedBox());
     await tester.runAsync(bloc.close);
   });
@@ -234,8 +340,7 @@ void main() {
     await tester.tap(find.text('Mark task done'));
     await settle(tester);
 
-    expect(await tester.runAsync(() => PomodoroMemory.load('r')), isNull);
-    expect(await tester.runAsync(PomodoroMemory.openTask), isNull);
+    expect(bloc.state.tasks.first.pomodoro, isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.runAsync(bloc.close);
   });

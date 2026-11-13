@@ -9,20 +9,26 @@ import '../bloc/tasks_bloc.dart';
 import '../timer.dart';
 import 'pomodoro.dart';
 
-/// Opens the focus view for the task with [taskId], where its Pomodoro was left if it has one.
+/// Opens the focus view for the task with [taskId], with its Pomodoro where it was, on this device or
+/// another, if it has one.
 ///
-/// The clock starts right away when [autoStart] is set (the person chose to focus); otherwise it
-/// waits, paused, for Resume, as when the app reopens a focus view that was cut short.
+/// A paused clock starts right away when [autoStart] is set (the person chose to focus); otherwise
+/// it waits for Resume, as when the app reopens a focus view that was cut short. A clock still
+/// running elsewhere carries on either way.
 Future<void> openFocus(BuildContext context, String taskId,
     {bool autoStart = true}) async {
   final settings = await PomodoroSettings.load();
-  final saved = await PomodoroMemory.load(taskId);
   if (!context.mounted) return;
+  final tasks = context.read<TasksBloc>().state.tasks;
+  final task = tasks.where((t) => t.id.value == taskId).firstOrNull;
+  final record = PomodoroRecord.decode(task?.pomodoro);
+  final (resumeFrom, endsAt) = record?.at(DateTime.now()) ?? (null, null);
   await Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => BlocProvider(
-      create: (_) => PomodoroCubit(settings: settings, resumeFrom: saved),
+      create: (_) => PomodoroCubit(
+          settings: settings, resumeFrom: resumeFrom, endsAt: endsAt),
       child: FocusPage(
-          taskId: taskId, autoStart: autoStart, resumed: saved != null),
+          taskId: taskId, autoStart: autoStart, resumed: record != null),
     ),
   ));
 }
@@ -34,8 +40,9 @@ Future<void> openFocus(BuildContext context, String taskId,
 /// focus session runs, and pauses, logging a break, during Pomodoro breaks or when the clock is
 /// paused. So History later shows the same work and breaks as the Pomodoro did.
 ///
-/// The clock is saved as it goes, in [PomodoroMemory], so leaving the view, quitting or a crash
-/// doesn't lose the session: the next focus on the task picks up where it was.
+/// The clock is kept in the task, as a [PomodoroRecord], whenever it starts, pauses or changes
+/// phase, so it syncs: leaving the view, a crash or another device picks up where it was. Leaving
+/// on purpose pauses it. A change made on another device while both show the view shows here too.
 class FocusPage extends StatefulWidget {
   final String taskId;
 
@@ -59,8 +66,14 @@ class _FocusPageState extends State<FocusPage> {
   StreamSubscription<PomodoroPhase>? _phases;
   AudioPlayer? _player;
   StreamSubscription<PomodoroState>? _saves;
+  StreamSubscription<TasksState>? _remote;
   late final TasksBloc _tasks;
   late final PomodoroCubit _pomodoro;
+  // What the task's record last said, written here or read from another device.
+  String? _lastKey;
+  // Records this view wrote, recent ones first. The task list catches up with them a moment later,
+  // possibly after a newer one was written, so they are never taken as another device's.
+  final _written = <String>[];
   // Set once the task is marked done, so its clock is forgotten rather than kept.
   bool _finished = false;
 
@@ -74,12 +87,10 @@ class _FocusPageState extends State<FocusPage> {
     tasks.add(SetFocusModeEvent(taskId: widget.taskId));
     final pomodoro = _pomodoro = context.read<PomodoroCubit>();
     _phases = pomodoro.phaseStarted.listen(_onPhase);
-    // Every change of the clock is kept, so a crash or a closed tab loses a second at most.
-    PomodoroMemory.setOpen(widget.taskId);
-    PomodoroMemory.save(widget.taskId, pomodoro.state);
-    _saves = pomodoro.stream.listen((s) {
-      if (!_finished) PomodoroMemory.save(widget.taskId, s);
-    });
+    _lastKey = PomodoroRecord.decode(_task(tasks.state)?.pomodoro)?.key;
+    _keep(pomodoro.state);
+    _saves = pomodoro.stream.listen(_keep);
+    _remote = tasks.stream.listen(_onTasks);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || pomodoro.isClosed) return;
       // Opening the focus view is the decision to focus: the session starts right away. After
@@ -87,7 +98,7 @@ class _FocusPageState extends State<FocusPage> {
       if (widget.autoStart) {
         pomodoro.start();
       } else {
-        // Waiting for Resume: the task's timer waits too, logging the interruption as a break.
+        // Waiting for Resume (or running on): the task's timer follows.
         _syncTaskTimer(pomodoro.state);
       }
       if (widget.resumed) {
@@ -103,19 +114,53 @@ class _FocusPageState extends State<FocusPage> {
 
   @override
   void dispose() {
-    if (!_tasks.isClosed) _tasks.add(SetFocusModeEvent());
     _saves?.cancel();
-    if (_finished) {
-      PomodoroMemory.forget(widget.taskId);
-    } else {
-      // Left on purpose: kept paused, at the time it showed, for the next focus on this task.
-      PomodoroMemory.save(widget.taskId, _pomodoro.state);
+    _remote?.cancel();
+    if (!_tasks.isClosed) {
+      _tasks.add(SetFocusModeEvent());
+      if (_finished) {
+        _tasks.add(SetPomodoroEvent(taskId: widget.taskId));
+      } else {
+        // Left on purpose: paused, and no longer open, for the next focus on this task.
+        if (_pomodoro.state.running) _pomodoro.pause();
+        _keep(_pomodoro.state, open: false);
+      }
     }
-    // Closed on purpose, so the app doesn't reopen it on its next start.
-    PomodoroMemory.setOpen(null);
     _phases?.cancel();
     _player?.dispose();
     super.dispose();
+  }
+
+  TaskState? _task(TasksState state) =>
+      state.tasks.where((t) => t.id.value == widget.taskId).firstOrNull;
+
+  /// Writes the clock into the task when it says something new; a running clock ticking down
+  /// doesn't.
+  void _keep(PomodoroState state, {bool open = true}) {
+    if (_finished || _tasks.isClosed) return;
+    final record = PomodoroRecord(
+        state: state,
+        endsAt: state.running ? _pomodoro.endsAt : null,
+        open: open,
+        savedAt: DateTime.now());
+    if (record.key == _lastKey) return;
+    _lastKey = record.key;
+    final encoded = record.encode();
+    _written.insert(0, encoded);
+    if (_written.length > 20) _written.removeLast();
+    _tasks.add(SetPomodoroEvent(taskId: widget.taskId, record: encoded));
+  }
+
+  /// Takes on the clock as another device left it.
+  void _onTasks(TasksState state) {
+    if (_finished || _pomodoro.isClosed) return;
+    final encoded = _task(state)?.pomodoro;
+    if (encoded == null || _written.contains(encoded)) return;
+    final record = PomodoroRecord.decode(encoded);
+    if (record == null || record.key == _lastKey) return;
+    _lastKey = record.key;
+    final (clock, endsAt) = record.at(DateTime.now());
+    _pomodoro.apply(clock, endsAt);
   }
 
   int _indexIn(TasksState state) =>

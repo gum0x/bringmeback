@@ -159,18 +159,33 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   final StreamController<PomodoroPhase> _phaseStarted =
       StreamController<PomodoroPhase>.broadcast();
 
-  /// Starts from [resumeFrom] when given, paused, else from a fresh focus session of [settings].
+  /// Starts from [resumeFrom] when given, else from a fresh focus session of [settings]. A running
+  /// [resumeFrom] needs [endsAt], when its phase ends; without it, it comes back paused.
   PomodoroCubit({
     PomodoroSettings settings = const PomodoroSettings(),
     PomodoroState? resumeFrom,
+    DateTime? endsAt,
     DateTime Function()? now,
     bool startTicking = true,
   })  : _now = now ?? DateTime.now,
-        super(resumeFrom?.copyWith(running: false) ??
-            PomodoroState.initial(settings)) {
+        _endsAt = resumeFrom?.running == true ? endsAt : null,
+        super(resumeFrom == null
+            ? PomodoroState.initial(settings)
+            : resumeFrom.copyWith(
+                running: resumeFrom.running && endsAt != null)) {
     if (startTicking) {
       _tick = Timer.periodic(const Duration(seconds: 1), (_) => tick());
     }
+  }
+
+  /// When the running phase ends; null while paused.
+  DateTime? get endsAt => _endsAt;
+
+  /// Takes on a clock changed elsewhere, on another device, without the sound of a new phase:
+  /// that device made it.
+  void apply(PomodoroState state, DateTime? endsAt) {
+    _endsAt = state.running ? endsAt : null;
+    emit(state.copyWith(running: _endsAt != null));
   }
 
   /// Each phase the clock moves into when the previous one runs out or is skipped, after the
@@ -234,27 +249,11 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   /// The phase after the current one. A skipped work session counts as done too: skipping says
   /// "I'm finished with this one".
   void _advance({required bool running}) {
-    final s = state;
-    PomodoroPhase next;
-    var completed = s.completedSessions;
-    if (s.phase == PomodoroPhase.work) {
-      completed++;
-      next = completed % s.settings.sessionsBeforeLongBreak == 0
-          ? PomodoroPhase.longBreak
-          : PomodoroPhase.shortBreak;
-    } else {
-      next = PomodoroPhase.work;
-    }
-    final seconds = s.settings.secondsFor(next);
-    _endsAt = running ? _now().add(Duration(seconds: seconds)) : null;
-    emit(PomodoroState(
-      settings: s.settings,
-      phase: next,
-      remainingSeconds: seconds,
-      running: running,
-      completedSessions: completed,
-    ));
-    _phaseStarted.add(next);
+    final next = nextPhase(state, running: running);
+    _endsAt =
+        running ? _now().add(Duration(seconds: next.remainingSeconds)) : null;
+    emit(next);
+    _phaseStarted.add(next.phase);
   }
 
   @override
@@ -265,113 +264,138 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   }
 }
 
-/// Where each task's Pomodoro was left, so its focus view picks up there after the view was closed,
-/// the app was quit or crashed, or the page was reloaded. Kept on this device, like the lengths.
+/// Where a task's Pomodoro is, as kept in the task document (`<taskId>/pomodoro`), so it syncs
+/// with the task: leave the view, crash, or pick up the phone, and the focus picks up there.
 ///
-/// A saved clock comes back paused, at the time it showed when it was saved: time away is an
-/// interruption, not focus. One left alone for longer than [maxAge] is forgotten, and the next
-/// focus on that task starts fresh.
-class PomodoroMemory {
-  // Not under "pomodoro.": PomodoroSettings keeps its lengths there, "pomodoro.sessions" among them.
-  static const _sessionsKey = 'focusClocks';
-  static const _openKey = 'focusOpen';
+/// It is written when something happens (start, pause, skip, a new phase, new lengths, leaving the
+/// view), never per second: a running clock is kept as when its phase ends, a paused one as the
+/// time left.
+class PomodoroRecord {
+  final PomodoroState state;
+
+  /// When the running phase ends, by the wall clock; null while paused.
+  final DateTime? endsAt;
+
+  /// Whether a focus view is open on it. One still open when the app starts was cut short.
+  final bool open;
+  final DateTime savedAt;
+
+  /// A record not touched for this long is forgotten: the next focus starts fresh.
   static const maxAge = Duration(hours: 12);
 
-  static Map<String, dynamic> _read(SharedPreferences prefs) {
-    final raw = prefs.getString(_sessionsKey);
-    if (raw == null) return {};
-    try {
-      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    } catch (_) {
-      return {};
-    }
-  }
+  const PomodoroRecord(
+      {required this.state,
+      required this.endsAt,
+      required this.open,
+      required this.savedAt});
 
-  static bool _fresh(Object? saved, DateTime now) {
-    if (saved is! Map) return false;
-    final at = saved['savedAt'];
-    return at is int &&
-        now.difference(DateTime.fromMillisecondsSinceEpoch(at)) < maxAge;
-  }
+  /// The settled part of the record, without when it was written: two records with the same key
+  /// say the same thing.
+  Map<String, Object?> get _key => {
+        'phase': state.phase.name,
+        'completed': state.completedSessions,
+        'work': state.settings.workMinutes,
+        'shortBreak': state.settings.shortBreakMinutes,
+        'longBreak': state.settings.longBreakMinutes,
+        'sessions': state.settings.sessionsBeforeLongBreak,
+        if (endsAt case final e?)
+          'endsAt': e.millisecondsSinceEpoch
+        else
+          'remaining': state.remainingSeconds,
+        'open': open,
+      };
 
-  /// The clock of the task with [taskId] as it was left, paused, or null when there is none, or it
-  /// is too old.
-  static Future<PomodoroState?> load(String taskId, {DateTime? now}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = _read(prefs)[taskId];
-    if (!_fresh(saved, now ?? DateTime.now())) return null;
+  String get key => jsonEncode(_key);
+
+  String encode() =>
+      jsonEncode({..._key, 'savedAt': savedAt.millisecondsSinceEpoch});
+
+  /// Reads a record, or null when [encoded] is missing, doesn't read (another device's changes are
+  /// untrusted) or is older than [maxAge].
+  static PomodoroRecord? decode(String? encoded, {DateTime? now}) {
+    if (encoded == null) return null;
     try {
-      final m = saved as Map;
+      final m = jsonDecode(encoded) as Map<String, dynamic>;
+      final savedAt = DateTime.fromMillisecondsSinceEpoch(m['savedAt'] as int);
+      if ((now ?? DateTime.now()).difference(savedAt) >= maxAge) return null;
       final settings = PomodoroSettings(
         workMinutes: m['work'] as int,
         shortBreakMinutes: m['shortBreak'] as int,
         longBreakMinutes: m['longBreak'] as int,
         sessionsBeforeLongBreak: m['sessions'] as int,
       );
-      final phase = PomodoroPhase.values.byName(m['phase'] as String);
-      final remaining = m['remaining'] as int;
-      final completed = m['completed'] as int;
       if ([
         settings.workMinutes,
         settings.shortBreakMinutes,
         settings.longBreakMinutes,
         settings.sessionsBeforeLongBreak
-      ].any((v) => v <= 0)) {
+      ].any((v) => v <= 0 || v > 999)) {
         return null;
       }
-      return PomodoroState(
-        settings: settings,
-        phase: phase,
-        remainingSeconds: remaining.clamp(1, settings.secondsFor(phase)),
-        running: false,
-        completedSessions: completed < 0 ? 0 : completed,
+      final phase = PomodoroPhase.values.byName(m['phase'] as String);
+      final endsAt = switch (m['endsAt']) {
+        int ms => DateTime.fromMillisecondsSinceEpoch(ms),
+        _ => null,
+      };
+      final remaining = switch (m['remaining']) { int r => r, _ => null };
+      if (endsAt == null && remaining == null) return null;
+      final completed = m['completed'] as int;
+      return PomodoroRecord(
+        state: PomodoroState(
+          settings: settings,
+          phase: phase,
+          remainingSeconds: (remaining ?? settings.secondsFor(phase))
+              .clamp(1, settings.secondsFor(phase)),
+          running: endsAt != null,
+          completedSessions: completed < 0 ? 0 : completed,
+        ),
+        endsAt: endsAt,
+        open: m['open'] == true,
+        savedAt: savedAt,
       );
     } catch (_) {
       return null;
     }
   }
 
-  /// Keeps [state] as where the task with [taskId] was left. Clocks gone stale are dropped.
-  static Future<void> save(String taskId, PomodoroState state,
-      {DateTime? now}) async {
-    final prefs = await SharedPreferences.getInstance();
-    final at = now ?? DateTime.now();
-    final sessions = _read(prefs)..removeWhere((_, v) => !_fresh(v, at));
-    sessions[taskId] = {
-      'phase': state.phase.name,
-      'remaining': state.remainingSeconds,
-      'completed': state.completedSessions,
-      'work': state.settings.workMinutes,
-      'shortBreak': state.settings.shortBreakMinutes,
-      'longBreak': state.settings.longBreakMinutes,
-      'sessions': state.settings.sessionsBeforeLongBreak,
-      'savedAt': at.millisecondsSinceEpoch,
-    };
-    await prefs.setString(_sessionsKey, jsonEncode(sessions));
-  }
-
-  /// Drops the saved clock of the task with [taskId], so its next focus starts fresh.
-  static Future<void> forget(String taskId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final sessions = _read(prefs);
-    if (sessions.remove(taskId) == null) return;
-    await prefs.setString(_sessionsKey, jsonEncode(sessions));
-  }
-
-  /// Notes which task's focus view is open, or null once it is closed on purpose. One still noted
-  /// when the app starts was cut short, and opens again.
-  static Future<void> setOpen(String? taskId) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (taskId == null) {
-      await prefs.remove(_openKey);
-    } else {
-      await prefs.setString(_openKey, taskId);
+  /// The clock as it stands at [now]. A running phase that ended meanwhile, with nobody watching,
+  /// doesn't roll on through more phases: it waits, paused, at the start of the next one.
+  (PomodoroState, DateTime?) at(DateTime now) {
+    final endsAt = this.endsAt;
+    if (endsAt == null) return (state.copyWith(running: false), null);
+    final ms = endsAt.difference(now).inMilliseconds;
+    if (ms > 0) {
+      return (
+        state.copyWith(
+            running: true,
+            remainingSeconds: ((ms + 999) ~/ 1000)
+                .clamp(1, state.settings.secondsFor(state.phase))),
+        endsAt
+      );
     }
+    return (nextPhase(state, running: false), null);
   }
+}
 
-  /// The task whose focus view was open when the app last stopped, if it was not closed.
-  static Future<String?> openTask() async =>
-      (await SharedPreferences.getInstance()).getString(_openKey);
+/// The phase after [s]'s, at its full length. A work session left counts as done.
+PomodoroState nextPhase(PomodoroState s, {required bool running}) {
+  var completed = s.completedSessions;
+  final PomodoroPhase next;
+  if (s.phase == PomodoroPhase.work) {
+    completed++;
+    next = completed % s.settings.sessionsBeforeLongBreak == 0
+        ? PomodoroPhase.longBreak
+        : PomodoroPhase.shortBreak;
+  } else {
+    next = PomodoroPhase.work;
+  }
+  return PomodoroState(
+    settings: s.settings,
+    phase: next,
+    remainingSeconds: s.settings.secondsFor(next),
+    running: running,
+    completedSessions: completed,
+  );
 }
 
 /// Minutes as "45 min", "2 h" or "2 h 10 min".

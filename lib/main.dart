@@ -79,19 +79,19 @@ class _TasksStackState extends State<TasksStack> {
     _reopenFocus();
   }
 
-  /// Opens the focus view again when the app stopped while it was open, from a crash, a closed tab
-  /// or the system ending the app, with its clock paused where it was.
+  /// Opens the focus view again when the app stopped while one was open, here or on another
+  /// device: a crash, a closed tab or the system ending the app. A clock still running carries on;
+  /// a paused one waits for Resume.
   Future<void> _reopenFocus() async {
     final tasks = context.read<TasksBloc>();
     await tasks.document;
-    final id = await PomodoroMemory.openTask();
-    if (id == null || !mounted) return;
-    final open = tasks.state.tasks.any((t) => t.id.value == id && !t.done);
-    if (!open || await PomodoroMemory.load(id) == null) {
-      await PomodoroMemory.setOpen(null);
-      return;
-    }
-    if (mounted) await openFocus(context, id, autoStart: false);
+    if (!mounted) return;
+    final now = DateTime.now();
+    final open = tasks.state.tasks
+        .where((t) =>
+            !t.done && (PomodoroRecord.decode(t.pomodoro, now: now)?.open ?? false))
+        .firstOrNull;
+    if (open != null) await openFocus(context, open.id.value, autoStart: false);
   }
 
   @override

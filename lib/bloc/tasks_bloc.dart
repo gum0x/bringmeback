@@ -78,6 +78,9 @@ class TaskState {
   /// The task of an earlier note this one was written again from.
   final String? carriedFrom;
 
+  /// Where the task's Pomodoro is, encoded; see `PomodoroRecord`.
+  final String? pomodoro;
+
   TaskState(
       {required this.name,
       this.notes = '',
@@ -88,7 +91,8 @@ class TaskState {
       this.totalResetAt = 0,
       this.inFocus = false,
       this.doneAt,
-      this.carriedFrom})
+      this.carriedFrom,
+      this.pomodoro})
       : entries = entries ?? [];
 
   bool get done => doneAt != null;
@@ -325,6 +329,14 @@ class SetFocusModeEvent extends TasksEvent {
   SetFocusModeEvent({this.taskId});
 }
 
+/// Keeps where the task with [taskId]'s Pomodoro is, in the document so it syncs; null forgets it.
+class SetPomodoroEvent extends TasksEvent {
+  final String taskId;
+  final String? record;
+
+  SetPomodoroEvent({required this.taskId, this.record});
+}
+
 class UpdateTimerEvent extends TasksEvent {
   UpdateTimerEvent();
 }
@@ -398,6 +410,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<ToggleMuteEvent>(_onToggleMute);
     on<SetNoteLinesEvent>(_onSetNoteLines);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
+    on<SetPomodoroEvent>((e, emit) =>
+        _edit(emit, (doc) => doc.setPomodoro(e.taskId, e.record)));
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
     on<StopTimerEvent>(_onStopTimer);
