@@ -8,9 +8,10 @@ void main() {
     final t = DateTime.utc(2026, 11, 13, 12, 30);
 
     test('a release shows its number, other builds the commit time and commit', () {
-      expect(const BuildInfo(version: '1.2.0', commit: 'abc').label, 'v1.2.0');
+      expect(const BuildInfo(version: '1.2.0').label, 'v1.2.0');
       expect(BuildInfo(commit: '70135a09b6', time: t).label, '2026-11-13 12:30 UTC · 70135a09b6');
-      expect(const BuildInfo().label, 'Development build');
+      expect(const BuildInfo(version: '1.2.0', commit: 'abc').label, 'v1.2.0 · abc');
+      expect(const BuildInfo().label, 'Development build, no commit');
       expect(const BuildInfo().isKnown, isFalse);
     });
 

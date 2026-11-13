@@ -262,7 +262,7 @@ class _VersionTiles extends StatelessWidget {
         return Column(children: [
           ListTile(
             title: Text('Version ${build.label}'),
-            subtitle: Text('${build.isRelease ? 'Release' : build.isKnown ? 'Built from commit ${build.commit}' : 'Not built with version information'}'
+            subtitle: Text('${build.isRelease ? 'Release' : build.isKnown ? 'Built from commit ${build.commit}' : 'Run it with tool/run.sh to show the commit'}'
                 ', sync version $syncProtocol\n$status'),
             isThreeLine: true,
             trailing: UpdateCubit.supported && (kIsWeb || state.checkReleases)

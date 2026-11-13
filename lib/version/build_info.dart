@@ -3,8 +3,9 @@
 /// Set at build time with `--dart-define`:
 /// - `APP_VERSION`: the release number (`1.2.0`), for released builds only;
 /// - `BUILD_COMMIT`: the commit it was built from, short form, with `-dirty` for local changes;
-/// - `BUILD_TIME`: when that commit was made, ISO 8601.
-/// `tool/build_info.sh` prints these for the current checkout.
+/// - `BUILD_TIME`: when that commit was made, ISO 8601; for a `-dirty` build, when it was built.
+/// `tool/build_info.sh` prints these for the current checkout, and `tool/run.sh` passes them to
+/// `flutter run`.
 class BuildInfo {
   final String version;
   final String commit;
@@ -23,10 +24,10 @@ class BuildInfo {
   /// False for a build without any of the defines, such as `flutter run`.
   bool get isKnown => isRelease || commit.isNotEmpty;
 
-  /// How the build is shown: the release number, or the commit time and commit.
+  /// How the build is shown: the release number and commit, or the time and commit.
   String get label {
-    if (isRelease) return 'v$version';
-    if (commit.isEmpty) return 'Development build';
+    if (isRelease) return commit.isEmpty ? 'v$version' : 'v$version · $commit';
+    if (commit.isEmpty) return 'Development build, no commit';
     final t = time;
     return t == null ? commit : '${_format(t)} · $commit';
   }

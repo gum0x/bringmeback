@@ -47,9 +47,14 @@ paired device's version is listed too:
 - any other build shows the time of its last commit and the commit, such as
   `2026-11-13 12:30 UTC · 70135a09b6`, with `-dirty` when it was built with uncommitted changes.
 
-`tool/build_info.sh defines` prints the `--dart-define` flags that set this, so a local build gets it
-with `flutter build web $(tool/build_info.sh defines)`. The Docker build and the CI builds do this on
-their own. A build without them shows "Development build".
+- a release shows its commit too, such as `v1.2.0 · 70135a09b6`;
+- a build with uncommitted changes shows when it was built instead of the commit time, so a stale
+  cached build is easy to spot.
+
+`tool/build_info.sh defines` prints the `--dart-define` flags that set this. Run the app with
+`tool/run.sh` (the same arguments as `flutter run`, such as `tool/run.sh -d chrome`) and build with
+`flutter build web $(tool/build_info.sh defines)`. The Docker build and the CI builds do this on
+their own. A plain `flutter run` shows "Development build, no commit".
 
 The web app also checks `build-info.json` on its own server (written by `tool/build_info.sh json`) when
 it starts, every half hour and when you come back to it, and offers **Reload** when a newer build is
