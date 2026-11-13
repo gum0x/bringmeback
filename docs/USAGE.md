@@ -133,7 +133,22 @@ off instead. A message at the bottom offers **Undo**, which puts the task back w
 Browsers keep Ctrl+N and Ctrl+D for themselves, so use the Alt variants in the web app. The keyboard
 icon in the top bar shows this list.
 
+## Sync between your devices
+
+The devices icon in the top bar opens **Devices**. Start a group on one device and enter its code
+on the other. With **Find my devices online** on, the devices find each other through public Nostr
+relays (which only see encrypted messages) and then sync directly, while both are open and on the
+same network. Sync starts with the app and reconnects when you come back to it.
+
+- **Start empty**, under the code box, deletes this device's tasks and history before it joins, so
+  it only gets the group's tasks and sends none of its own. It asks before deleting.
+- Devices sync only when they run the same sync version, shown under **This device**. When they
+  don't, the Devices page says which one is older; reload the page (or update the app) there.
+- When sync can't work, the Devices page says why: no relay reachable, no direct connection (not
+  on the same network, or a browser setting that blocks WebRTC), another version, or a failed
+  handshake.
+
 ## Where your data is
 
 Everything is saved on the device you use, in the browser's storage for the web app. Nothing is sent
-anywhere. Sync between your devices is planned and will be opt-in (see [ROADMAP.md](ROADMAP.md)).
+anywhere unless you turn on sync, which is opt-in and sends tasks only to your own paired devices.

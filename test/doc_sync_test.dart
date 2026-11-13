@@ -18,7 +18,8 @@ Future<(SyncCubit, SyncCubit, FakeNetwork)> twoDevices(TaskDocument a, TaskDocum
   final relay = FakeRelay();
   final net = FakeNetwork();
   SharedPreferences.setMockInitialValues({});
-  final first = SyncCubit(connect: relay.connect, transport: net.create, document: Future.value(a.doc));
+  final first =
+      SyncCubit(connect: relay.connect, transport: net.create, document: Future.value(a.doc));
   await first.load();
   await first.createGroup();
   await first.setLive(true);
@@ -54,6 +55,37 @@ void main() {
 
     await first.close();
     await second.close();
+  });
+
+  test('each device knows whether the other has caught up', () async {
+    final a = newDocument()..insert(0, 'a1', name: 'Written on A');
+    final b = newDocument();
+    final (first, second, net) = await twoDevices(a, b);
+    final bId = second.state.device!.id;
+    final aId = first.state.device!.id;
+    expect(first.state.inSync, {bId});
+    expect(second.state.inSync, {aId});
+    expect(first.state.allInSync, isTrue);
+    expect(first.state.lastSynced, isNotNull);
+
+    // A change on A takes B out of sync on both sides until it has arrived and B has said so.
+    net.hold = true;
+    a.setName('a1', 'Renamed on A');
+    await pumpEventQueue();
+    expect(first.state.inSync, isEmpty);
+    expect(first.state.allInSync, isFalse);
+    net.release();
+    await pumpEventQueue();
+    expect(b.task('a1').name, 'Renamed on A');
+    expect(first.state.inSync, {bId});
+    expect(second.state.inSync, {aId});
+
+    // A dropped link is no longer in sync, but the last time it was stays.
+    await second.close();
+    await pumpEventQueue();
+    expect(first.state.inSync, isEmpty);
+    expect(first.state.lastSynced, isNotNull);
+    await first.close();
   });
 
   test('messages bigger than one channel message arrive whole', () async {
