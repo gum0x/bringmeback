@@ -13,8 +13,16 @@ import 'tasks_bloc.dart';
 /// - `fields`: one last-writer-wins map for every task field, keyed `<taskId>/<field>`. Time entries
 ///   are keyed `<taskId>/e/<start>` with the end as value (null while running).
 ///
-/// A removed task leaves the order but keeps its fields, so its history stays in the document. A task
-/// marked done leaves the order the same way, with `<taskId>/doneAt` set.
+/// The order is today's note: the tasks written on it, done or not. A task checked off stays in the
+/// order with `<taskId>/doneAt` set, struck through. A deleted task leaves the order but keeps its
+/// fields, with `<taskId>/deletedAt` set, so its history stays in the document. (Before notes, a done
+/// task left the order too; such tasks still read as done.)
+///
+/// When a note is torn off, its tasks leave the order and the note is kept as `note/<noteId>/ids`
+/// (task ids joined by commas, in order), `note/<noteId>/startedAt` and `note/<noteId>/closedAt`.
+/// Its unfinished tasks wait to be written again on the new note (a new task with
+/// `<newId>/carriedFrom` and `<oldId>/carriedTo`) or let go (`<oldId>/letGoAt`).
+/// `current/startedAt` is when the note in the order was started.
 ///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
@@ -62,6 +70,9 @@ class TaskDocument {
     ]..sort((a, b) => a.start.compareTo(b.start));
     return TaskState(
       name: field<String>('name', ''),
+      notes: field<String>('notes', ''),
+      doneAt: fields['$id/doneAt'] is int ? fields['$id/doneAt'] as int : null,
+      carriedFrom: field<String?>('carriedFrom', null),
       id: ValueKey<String>(id),
       timerLengthSeconds: field<int>('timerLength', 20 * 60),
       timerStartAt: field<int>('timerStartAt', 0),
@@ -77,6 +88,7 @@ class TaskDocument {
   /// Adds a task at [index] with the given fields; [running] opens its first time entry now.
   void insert(int index, String id,
       {String name = '',
+      String notes = '',
       int timerLengthSeconds = 20 * 60,
       int? timerStartAt,
       int totalResetAt = 0,
@@ -89,6 +101,7 @@ class TaskDocument {
         ..set('$id/timerLength', timerLengthSeconds)
         ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
         ..set('$id/totalResetAt', totalResetAt);
+      if (notes.isNotEmpty) _fields.set('$id/notes', notes);
       for (final e in entries) {
         _fields.set('$id/e/${e.start}', e.end);
       }
@@ -98,21 +111,132 @@ class TaskDocument {
     });
   }
 
-  void removeAt(int index) => _order.delete(index);
-
-  /// Puts a removed or done task back at [index]; its fields never left the document.
-  void restore(int index, String id) => doc.runInTransaction(() {
-        _order.insert(index, id);
-        if (_values['$id/doneAt'] != null) _fields.set('$id/doneAt', null);
-      });
-
-  /// Takes the task at [index] off the list as done, keeping when it was finished.
-  void markDone(int index, String id) => doc.runInTransaction(() {
-        _fields.set('$id/doneAt', nowSeconds());
+  /// Deletes the task at [index] from the note, keeping its fields and when it was deleted.
+  void removeAt(int index, String id) => doc.runInTransaction(() {
+        _fields.set('$id/deletedAt', nowSeconds());
         _order.delete(index);
       });
 
+  /// Puts a deleted task back at [index]; its fields never left the document.
+  void restore(int index, String id) => doc.runInTransaction(() {
+        _order.insert(index, id);
+        if (_values['$id/deletedAt'] != null) _fields.set('$id/deletedAt', null);
+      });
+
+  /// Checks a task off, keeping when it was finished, or unchecks it. It stays on the note either way.
+  void setDone(String id, bool done) =>
+      _fields.set('$id/doneAt', done ? nowSeconds() : null);
+
   int? doneAt(String id) => switch (_values['$id/doneAt']) { int v => v, _ => null };
+
+  /// When the note in the order was started, or null in a document from before notes.
+  int? get noteStartedAt => switch (_values['current/startedAt']) { int v => v, _ => null };
+
+  void setNoteStartedAt(int at) => _fields.set('current/startedAt', at);
+
+  /// Every note torn off, oldest first.
+  List<NoteRecord> get notes {
+    final fields = _values;
+    final notes = <NoteRecord>[];
+    for (final MapEntry(:key, :value) in fields.entries) {
+      if (!key.startsWith('note/') || !key.endsWith('/ids') || value is! String) continue;
+      final id = key.substring('note/'.length, key.length - '/ids'.length);
+      final startedAt = fields['note/$id/startedAt'];
+      final closedAt = fields['note/$id/closedAt'];
+      if (startedAt is! int || closedAt is! int) continue;
+      notes.add(NoteRecord(
+          id: id,
+          startedAt: startedAt,
+          closedAt: closedAt,
+          taskIds: [for (final t in value.split(',')) if (t.isNotEmpty) t]));
+    }
+    return notes..sort((a, b) => a.closedAt.compareTo(b.closedAt));
+  }
+
+  /// Tears off the note in the order: keeps it as note [noteId] and starts an empty one at [at].
+  void tearOff(String noteId, int at) => doc.runInTransaction(() {
+        final ids = this.ids;
+        for (final id in ids) {
+          setRunning(id, false);
+        }
+        _fields
+          ..set('note/$noteId/ids', ids.join(','))
+          ..set('note/$noteId/startedAt', noteStartedAt ?? at)
+          ..set('note/$noteId/closedAt', at)
+          ..set('current/startedAt', at);
+        for (var i = ids.length - 1; i >= 0; i--) {
+          _order.delete(i);
+        }
+      });
+
+  /// Writes the unfinished task [fromId] of an earlier note again at [index], as task [newId].
+  void carry(String fromId, String newId, int index) => doc.runInTransaction(() {
+        final from = task(fromId);
+        insert(index, newId,
+            name: from.name,
+            notes: from.notes,
+            timerLengthSeconds: from.timerLengthSeconds);
+        _fields
+          ..set('$newId/carriedFrom', fromId)
+          ..set('$fromId/carriedTo', newId);
+      });
+
+  /// Lets go of the unfinished task [id] of an earlier note: it is not written again.
+  void letGo(String id) => _fields.set('$id/letGoAt', nowSeconds());
+
+  /// What became of task [id].
+  TaskStatus status(String id) => _status(id, _values, ids.toSet(), _onNotes());
+
+  Set<String> _onNotes() => {for (final n in notes) ...n.taskIds};
+
+  TaskStatus _status(
+      String id, Map<String, Object?> fields, Set<String> order, Set<String> onNotes) {
+    if (fields['$id/deletedAt'] is int) return TaskStatus.deleted;
+    if (fields['$id/doneAt'] is int) return TaskStatus.done;
+    if (fields['$id/carriedTo'] is String) return TaskStatus.carried;
+    if (fields['$id/letGoAt'] is int) return TaskStatus.letGo;
+    if (order.contains(id)) return TaskStatus.open;
+    // Not on the note and never torn off with one: deleted before deletions were recorded.
+    if (!onNotes.contains(id)) return TaskStatus.deleted;
+    return TaskStatus.pending;
+  }
+
+  /// What became of every task in [taskIds], read in one pass.
+  Map<String, TaskStatus> statuses(Iterable<String> taskIds) {
+    final fields = _values;
+    final order = ids.toSet();
+    final onNotes = _onNotes();
+    return {for (final id in taskIds) id: _status(id, fields, order, onNotes)};
+  }
+
+  int? fieldInt(String key) => switch (_values[key]) { int v => v, _ => null };
+
+  /// The ids of every task ever written, pauses left out, in no particular order.
+  List<String> get allTaskIds {
+    final fields = _values;
+    return [
+      for (final key in fields.keys)
+        if (key.endsWith('/name') && !key.startsWith('note/') && !key.startsWith('current/'))
+          if (key.substring(0, key.length - '/name'.length) case final id
+              when fields['$id/kind'] != 'pause')
+            id
+    ];
+  }
+
+  /// Unfinished tasks of torn-off notes still waiting to be written again or let go, in the order
+  /// they were on their notes, oldest note first.
+  List<String> get pendingIds {
+    final notes = this.notes;
+    final ordered = <String>[
+      for (final note in notes) ...note.taskIds,
+    ];
+    final statuses = this.statuses(ordered);
+    final seen = <String>{};
+    return [
+      for (final id in ordered)
+        if (seen.add(id) && statuses[id] == TaskStatus.pending) id
+    ];
+  }
 
   /// The ids of every pause logged, in no particular order.
   List<String> get pauseIds => [
@@ -139,6 +263,8 @@ class TaskDocument {
   void move(int from, int to) => _order.move(from, to);
 
   void setName(String id, String name) => _fields.set('$id/name', name);
+
+  void setNotes(String id, String notes) => _fields.set('$id/notes', notes);
 
   void setTimer(String id, int lengthSeconds, int startAt) =>
       doc.runInTransaction(() {
@@ -172,4 +298,35 @@ class TaskDocument {
       for (final c in list) Change.fromBytes(Uint8List.fromList(base64Decode(c)))
     ]);
   }
+}
+
+/// What became of a task.
+enum TaskStatus {
+  /// On the current note, not done yet.
+  open,
+  done,
+
+  /// Torn off unfinished, waiting to be written again or let go.
+  pending,
+
+  /// Torn off unfinished and written again on a later note.
+  carried,
+
+  /// Torn off unfinished and not written again.
+  letGo,
+  deleted,
+}
+
+/// A note torn off: the tasks written on it, in order, and when it was started and torn off.
+class NoteRecord {
+  final String id;
+  final int startedAt;
+  final int closedAt;
+  final List<String> taskIds;
+
+  const NoteRecord(
+      {required this.id,
+      required this.startedAt,
+      required this.closedAt,
+      required this.taskIds});
 }

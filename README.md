@@ -1,9 +1,11 @@
 # bringmeback
 A Pomodoro timer, stopwatch, and task manager to help you stay focused.
 
-Keep tasks in the order you will do them. The top task is the one you are working on, and it is the
-only one whose timer runs. When it's done, mark it done and the next one takes over. Pausing logs a
-break, so the time between tasks is kept too. Done and deleted tasks can be brought back with Undo.
+Write today's tasks on a small numbered note, in the order you will do them. The first task not
+checked off is the one you are working on, and it is the only one whose timer runs. Check it off and
+it stays on the note, struck through, while the next one takes over. Each day starts with tearing off
+yesterday's note and writing again only what still matters. Pausing logs a
+break, so the time between tasks is kept too. Deleted tasks can be brought back with Undo, and History keeps every note.
 
 - [How to use the app](docs/USAGE.md)
 - [Goals and usability rules](docs/PRINCIPLES.md)
@@ -16,8 +18,9 @@ break, so the time between tasks is kept too. Done and deleted tasks can be brou
 | --- | --- |
 | Ctrl+N or Alt+N | New task on top, with its timer running |
 | Ctrl+Shift+N or Alt+Shift+N | New task after the selected one |
+| Ctrl+Enter or Alt+Enter | Check off the selected task, or uncheck it |
 | Ctrl+D or Alt+D | Delete the selected task |
-| Enter | Finish editing a task name or timer |
+| Enter | Save the task in the task dialog |
 
 Browsers keep Ctrl+N and Ctrl+D for themselves, so use the Alt variants in the web app.
 
