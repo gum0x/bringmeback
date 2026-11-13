@@ -3,9 +3,14 @@ name: Desktop release
 # Run by hand from the Actions tab. Builds the macOS, Windows and Linux desktop apps from the chosen
 # branch, packages them (dmg, zip, tar.gz) and attaches them to a draft GitHub Release named after
 # the version in pubspec.yaml (v<version>). Publishing the draft creates the tag, so a person
-# reviews the release before it goes out.
+# reviews the release before it goes out. A pull request that changes this file runs the builds and
+# packaging only, so the workflow is tested before it is needed.
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/release.yaml'
 
 permissions:
   contents: read
@@ -106,6 +111,7 @@ jobs:
   release:
     name: Draft GitHub Release
     needs: [version, build]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
