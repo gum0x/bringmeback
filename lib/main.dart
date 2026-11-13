@@ -26,12 +26,15 @@ class App extends StatelessWidget {
     return MultiBlocProvider(
         providers: [
           BlocProvider(create: (_) => TasksBloc()..add(LoadStateEvent())),
+          // Not lazy: sync starts with the app, not when the Devices page first opens.
           BlocProvider(
+              lazy: false,
               create: (context) =>
                   SyncCubit(document: context.read<TasksBloc>().document)
                     ..load()),
         ],
-        child: MaterialApp(
+        child: _SyncLifecycle(
+            child: MaterialApp(
           title: 'bringmeback',
           theme: ThemeData(colorSchemeSeed: Colors.blue),
           darkTheme: ThemeData(
@@ -39,8 +42,42 @@ class App extends StatelessWidget {
           // The app is laid out for portrait: on a wide window it stays a column in the middle.
           builder: (context, child) => _PortraitFrame(child: child!),
           home: const TasksStack(),
-        ));
+        )));
   }
+}
+
+/// Tells sync when the app goes to the background and comes back, so it reconnects right away
+/// after a phone kept the app (or a browser kept the tab) asleep.
+class _SyncLifecycle extends StatefulWidget {
+  final Widget child;
+
+  const _SyncLifecycle({required this.child});
+
+  @override
+  State<_SyncLifecycle> createState() => _SyncLifecycleState();
+}
+
+class _SyncLifecycleState extends State<_SyncLifecycle> {
+  late final AppLifecycleListener _listener;
+
+  @override
+  void initState() {
+    super.initState();
+    final sync = context.read<SyncCubit>();
+    _listener = AppLifecycleListener(
+      onHide: sync.paused,
+      onShow: sync.resumed,
+    );
+  }
+
+  @override
+  void dispose() {
+    _listener.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Keyboard shortcuts, with the Alt variants for browsers, which keep Ctrl+N and Ctrl+D to

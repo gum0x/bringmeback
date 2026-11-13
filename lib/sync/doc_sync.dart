@@ -120,7 +120,7 @@ class DocumentSync {
 
   void _reject(PeerLink link) {
     _links.remove(link)?.subscription?.cancel();
-    link.close();
+    link.fail(LinkFailure.protocol);
   }
 
   Future<void> close() async {

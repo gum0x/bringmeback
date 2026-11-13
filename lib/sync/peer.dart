@@ -29,6 +29,48 @@ abstract class PeerTransport {
   Future<void> close();
 }
 
+/// The version of what two devices say to each other: the offer and answer, the framing on the
+/// channel and the sync messages inside it. Devices sync only with the same version, and say so
+/// on the Devices page when they can't.
+///
+/// 1: before versions were sent, the offer and answer were the bare SDP.
+/// 2: the offer and answer carry the version; messages on the channel are numbered ([Reorder]).
+const syncProtocol = 2;
+
+/// Why a link closed before or after it connected, to show on the Devices page.
+enum LinkFailure {
+  /// No direct connection within the time limit.
+  timeout,
+
+  /// The direct connection couldn't be set up, or broke.
+  transport,
+
+  /// The encryption handshake failed: another key, another group, or a broken message.
+  handshake,
+
+  /// The other device runs another version of the app; see [PeerLink.remoteProtocol].
+  version,
+
+  /// The other device sent something this one can't read.
+  protocol,
+}
+
+/// The offer or answer as signalled: the version, then the SDP.
+List<int> _envelope(String sdp) => utf8.encode(jsonEncode({'v': syncProtocol, 'sdp': sdp}));
+
+/// The version and SDP in a signalled offer or answer. A bare SDP is from version 1. Throws
+/// [FormatException] for anything else.
+({int version, String? sdp}) _openEnvelope(List<int> body) {
+  final text = utf8.decode(body);
+  if (text.startsWith('v=')) return (version: 1, sdp: null);
+  final parsed = jsonDecode(text);
+  if (parsed is! Map || parsed['v'] is! int) throw const FormatException('Not an envelope');
+  final version = parsed['v'] as int;
+  final sdp = parsed['sdp'];
+  if (version == syncProtocol && sdp is! String) throw const FormatException('No SDP');
+  return (version: version, sdp: version == syncProtocol ? sdp as String : null);
+}
+
 /// Makes a fresh [PeerTransport]. Tests pass an in-memory one.
 typedef PeerTransportFactory = Future<PeerTransport> Function();
 
@@ -64,6 +106,14 @@ class PeerLink {
   Timer? _timeout;
   SymbolonHandshake? _handshake;
   SymbolonChannel? _channel;
+  LinkFailure? _failure;
+  int? _remoteProtocol;
+
+  /// Why the link closed, once it has; null when it was closed on purpose.
+  LinkFailure? get failure => _failure;
+
+  /// The other device's [syncProtocol], once its offer or answer has arrived.
+  int? get remoteProtocol => _remoteProtocol;
 
   /// `signal` sends an offer or answer to [remoteSession].
   PeerLink({
@@ -81,9 +131,10 @@ class PeerLink {
         _keys = keys,
         _prologue = prologue,
         _signal = signal {
-    _timeout = Timer(timeout, close);
-    _listening = transport.messages.listen(_message, onDone: close);
-    transport.open.then((_) => _opened(), onError: (Object _) => close());
+    _timeout = Timer(timeout, () => fail(LinkFailure.timeout));
+    _listening =
+        transport.messages.listen(_message, onDone: () => fail(LinkFailure.transport));
+    transport.open.then((_) => _opened(), onError: (Object _) => fail(LinkFailure.transport));
   }
 
   /// Completes once the handshake is done and [send] can be used.
@@ -103,27 +154,39 @@ class PeerLink {
     assert(initiator);
     try {
       final offer = await _transport.offer();
-      if (!isClosed) _signal(SignalKind.offer, utf8.encode(offer));
+      if (!isClosed) _signal(SignalKind.offer, _envelope(offer));
     } on Object {
-      await close();
+      await fail(LinkFailure.transport);
     }
   }
 
   /// Handles the offer (responder) or answer (initiator) from [remoteSession].
   Future<void> signalled(SymbolonSignal signal) async {
     if (isClosed) return;
+    final ({int version, String? sdp}) opened;
     try {
-      final sdp = utf8.decode(signal.body);
+      opened = _openEnvelope(signal.body);
+    } on Object {
+      await fail(LinkFailure.protocol);
+      return;
+    }
+    _remoteProtocol = opened.version;
+    final sdp = opened.sdp;
+    if (sdp == null) {
+      await fail(LinkFailure.version);
+      return;
+    }
+    try {
       if (signal.kind == SignalKind.offer && !initiator) {
         final answer = await _transport.answer(sdp);
-        if (!isClosed) _signal(SignalKind.answer, utf8.encode(answer));
+        if (!isClosed) _signal(SignalKind.answer, _envelope(answer));
       } else if (signal.kind == SignalKind.answer && initiator) {
         await _transport.accept(sdp);
       } else {
-        await close();
+        await fail(LinkFailure.protocol);
       }
     } on Object {
-      await close();
+      await fail(LinkFailure.transport);
     }
   }
 
@@ -139,7 +202,7 @@ class PeerLink {
   void _message(Uint8List message) {
     if (isClosed) return;
     if (message.length > maxMessage) {
-      close();
+      fail(LinkFailure.protocol);
       return;
     }
     _guard(() {
@@ -177,12 +240,19 @@ class PeerLink {
     _guard(() => _transport.send(channel.encrypt(plaintext)));
   }
 
+  /// Anything that throws here is the handshake or a message that doesn't decrypt.
   void _guard(void Function() action) {
     try {
       action();
     } on Object {
-      close();
+      fail(LinkFailure.handshake);
     }
+  }
+
+  /// Closes the link because of `reason`, which [failure] then tells.
+  Future<void> fail(LinkFailure reason) {
+    if (!isClosed) _failure = reason;
+    return close();
   }
 
   Future<void> close() async {
@@ -211,6 +281,11 @@ bool _same(List<int>? a, List<int> b) {
 
 /// [PeerTransport] over a WebRTC data channel, with flutter_webrtc on every platform.
 ///
+/// Every message carries a 4-byte sequence number in front, and messages are passed on in that
+/// order. The channel itself is ordered, but in Safari the web plugin hands over each message as a
+/// Blob and reads it asynchronously, so two messages can come out swapped. Noise needs them in
+/// order, so without this a swap broke the link.
+///
 /// Both sides open the same pre-negotiated, ordered and reliable channel, so neither waits for the
 /// other to announce one. Candidates are gathered before the offer or answer is sent, so each side
 /// sends exactly one signal. With no ICE servers only host candidates exist, which is enough on one
@@ -218,11 +293,16 @@ bool _same(List<int>? a, List<int> b) {
 class WebRtcTransport implements PeerTransport {
   static const _gatherTimeout = Duration(seconds: 5);
 
+  /// How many messages may wait for an earlier one before the channel counts as broken.
+  static const _maxWaiting = 256;
+
   final RTCPeerConnection _pc;
   final RTCDataChannel _dc;
   final _messages = StreamController<Uint8List>();
   final _open = Completer<void>();
   final _gathered = <Completer<void>>[];
+  var _sent = 0;
+  final _reorder = Reorder(_maxWaiting);
 
   WebRtcTransport._(this._pc, this._dc) {
     _open.future.ignore();
@@ -232,7 +312,15 @@ class WebRtcTransport implements PeerTransport {
     };
     _dc.onMessage = (m) {
       // Only binary messages are ours.
-      if (m.isBinary && !_messages.isClosed) _messages.add(m.binary);
+      if (!m.isBinary || _messages.isClosed) return;
+      final ready = _reorder.take(m.binary);
+      if (ready == null) {
+        close();
+        return;
+      }
+      for (final message in ready) {
+        _messages.add(message);
+      }
     };
     _pc.onIceGatheringState = (s) {
       if (s == RTCIceGatheringState.RTCIceGatheringStateComplete) {
@@ -301,7 +389,8 @@ class WebRtcTransport implements PeerTransport {
   Stream<Uint8List> get messages => _messages.stream;
 
   @override
-  void send(Uint8List message) => _dc.send(RTCDataChannelMessage.fromBinary(message));
+  void send(Uint8List message) =>
+      _dc.send(RTCDataChannelMessage.fromBinary(Reorder.frame(_sent++, message)));
 
   void _ended() {
     if (!_open.isCompleted) _open.completeError(StateError('Closed'));
@@ -314,5 +403,40 @@ class WebRtcTransport implements PeerTransport {
     await _dc.close();
     await _pc.close();
     await _pc.dispose();
+  }
+}
+
+/// Puts a channel's messages back in the order they were sent, by the sequence number in front of
+/// each ([frame]).
+class Reorder {
+  final int maxWaiting;
+  final _waiting = <int, Uint8List>{};
+  var _next = 0;
+
+  Reorder(this.maxWaiting);
+
+  /// `message` with sequence number `seq` in front.
+  static Uint8List frame(int seq, Uint8List message) {
+    final out = Uint8List(message.length + 4);
+    ByteData.sublistView(out).setUint32(0, seq & 0xffffffff);
+    out.setRange(4, out.length, message);
+    return out;
+  }
+
+  /// Takes one framed message and returns the messages that are now next in order, which may be
+  /// none. Returns null when the message can't be right: too short, a number already taken, or too
+  /// many messages waiting for a missing one.
+  List<Uint8List>? take(Uint8List framed) {
+    if (framed.length < 4) return null;
+    final seq = ByteData.sublistView(framed).getUint32(0);
+    final ahead = (seq - _next) & 0xffffffff;
+    if (ahead >= maxWaiting || _waiting.containsKey(seq)) return null;
+    _waiting[seq] = Uint8List.sublistView(framed, 4);
+    final ready = <Uint8List>[];
+    for (var message = _waiting.remove(_next); message != null; message = _waiting.remove(_next)) {
+      ready.add(message);
+      _next = (_next + 1) & 0xffffffff;
+    }
+    return ready;
   }
 }

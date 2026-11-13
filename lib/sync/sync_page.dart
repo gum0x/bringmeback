@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../bloc/tasks_bloc.dart';
+import 'pairing.dart';
+import 'peer.dart' show syncProtocol;
 import 'sync_cubit.dart';
 
 /// Pairs this device with others. Every device in a group shares the same group secret.
@@ -67,6 +70,10 @@ class SyncPage extends StatelessWidget {
             label: const Text('Copy code')),
         const SizedBox(height: 16),
         ListTile(
+          title: const Text('This device'),
+          subtitle: Text('Device ${_shortId(state.device!.id)}, sync version $syncProtocol'),
+        ),
+        ListTile(
           title: const Text('Group fingerprint'),
           subtitle: Text('${state.keys!.fingerprint}\nIt should be the same on every device in the group.'),
           isThreeLine: true,
@@ -80,6 +87,7 @@ class SyncPage extends StatelessWidget {
           value: state.live,
           onChanged: (on) => context.read<SyncCubit>().setLive(on),
         ),
+        if (state.live) ..._status(context, state),
         if (state.live)
           ListTile(
             title: Text(state.online.isEmpty
@@ -99,6 +107,34 @@ class SyncPage extends StatelessWidget {
             onPressed: () => _confirmLeave(context),
             child: const Text('Leave group')),
       ];
+
+  /// What stops sync right now, if anything: the relays, or a device that can't connect.
+  List<Widget> _status(BuildContext context, SyncState state) {
+    final error = Theme.of(context).colorScheme.error;
+    Widget problem(String title, String detail) => ListTile(
+          leading: Icon(Icons.error_outline, color: error),
+          title: Text(title),
+          subtitle: Text(detail),
+          isThreeLine: true,
+        );
+    return [
+      if (state.relaysUnreachable)
+        problem(
+            'Can\'t reach the relays',
+            'None of the ${state.relayCount} relays answered, so this device can\'t find the '
+                'others. Check the internet connection, or whether a blocker stops connections '
+                'to the relays.')
+      else if (state.relayCount > 0)
+        ListTile(
+          dense: true,
+          title: Text('Connected to ${state.relaysUp} of ${state.relayCount} relays'),
+        ),
+      for (final MapEntry(key: id, value: p) in state.problems.entries)
+        problem('Device ${_shortId(id)} isn\'t syncing', p.message),
+    ];
+  }
+
+  static String _shortId(String id) => id.length > 6 ? id.substring(0, 6) : id;
 
   Future<void> _confirmLeave(BuildContext context) async {
     final cubit = context.read<SyncCubit>();
@@ -127,6 +163,7 @@ class _JoinForm extends StatefulWidget {
 class _JoinFormState extends State<_JoinForm> {
   final _controller = TextEditingController();
   String? _error;
+  bool _clearFirst = false;
 
   @override
   void dispose() {
@@ -135,12 +172,42 @@ class _JoinFormState extends State<_JoinForm> {
   }
 
   Future<void> _join() async {
+    final sync = context.read<SyncCubit>();
+    final tasks = context.read<TasksBloc>();
+    if (_clearFirst) {
+      // A bad code shows its error before anything is asked or deleted.
+      try {
+        await PairingCode.parse(_controller.text);
+      } on FormatException catch (e) {
+        setState(() => _error = e.message);
+        return;
+      }
+      if (!mounted || !await _confirmClear()) return;
+    }
+    if (!mounted) return;
     try {
-      await context.read<SyncCubit>().joinGroup(_controller.text);
+      await sync.joinGroup(_controller.text, clearFirst: _clearFirst ? tasks.clearAll : null);
     } on FormatException catch (e) {
-      setState(() => _error = e.message);
+      if (mounted) setState(() => _error = e.message);
     }
   }
+
+  Future<bool> _confirmClear() async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete this device\'s tasks?'),
+          content: const Text('Every task, note and logged time on this device is deleted before it '
+              'joins, and it then gets the group\'s tasks. This can\'t be undone.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Delete and join')),
+          ],
+        ),
+      ) ==
+      true;
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +228,15 @@ class _JoinFormState extends State<_JoinForm> {
           },
           onSubmitted: (_) => _join(),
         ),
-        const SizedBox(height: 8),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: const Text('Start empty'),
+          subtitle: const Text('Delete the tasks and history on this device first, so only the '
+              'group\'s tasks are here and none of this device\'s go to the others.'),
+          value: _clearFirst,
+          onChanged: (on) => setState(() => _clearFirst = on ?? false),
+        ),
         ElevatedButton(onPressed: _join, child: const Text('Join group')),
       ],
     );
