@@ -116,6 +116,25 @@ off instead. A message at the bottom offers **Undo**, which puts the task back w
 Browsers keep Ctrl+N and Ctrl+D for themselves, so use the Alt variants in the web app. The keyboard
 icon in the top bar shows this list.
 
+## Export and import tasks
+
+In **Settings**, under **Tasks**:
+
+- **Export tasks** saves today's note and the unfinished tasks waiting from earlier notes to a file,
+  `bringmeback-tasks-<date>.json`. The web app downloads it; the desktop apps ask where to save it.
+  Use it as a backup, or to move tasks to a device that isn't paired.
+- **Import tasks** adds the tasks of such a file. They go at the end of today's note, below what you
+  are doing, done ones still checked off, with their notes, expected time and the time tracked.
+  Any that don't fit on the note, and the file's waiting tasks, wait to be written again like the
+  tasks of a note torn off. Tasks the device already has are left out, so importing the same file
+  twice, or on a device it already synced with, adds nothing twice.
+
+The file is plain JSON: `format` is `bringmeback-tasks`, `version` is `1`, `tasks` lists the note
+in order and `waiting` the unfinished tasks of earlier notes. A task needs only a `name`; it may also
+have `notes`, `timerLengthSeconds`, `doneAt` and `entries` (each `{"start": …, "end": …}`, in Unix
+seconds), so a list written by hand imports too. A running timer is saved as stopped at the time of
+the export.
+
 ## Where your data is
 
 Everything is saved on the device you use, in the browser's storage for the web app. Nothing is sent
