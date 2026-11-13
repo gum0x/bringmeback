@@ -1,6 +1,7 @@
 import 'package:bringmeback/bloc/history.dart';
 import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
+import 'package:bringmeback/focus/pomodoro.dart';
 import 'package:bringmeback/main.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -165,6 +166,24 @@ void main() {
 
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt('noteLines'), minNoteLines);
+  });
+
+  noteTest('the Pomodoro lengths are set in Settings and kept', (tester, bloc) async {
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Long break every'), 100);
+    expect(find.text('25 min'), findsOneWidget);
+    for (final tooltip in ['Longer focus', 'Longer focus', 'Shorter short break']) {
+      await tester.tap(find.byTooltip(tooltip));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('27 min'), findsOneWidget);
+    expect(find.text('4 min'), findsOneWidget);
+
+    final saved = await tester.runAsync(PomodoroSettings.load);
+    expect(saved?.workMinutes, 27);
+    expect(saved?.shortBreakMinutes, 4);
+    expect(saved?.longBreakMinutes, 15);
   });
 
   noteTest('tearing off the note carries over what is not done', (tester, bloc) async {

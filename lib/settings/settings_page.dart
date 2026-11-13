@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
+import '../focus/pomodoro.dart';
 
 /// How the app behaves on this device. Settings are saved here and are not synced.
 class SettingsPage extends StatelessWidget {
@@ -9,7 +10,6 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: Center(
@@ -17,17 +17,87 @@ class SettingsPage extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 640),
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text('Today\'s note',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(color: theme.colorScheme.primary)),
-              ),
-              const _NoteLinesTile(),
+            children: const [
+              _Section('Today\'s note'),
+              _NoteLinesTile(),
+              _Section('Pomodoro'),
+              _PomodoroDefaults(),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _Section extends StatelessWidget {
+  final String title;
+
+  const _Section(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(title,
+          style: theme.textTheme.titleSmall
+              ?.copyWith(color: theme.colorScheme.primary)),
+    );
+  }
+}
+
+/// A setting with a small number, changed one step at a time with − and +.
+class _StepperTile extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final int value;
+  final int min;
+  final int max;
+  final String unit;
+  final String lessTooltip;
+  final String moreTooltip;
+  final ValueChanged<int> onChanged;
+
+  const _StepperTile({
+    super.key,
+    required this.title,
+    this.subtitle,
+    required this.value,
+    required this.min,
+    required this.max,
+    this.unit = '',
+    required this.lessTooltip,
+    required this.moreTooltip,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      title: Text(title),
+      subtitle: subtitle == null ? null : Text(subtitle!),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: lessTooltip,
+            onPressed: value > min ? () => onChanged(value - 1) : null,
+            icon: const Icon(Icons.remove),
+          ),
+          SizedBox(
+            width: unit.isEmpty ? 32 : 64,
+            child: Text(unit.isEmpty ? '$value' : '$value $unit',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()])),
+          ),
+          IconButton(
+            tooltip: moreTooltip,
+            onPressed: value < max ? () => onChanged(value + 1) : null,
+            icon: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }
@@ -41,41 +111,98 @@ class _NoteLinesTile extends StatelessWidget {
     final bloc = context.read<TasksBloc>();
     return BlocBuilder<TasksBloc, TasksState>(
       buildWhen: (a, b) => a.noteLines != b.noteLines,
-      builder: (context, state) {
-        final lines = state.noteLines;
-        return ListTile(
-          title: const Text('Tasks per note'),
-          subtitle: const Text(
-              'A small note keeps the day focused. Done tasks count too. '
-              'Making it smaller keeps what is already written.'),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: 'Fewer tasks per note',
-                onPressed: lines > minNoteLines
-                    ? () => bloc.add(SetNoteLinesEvent(lines - 1))
-                    : null,
-                icon: const Icon(Icons.remove),
-              ),
-              SizedBox(
-                width: 32,
-                child: Text('$lines',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontFeatures: const [FontFeature.tabularFigures()])),
-              ),
-              IconButton(
-                tooltip: 'More tasks per note',
-                onPressed: lines < maxNoteLines
-                    ? () => bloc.add(SetNoteLinesEvent(lines + 1))
-                    : null,
-                icon: const Icon(Icons.add),
-              ),
-            ],
-          ),
-        );
-      },
+      builder: (context, state) => _StepperTile(
+        title: 'Tasks per note',
+        subtitle: 'A small note keeps the day focused. Done tasks count too. '
+            'Making it smaller keeps what is already written.',
+        value: state.noteLines,
+        min: minNoteLines,
+        max: maxNoteLines,
+        lessTooltip: 'Fewer tasks per note',
+        moreTooltip: 'More tasks per note',
+        onChanged: (lines) => bloc.add(SetNoteLinesEvent(lines)),
+      ),
+    );
+  }
+}
+
+/// The lengths a focus view starts with. The focus view can change them for one focus, or keep its
+/// change here.
+class _PomodoroDefaults extends StatefulWidget {
+  const _PomodoroDefaults();
+
+  @override
+  State<_PomodoroDefaults> createState() => _PomodoroDefaultsState();
+}
+
+class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
+  PomodoroSettings? _settings;
+
+  @override
+  void initState() {
+    super.initState();
+    PomodoroSettings.load().then((s) {
+      if (mounted) setState(() => _settings = s);
+    });
+  }
+
+  void _update(PomodoroSettings settings) {
+    setState(() => _settings = settings);
+    settings.save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = _settings;
+    if (s == null) return const SizedBox(height: 48);
+    return Column(
+      children: [
+        _StepperTile(
+          key: const Key('pomodoroWork'),
+          title: 'Focus',
+          subtitle: 'How long each focus session lasts.',
+          value: s.workMinutes,
+          min: 1,
+          max: 120,
+          unit: 'min',
+          lessTooltip: 'Shorter focus',
+          moreTooltip: 'Longer focus',
+          onChanged: (v) => _update(s.copyWith(workMinutes: v)),
+        ),
+        _StepperTile(
+          key: const Key('pomodoroShortBreak'),
+          title: 'Short break',
+          value: s.shortBreakMinutes,
+          min: 1,
+          max: 60,
+          unit: 'min',
+          lessTooltip: 'Shorter short break',
+          moreTooltip: 'Longer short break',
+          onChanged: (v) => _update(s.copyWith(shortBreakMinutes: v)),
+        ),
+        _StepperTile(
+          key: const Key('pomodoroLongBreak'),
+          title: 'Long break',
+          value: s.longBreakMinutes,
+          min: 1,
+          max: 120,
+          unit: 'min',
+          lessTooltip: 'Shorter long break',
+          moreTooltip: 'Longer long break',
+          onChanged: (v) => _update(s.copyWith(longBreakMinutes: v)),
+        ),
+        _StepperTile(
+          key: const Key('pomodoroSessions'),
+          title: 'Long break every',
+          subtitle: 'Focus sessions before a long break.',
+          value: s.sessionsBeforeLongBreak,
+          min: 1,
+          max: 12,
+          lessTooltip: 'Fewer sessions before a long break',
+          moreTooltip: 'More sessions before a long break',
+          onChanged: (v) => _update(s.copyWith(sessionsBeforeLongBreak: v)),
+        ),
+      ],
     );
   }
 }
