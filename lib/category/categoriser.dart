@@ -92,9 +92,11 @@ class Categoriser {
       .load(wordVectorsAsset)
       .then((data) => Categoriser(WordVectors.parse(data)));
 
-  /// The id of the category [text] fits best, or null when none fits well enough.
+  /// The id of the category [text] fits best, or null when none fits well enough. A category whose
+  /// rules [text] mentions wins outright.
   String? categorise(String text, List<TaskCategory> categories,
       {List<CategoryExample> examples = const []}) {
+    if (byRule(text, categories) case final id?) return id;
     final task = _words(text);
     if (task.isEmpty || categories.isEmpty) return null;
     final ids = {for (final c in categories) c.id};
@@ -137,6 +139,28 @@ class Categoriser {
     }
     return fit >= threshold ? id : null;
   }
+
+  /// The category one of whose rules [text] mentions, as whole words in any case, or null. The
+  /// longest phrase wins, so "bringmeback sync" can go somewhere else than "bringmeback". Needs no
+  /// word vectors.
+  static String? byRule(String text, List<TaskCategory> categories) {
+    final words = ' ${_ruleWords(text)} ';
+    String? best;
+    var longest = 0;
+    for (final c in categories) {
+      for (final phrase in c.rulePhrases) {
+        final p = _ruleWords(phrase);
+        if (p.length > longest && words.contains(' $p ')) {
+          best = c.id;
+          longest = p.length;
+        }
+      }
+    }
+    return best;
+  }
+
+  static String _ruleWords(String text) =>
+      [for (final m in _anyWord.allMatches(text.toLowerCase())) m[0]].join(' ');
 
   /// How well [text] fits each category by its name and keywords, from 0 to 1.
   Map<String, double> scores(String text, List<TaskCategory> categories) {
@@ -203,6 +227,9 @@ class _Word {
 
 final _wordPattern = RegExp(r'[a-z]+');
 
+/// Words in any script, for rules, which name things the vectors may not know.
+final _anyWord = RegExp(r'[\p{L}\p{N}]+', unicode: true);
+
 /// Words that say little about what a task is about.
 const _stopWords = {
   'a', 'about', 'after', 'all', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'before', 'but', 'by',
@@ -211,14 +238,3 @@ const _stopWords = {
   'that', 'the', 'their', 'them', 'then', 'this', 'to', 'up', 'us', 'we', 'what', 'when', 'with',
   'you', 'your',
 };
-
-/// Categories offered in Settings when the list is empty, as a start to edit.
-const suggestedCategories = [
-  (name: 'Work', keywords: 'job office meeting project email client colleague report deadline'),
-  (name: 'Health', keywords: 'doctor dentist exercise gym run sport medicine sleep'),
-  (name: 'Home', keywords: 'house cleaning laundry kitchen repair garden cooking'),
-  (name: 'Errands', keywords: 'shopping buy groceries store order post office'),
-  (name: 'Money', keywords: 'bank bill pay tax budget invoice insurance rent'),
-  (name: 'Learning', keywords: 'study read book course practice language tutorial'),
-  (name: 'People', keywords: 'family friends call visit birthday partner kids mom dad'),
-];

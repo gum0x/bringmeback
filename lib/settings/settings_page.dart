@@ -4,7 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
-import '../category/categoriser.dart';
+import '../category/default_categories.dart';
 import '../focus/pomodoro.dart';
 import '../sync/peer.dart' show syncProtocol;
 import '../version/build_info.dart';
@@ -242,9 +242,10 @@ class _Categories extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              'Each task gets the category that fits its name best, chosen on this device. '
-              'Keywords help tell categories apart. Tap a task\'s category to correct it, '
-              'and later tasks like it follow. The list syncs with your other devices.',
+              'Each task gets one category: the one whose rules it mentions, or else the one '
+              'that fits its name best, chosen on this device. Keywords help tell categories '
+              'apart. Tap a task\'s category to correct it, and later tasks like it follow. '
+              'Changes sync with your other devices.',
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
@@ -254,7 +255,13 @@ class _Categories extends StatelessWidget {
               key: ValueKey('category-${c.id}'),
               leading: const Icon(Icons.label_outline),
               title: Text(c.name),
-              subtitle: c.keywords.isEmpty ? null : Text(c.keywords),
+              subtitle: switch ([
+                if (c.rulePhrases.isNotEmpty) 'Always: ${c.rulePhrases.join(', ')}',
+                if (c.keywords.isNotEmpty) c.keywords,
+              ]) {
+                [] => null,
+                final lines => Text(lines.join('\n'), maxLines: 3, overflow: TextOverflow.ellipsis),
+              },
               trailing: const Icon(Icons.edit_outlined),
               onTap: () => _edit(context, c),
             ),
@@ -263,16 +270,22 @@ class _Categories extends StatelessWidget {
             title: const Text('Add category'),
             onTap: () => _edit(context, null),
           ),
-          if (state.categories.isEmpty)
+          if (_deletedDefaults(state) case final deleted when deleted.isNotEmpty)
             ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('Add suggested categories'),
-              subtitle: Text([for (final c in suggestedCategories) c.name].join(', ')),
-              onTap: () => bloc.add(AddSuggestedCategoriesEvent()),
+              leading: const Icon(Icons.restore),
+              title: const Text('Restore default categories'),
+              subtitle: Text(deleted.join(', ')),
+              onTap: () => bloc.add(RestoreDefaultCategoriesEvent()),
             ),
         ],
       ),
     );
+  }
+
+  /// The names of the default categories the user deleted.
+  static List<String> _deletedDefaults(TasksState state) {
+    final shown = {for (final c in state.categories) c.id};
+    return [for (final d in defaultCategories) if (!shown.contains(d.id)) d.name];
   }
 
   Future<void> _edit(BuildContext context, TaskCategory? category) async {
@@ -286,10 +299,10 @@ class _Categories extends StatelessWidget {
         return;
       case _CategoryEdit(delete: true):
         if (category != null) bloc.add(RemoveCategoryEvent(id: category.id));
-      case _CategoryEdit(:final name, :final keywords) when category == null:
-        bloc.add(AddCategoryEvent(name: name, keywords: keywords));
-      case _CategoryEdit(:final name, :final keywords):
-        bloc.add(EditCategoryEvent(id: category.id, name: name, keywords: keywords));
+      case _CategoryEdit(:final name, :final keywords, :final rules) when category == null:
+        bloc.add(AddCategoryEvent(name: name, keywords: keywords, rules: rules));
+      case _CategoryEdit(:final name, :final keywords, :final rules):
+        bloc.add(EditCategoryEvent(id: category.id, name: name, keywords: keywords, rules: rules));
     }
   }
 }
@@ -297,9 +310,10 @@ class _Categories extends StatelessWidget {
 class _CategoryEdit {
   final String name;
   final String keywords;
+  final String rules;
   final bool delete;
 
-  const _CategoryEdit({this.name = '', this.keywords = '', this.delete = false});
+  const _CategoryEdit({this.name = '', this.keywords = '', this.rules = '', this.delete = false});
 }
 
 /// Names a category and its keywords, or deletes it.
@@ -315,6 +329,7 @@ class _CategoryDialog extends StatefulWidget {
 class _CategoryDialogState extends State<_CategoryDialog> {
   late final _name = TextEditingController(text: widget.category?.name ?? '');
   late final _keywords = TextEditingController(text: widget.category?.keywords ?? '');
+  late final _rules = TextEditingController(text: widget.category?.rules ?? '');
 
   @override
   void initState() {
@@ -326,6 +341,7 @@ class _CategoryDialogState extends State<_CategoryDialog> {
   void dispose() {
     _name.dispose();
     _keywords.dispose();
+    _rules.dispose();
     super.dispose();
   }
 
@@ -333,7 +349,10 @@ class _CategoryDialogState extends State<_CategoryDialog> {
 
   void _save() {
     if (!_canSave) return;
-    Navigator.pop(context, _CategoryEdit(name: _name.text.trim(), keywords: _keywords.text.trim()));
+    Navigator.pop(
+        context,
+        _CategoryEdit(
+            name: _name.text.trim(), keywords: _keywords.text.trim(), rules: _rules.text.trim()));
   }
 
   @override
@@ -368,6 +387,21 @@ class _CategoryDialogState extends State<_CategoryDialog> {
                 labelText: 'Keywords',
                 hintText: 'meeting, report, client (optional)',
                 helperText: 'Words tasks in this category often use',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _save(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _rules,
+              minLines: 1,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Always for tasks that mention',
+                hintText: 'bringmeback, Acme (optional)',
+                helperText: 'Names or phrases, separated by commas. A task that mentions one\n'
+                    'goes here, whatever else it says.',
+                helperMaxLines: 3,
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _save(),

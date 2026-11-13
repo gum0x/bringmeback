@@ -1,4 +1,5 @@
 import 'package:bringmeback/bloc/task_document.dart';
+import 'package:bringmeback/category/default_categories.dart';
 import 'package:crdt_lf/crdt_lf.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -142,14 +143,29 @@ void main() {
       final d = newDoc()
         ..addCategory('w', 'Work', keywords: 'office', at: 2)
         ..addCategory('h', 'Health', at: 1);
-      expect(d.categories().map((c) => c.name), ['Health', 'Work']);
+      expect(d.categories().map((c) => c.name).skip(defaultCategories.length), ['Health', 'Work']);
       d.setCategoryName('w', 'Job');
       d.setCategoryKeywords('w', 'office meeting');
       expect(d.categories().last.keywords, 'office meeting');
       d.removeCategory('h');
-      expect(d.categories().map((c) => c.name), ['Job']);
-      expect(d.categories(deleted: true).map((c) => (c.name, c.deleted)),
+      expect(d.categories().last.name, 'Job');
+      expect(d.categories().length, defaultCategories.length + 1);
+      expect(d.categories(deleted: true).skip(defaultCategories.length).map((c) => (c.name, c.deleted)),
           [('Health', true), ('Job', false)]);
+    });
+
+    test('the defaults need nothing in the document, and only changes to them are written', () {
+      final d = newDoc();
+      expect(d.categories().map((c) => c.id), [for (final c in defaultCategories) c.id]);
+      expect(d.categories().every((c) => c.isDefault), isTrue);
+      d.setCategoryRules('personal-projects', 'bringmeback');
+      d.removeCategory('leisure');
+      final p = d.categories().firstWhere((c) => c.id == 'personal-projects');
+      expect((p.name, p.rules), ('Personal projects', 'bringmeback'));
+      expect(p.rulePhrases, ['bringmeback']);
+      expect(d.categories().map((c) => c.id), isNot(contains('leisure')));
+      d.restoreDefaultCategories();
+      expect(d.categories().map((c) => c.id), contains('leisure'));
     });
 
     test('are not listed as tasks', () {
@@ -179,13 +195,13 @@ void main() {
       final a = newDoc()..addCategory('w', 'Work', keywords: 'office');
       final b = newDoc();
       exchange(a, b);
-      expect(b.categories().single.name, 'Work');
+      expect(b.categories().last.name, 'Work');
       a.setCategoryName('w', 'Job');
       b.setCategoryKeywords('w', 'office meeting');
       b.insert(0, 't', name: 'report', category: 'w');
       exchange(a, b);
       for (final d in [a, b]) {
-        final c = d.categories().single;
+        final c = d.categories().last;
         expect((c.name, c.keywords), ('Job', 'office meeting'));
         expect(d.task('t').category, 'w');
       }
@@ -201,7 +217,8 @@ void main() {
         ..set('category/d/addedAt', 'soon');
       d.doc.importChanges(other.exportChanges());
       expect(d.task('a').category, isNull);
-      expect(d.categories().map((c) => (c.id, c.addedAt)), [('d', 0)]);
+      expect(d.categories().skip(defaultCategories.length).map((c) => (c.id, c.addedAt)),
+          [('d', 0)]);
     });
   });
 }

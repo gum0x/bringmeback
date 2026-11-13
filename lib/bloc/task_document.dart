@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:crdt_lf/crdt_lf.dart';
 import 'package:flutter/foundation.dart';
 
+import '../category/default_categories.dart';
 import 'tasks_bloc.dart';
 
 /// The task list as a CRDT document, so copies on different devices converge when they exchange
@@ -27,12 +28,15 @@ import 'tasks_bloc.dart';
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
 ///
-/// Categories, set in Settings, live in the same document so they sync with the tasks:
+/// Categories: the app comes with [defaultCategories], which need nothing in the document, and the
+/// user's changes and own categories live in the same document as the tasks, so they sync with them:
 /// `category/<categoryId>/name`, `category/<categoryId>/keywords` (words that help the categoriser
-/// tell it apart), `category/<categoryId>/addedAt` (milliseconds, to order the list) and
-/// `category/<categoryId>/deletedAt`. A deleted category keeps its fields, so tasks filed under it
-/// still read for statistics. Each field is its own last-writer-wins entry, so a rename on one device
-/// and a keyword change on another both survive.
+/// tell it apart), `category/<categoryId>/rules` (words or phrases that always file a task there),
+/// `category/<categoryId>/addedAt` (milliseconds, to order the user's own after the defaults) and
+/// `category/<categoryId>/deletedAt`. A field left unset on a default category reads as the
+/// default. A deleted category keeps its fields, so tasks filed under it still read for statistics.
+/// Each field is its own last-writer-wins entry, so a rename on one device and a keyword change on
+/// another both survive.
 ///
 /// A task's category is `<taskId>/category` (a category id, or null for none) and
 /// `<taskId>/categoryBy`: `ai` when the categoriser chose it, `hand` when the user did. A category
@@ -311,35 +315,67 @@ class TaskDocument {
     }
   }
 
-  /// The categories set in Settings, in the order they were added. With [deleted], the deleted ones
-  /// too, for reading what older tasks were filed under.
+  /// The categories in Settings: the defaults first, then the user's own in the order they were
+  /// added. With [deleted], the deleted ones too, for reading what older tasks were filed under.
   List<TaskCategory> categories({bool deleted = false}) {
     final fields = _values;
+    String? text(String id, String field) => switch (fields['category/$id/$field']) {
+          String v => v,
+          _ => null,
+        };
     final list = <TaskCategory>[];
+    for (final (i, d) in defaultCategories.indexed) {
+      final isDeleted = fields['category/${d.id}/deletedAt'] is int;
+      if (isDeleted && !deleted) continue;
+      final name = text(d.id, 'name');
+      list.add(TaskCategory(
+        id: d.id,
+        name: name == null || name.isEmpty ? d.name : name,
+        keywords: text(d.id, 'keywords') ?? d.keywords,
+        rules: text(d.id, 'rules') ?? d.rules,
+        addedAt: i - defaultCategories.length,
+        deleted: isDeleted,
+        isDefault: true,
+      ));
+    }
+    final own = <TaskCategory>[];
     for (final MapEntry(:key, :value) in fields.entries) {
       if (!key.startsWith('category/') || !key.endsWith('/name') || value is! String) continue;
       final id = key.substring('category/'.length, key.length - '/name'.length);
-      if (id.isEmpty || id.contains('/')) continue;
-      final deletedAt = fields['category/$id/deletedAt'];
-      if (deletedAt is int && !deleted) continue;
-      list.add(TaskCategory(
+      if (id.isEmpty || id.contains('/') || defaultCategory(id) != null) continue;
+      final isDeleted = fields['category/$id/deletedAt'] is int;
+      if (isDeleted && !deleted) continue;
+      own.add(TaskCategory(
         id: id,
         name: value,
-        keywords: switch (fields['category/$id/keywords']) { String k => k, _ => '' },
+        keywords: text(id, 'keywords') ?? '',
+        rules: text(id, 'rules') ?? '',
         addedAt: switch (fields['category/$id/addedAt']) { int a => a, _ => 0 },
-        deleted: deletedAt is int,
+        deleted: isDeleted,
       ));
     }
-    return list
-      ..sort((a, b) => a.addedAt != b.addedAt ? a.addedAt.compareTo(b.addedAt) : a.id.compareTo(b.id));
+    own.sort((a, b) => a.addedAt != b.addedAt ? a.addedAt.compareTo(b.addedAt) : a.id.compareTo(b.id));
+    return list..addAll(own);
   }
 
-  void addCategory(String id, String name, {String keywords = '', int? at}) =>
+  void addCategory(String id, String name, {String keywords = '', String rules = '', int? at}) =>
       doc.runInTransaction(() {
         _fields
           ..set('category/$id/name', name)
           ..set('category/$id/keywords', keywords)
+          ..set('category/$id/rules', rules)
           ..set('category/$id/addedAt', at ?? DateTime.now().millisecondsSinceEpoch);
+      });
+
+  void setCategoryRules(String id, String rules) => _fields.set('category/$id/rules', rules);
+
+  /// Brings back the default categories that were deleted, as the user last left them.
+  void restoreDefaultCategories() => doc.runInTransaction(() {
+        for (final d in defaultCategories) {
+          if (_values['category/${d.id}/deletedAt'] != null) {
+            _fields.set('category/${d.id}/deletedAt', null);
+          }
+        }
       });
 
   void setCategoryName(String id, String name) => _fields.set('category/$id/name', name);
@@ -408,6 +444,13 @@ class TaskCategory {
   final String id;
   final String name;
 
+  /// Words or phrases, separated by commas or lines, that always file a task here when its name
+  /// mentions one, whatever else it says. For names the word vectors can't know, like a project's.
+  final String rules;
+
+  /// Whether the app comes with it (see [defaultCategories]).
+  final bool isDefault;
+
   /// Words that describe what goes in it, separated by spaces or commas. The categoriser compares a
   /// task with these and the name.
   final String keywords;
@@ -418,8 +461,16 @@ class TaskCategory {
       {required this.id,
       required this.name,
       this.keywords = '',
+      this.rules = '',
       this.addedAt = 0,
-      this.deleted = false});
+      this.deleted = false,
+      this.isDefault = false});
+
+  /// The words or phrases of [rules], lowercase.
+  List<String> get rulePhrases => [
+        for (final r in rules.split(RegExp(r'[,;\n]')))
+          if (r.trim().toLowerCase() case final p when p.isNotEmpty) p
+      ];
 
   @override
   bool operator ==(Object other) =>
@@ -427,11 +478,13 @@ class TaskCategory {
       other.id == id &&
       other.name == name &&
       other.keywords == keywords &&
+      other.rules == rules &&
       other.addedAt == addedAt &&
-      other.deleted == deleted;
+      other.deleted == deleted &&
+      other.isDefault == isDefault;
 
   @override
-  int get hashCode => Object.hash(id, name, keywords, addedAt, deleted);
+  int get hashCode => Object.hash(id, name, keywords, rules, addedAt, deleted, isDefault);
 }
 
 /// What became of a task.

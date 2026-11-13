@@ -421,17 +421,20 @@ class SetTaskCategoryEvent extends TasksEvent {
 class AddCategoryEvent extends TasksEvent {
   final String name;
   final String keywords;
+  final String rules;
 
-  AddCategoryEvent({required this.name, this.keywords = ''});
+  AddCategoryEvent({required this.name, this.keywords = '', this.rules = ''});
 }
 
-/// Renames a category or changes its keywords.
+/// Renames a category or changes its keywords or rules.
 class EditCategoryEvent extends TasksEvent {
   final String id;
   final String name;
   final String keywords;
+  final String rules;
 
-  EditCategoryEvent({required this.id, required this.name, required this.keywords});
+  EditCategoryEvent(
+      {required this.id, required this.name, required this.keywords, this.rules = ''});
 }
 
 class RemoveCategoryEvent extends TasksEvent {
@@ -440,13 +443,14 @@ class RemoveCategoryEvent extends TasksEvent {
   RemoveCategoryEvent({required this.id});
 }
 
-/// Fills an empty category list with [suggestedCategories], as a start to edit.
-class AddSuggestedCategoriesEvent extends TasksEvent {}
+/// Brings back the default categories that were deleted.
+class RestoreDefaultCategoriesEvent extends TasksEvent {}
 
-/// The categoriser is ready to file the tasks [ids].
+/// The categoriser is ready to file the tasks [ids]; null when it couldn't load, and only the
+/// categories' rules apply.
 class _CategoriseEvent extends TasksEvent {
   final List<String> ids;
-  final Categoriser categoriser;
+  final Categoriser? categoriser;
 
   _CategoriseEvent(this.ids, this.categoriser);
 }
@@ -503,19 +507,20 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         notes: e.notes, category: e.category));
     on<SetTaskCategoryEvent>(_onSetTaskCategory);
     on<AddCategoryEvent>((e, emit) => _editCategories(
-        emit, (doc) => doc.addCategory(newId(), e.name.trim(), keywords: e.keywords.trim())));
+        emit,
+        (doc) => doc.addCategory(newId(), e.name.trim(),
+            keywords: e.keywords.trim(), rules: e.rules.trim())));
     on<EditCategoryEvent>((e, emit) => _editCategories(emit, (doc) {
-          doc.setCategoryName(e.id, e.name.trim());
-          doc.setCategoryKeywords(e.id, e.keywords.trim());
+          final before = doc.categories().where((c) => c.id == e.id).firstOrNull;
+          // Only what changed is written, so a default category keeps following the app's defaults
+          // in the fields the user didn't touch.
+          if (before?.name != e.name.trim()) doc.setCategoryName(e.id, e.name.trim());
+          if (before?.keywords != e.keywords.trim()) doc.setCategoryKeywords(e.id, e.keywords.trim());
+          if (before?.rules != e.rules.trim()) doc.setCategoryRules(e.id, e.rules.trim());
         }));
     on<RemoveCategoryEvent>((e, emit) => _editCategories(emit, (doc) => doc.removeCategory(e.id)));
-    on<AddSuggestedCategoriesEvent>((e, emit) => _editCategories(emit, (doc) {
-          if (doc.categories().isNotEmpty) return;
-          final at = DateTime.now().millisecondsSinceEpoch;
-          for (final (i, c) in suggestedCategories.indexed) {
-            doc.addCategory(newId(), c.name, keywords: c.keywords, at: at + i);
-          }
-        }));
+    on<RestoreDefaultCategoriesEvent>(
+        (e, emit) => _editCategories(emit, (doc) => doc.restoreDefaultCategories()));
     on<_CategoriseEvent>(_onCategorise);
     on<SetDoneEvent>((e, emit) => _setDone(emit, e.index, e.done));
     on<EditTaskEvent>(_onEditTask);
@@ -644,13 +649,12 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     if (ids.isEmpty || doc == null) return;
     // With no categories there is nothing to choose from, and no need to load the vectors.
     if (doc.categories().isEmpty && ids.every((id) => doc.task(id).category == null)) return;
-    final Categoriser categoriser;
+    Categoriser? categoriser;
     try {
       categoriser = await _categoriser();
     } on Object catch (e) {
-      // Tasks then simply stay without a category; the user can still pick one.
+      // Only the rules apply then; the user can still pick a category.
       debugPrint('Categoriser unavailable: $e');
-      return;
     }
     if (!isClosed) add(_CategoriseEvent(ids, categoriser));
   }
@@ -667,7 +671,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       final task = doc.task(id);
       // Gone, or the user chose since: their choice stands.
       if (task.categoryByHand || doc.fieldInt('$id/timerStartAt') == null) continue;
-      final pick = event.categoriser.categorise(task.name, categories, examples: examples);
+      final pick = event.categoriser?.categorise(task.name, categories, examples: examples) ??
+          Categoriser.byRule(task.name, categories);
       if (pick == task.category) continue;
       doc.setTaskCategory(id, pick, byHand: false);
       changed = true;

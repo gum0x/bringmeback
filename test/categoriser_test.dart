@@ -3,13 +3,13 @@ import 'dart:typed_data';
 
 import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/category/categoriser.dart';
+import 'package:bringmeback/category/default_categories.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   late Categoriser categoriser;
   final categories = [
-    for (final (i, s) in suggestedCategories.indexed)
-      TaskCategory(id: s.name.toLowerCase(), name: s.name, keywords: s.keywords, addedAt: i),
+    for (final d in defaultCategories) TaskCategory(id: d.id, name: d.name, keywords: d.keywords),
   ];
 
   setUpAll(() {
@@ -34,23 +34,29 @@ void main() {
 
   test('files everyday tasks under the suggested categories', () {
     const tasks = {
-      'fix login bug in the client project': 'work',
-      'reply to Ana about the report': 'work',
-      'prepare slides for the meeting': 'work',
-      'book dentist appointment': 'health',
-      'go for a run': 'health',
-      'pick up prescription': 'health',
-      'clean the kitchen': 'home',
-      'do the laundry': 'home',
-      'water the plants': 'home',
-      'buy milk': 'errands',
-      'get groceries': 'errands',
-      'pay electricity bill': 'money',
-      'file tax return': 'money',
+      'read work emails': 'work-planning',
+      'prepare tomorrow\'s work': 'work-planning',
+      'weekly KPIs': 'work-planning',
+      'fix login bug': 'focused-work',
+      'write the design doc': 'focused-work',
+      'standup with the team': 'meetings',
+      'call with the client': 'meetings',
       'read chapter 3 of the rust book': 'learning',
       'spanish lesson': 'learning',
-      'call mom': 'people',
-      'dinner with friends': 'people',
+      'clean the kitchen': 'housekeeping',
+      'do the laundry': 'housekeeping',
+      'water the plants': 'housekeeping',
+      'buy milk': 'errands',
+      'get groceries': 'errands',
+      'pay electricity bill': 'money-paperwork',
+      'file tax return': 'money-paperwork',
+      'go for a run': 'workout-self-care',
+      'book dentist appointment': 'workout-self-care',
+      'yoga class': 'workout-self-care',
+      'call mom': 'family-friends',
+      'dinner with friends': 'family-friends',
+      'watch a movie': 'leisure',
+      'plan the summer trip': 'leisure',
     };
     final wrong = <String>[];
     for (final MapEntry(key: task, value: expected) in tasks.entries) {
@@ -64,6 +70,27 @@ void main() {
     expect(wrong.length, lessThanOrEqualTo(3), reason: wrong.join('\n'));
   });
 
+  test('a rule files a task whatever else it says, longest phrase first', () {
+    final withRules = [
+      for (final c in categories)
+        if (c.id == 'personal-projects')
+          TaskCategory(id: c.id, name: c.name, keywords: c.keywords, rules: 'bringmeback, BMB')
+        else if (c.id == 'meetings')
+          TaskCategory(id: c.id, name: c.name, keywords: c.keywords, rules: 'bringmeback sync call')
+        else
+          c,
+    ];
+    expect(categoriser.categorise('Fix the login bug in Bringmeback', withRules),
+        'personal-projects');
+    expect(categoriser.categorise('bmb: review PR', withRules), 'personal-projects');
+    expect(categoriser.categorise('Bringmeback sync call', withRules), 'meetings');
+    // Whole words only.
+    expect(Categoriser.byRule('bringmebacks', withRules), isNull);
+    expect(Categoriser.byRule('café run', [
+      const TaskCategory(id: 'x', name: 'X', rules: 'Café'),
+    ]), 'x');
+  });
+
   test('leaves a task with nothing to go on without a category', () {
     expect(categoriser.categorise('asdf qwerty', categories), isNull);
     expect(categoriser.categorise('', categories), isNull);
@@ -71,17 +98,16 @@ void main() {
   });
 
   test('learns from tasks filed by hand', () {
-    const text = 'standup';
-    expect(categoriser.categorise(text, categories), isNot('work'));
+    expect(categoriser.categorise('groom the backlog', categories), isNot('personal-projects'));
     expect(
-        categoriser.categorise('daily standup', categories,
-            examples: [(text: 'standup with the team', category: 'work')]),
-        'work');
+        categoriser.categorise('groom the backlog', categories,
+            examples: [(text: 'backlog grooming', category: 'personal-projects')]),
+        'personal-projects');
     // A category's own words still win over an example that is only a bit alike.
     expect(
         categoriser.categorise('call mom', categories,
-            examples: [(text: 'call the bank', category: 'money')]),
-        'people');
+            examples: [(text: 'call the bank', category: 'money-paperwork')]),
+        'family-friends');
     // An example under a category no longer in the list is ignored.
     expect(
         categoriser.categorise('standup', categories,
