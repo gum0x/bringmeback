@@ -91,6 +91,12 @@ below or beside it, the rest of the list in a quiet **Up next**.
   is focus. The defaults, with the same total, are also in **Settings**, under **Pomodoro**.
 - The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
   carries on as it was.
+- Each task remembers where its Pomodoro was: the phase, the time left and the sessions done. Focus
+  on it again and it picks up there instead of starting over. If the app closes while the focus view
+  is open (a crash, a closed tab, the phone ending the app), it opens the focus view again on the
+  next start, paused where it was, and the task's timer waits too; press **Resume** to carry on.
+  Time away is not counted as focus. A Pomodoro left alone for 12 hours, or one whose task was marked
+  done, starts fresh. This is kept on each device, like the lengths, and not synced.
 
 ## Pause and breaks
 

@@ -9,14 +9,20 @@ import '../bloc/tasks_bloc.dart';
 import '../timer.dart';
 import 'pomodoro.dart';
 
-/// Opens the focus view for the task with [taskId].
-Future<void> openFocus(BuildContext context, String taskId) async {
+/// Opens the focus view for the task with [taskId], where its Pomodoro was left if it has one.
+///
+/// The clock starts right away when [autoStart] is set (the person chose to focus); otherwise it
+/// waits, paused, for Resume, as when the app reopens a focus view that was cut short.
+Future<void> openFocus(BuildContext context, String taskId,
+    {bool autoStart = true}) async {
   final settings = await PomodoroSettings.load();
+  final saved = await PomodoroMemory.load(taskId);
   if (!context.mounted) return;
   await Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => BlocProvider(
-      create: (_) => PomodoroCubit(settings: settings),
-      child: FocusPage(taskId: taskId),
+      create: (_) => PomodoroCubit(settings: settings, resumeFrom: saved),
+      child: FocusPage(
+          taskId: taskId, autoStart: autoStart, resumed: saved != null),
     ),
   ));
 }
@@ -27,10 +33,23 @@ Future<void> openFocus(BuildContext context, String taskId) async {
 /// Focusing on a task makes it the current one (it moves to the top). Its own timer runs while a
 /// focus session runs, and pauses, logging a break, during Pomodoro breaks or when the clock is
 /// paused. So History later shows the same work and breaks as the Pomodoro did.
+///
+/// The clock is saved as it goes, in [PomodoroMemory], so leaving the view, quitting or a crash
+/// doesn't lose the session: the next focus on the task picks up where it was.
 class FocusPage extends StatefulWidget {
   final String taskId;
 
-  const FocusPage({super.key, required this.taskId});
+  /// Whether the clock starts as the view opens.
+  final bool autoStart;
+
+  /// Whether the clock was picked up from where it was left, which the view says.
+  final bool resumed;
+
+  const FocusPage(
+      {super.key,
+      required this.taskId,
+      this.autoStart = true,
+      this.resumed = false});
 
   @override
   State<FocusPage> createState() => _FocusPageState();
@@ -39,7 +58,11 @@ class FocusPage extends StatefulWidget {
 class _FocusPageState extends State<FocusPage> {
   StreamSubscription<PomodoroPhase>? _phases;
   AudioPlayer? _player;
+  StreamSubscription<PomodoroState>? _saves;
   late final TasksBloc _tasks;
+  late final PomodoroCubit _pomodoro;
+  // Set once the task is marked done, so its clock is forgotten rather than kept.
+  bool _finished = false;
 
   @override
   void initState() {
@@ -49,18 +72,47 @@ class _FocusPageState extends State<FocusPage> {
     if (index > 0) tasks.add(MoveTaskEvent(fromIndex: index, toIndex: 0));
     // The Pomodoro clock replaces the task's own countdown while this view is open.
     tasks.add(SetFocusModeEvent(taskId: widget.taskId));
-    final pomodoro = context.read<PomodoroCubit>();
+    final pomodoro = _pomodoro = context.read<PomodoroCubit>();
     _phases = pomodoro.phaseStarted.listen(_onPhase);
-    // Opening the focus view is the decision to focus: the first session starts right away. After
-    // the first frame, so the task has moved on top and the listener below sees the start.
+    // Every change of the clock is kept, so a crash or a closed tab loses a second at most.
+    PomodoroMemory.setOpen(widget.taskId);
+    PomodoroMemory.save(widget.taskId, pomodoro.state);
+    _saves = pomodoro.stream.listen((s) {
+      if (!_finished) PomodoroMemory.save(widget.taskId, s);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !pomodoro.isClosed) pomodoro.start();
+      if (!mounted || pomodoro.isClosed) return;
+      // Opening the focus view is the decision to focus: the session starts right away. After
+      // the first frame, so the task has moved on top and the listener below sees the start.
+      if (widget.autoStart) {
+        pomodoro.start();
+      } else {
+        // Waiting for Resume: the task's timer waits too, logging the interruption as a break.
+        _syncTaskTimer(pomodoro.state);
+      }
+      if (widget.resumed) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('Picked up where you left off'),
+            duration: Duration(seconds: 4),
+          ));
+      }
     });
   }
 
   @override
   void dispose() {
     if (!_tasks.isClosed) _tasks.add(SetFocusModeEvent());
+    _saves?.cancel();
+    if (_finished) {
+      PomodoroMemory.forget(widget.taskId);
+    } else {
+      // Left on purpose: kept paused, at the time it showed, for the next focus on this task.
+      PomodoroMemory.save(widget.taskId, _pomodoro.state);
+    }
+    // Closed on purpose, so the app doesn't reopen it on its next start.
+    PomodoroMemory.setOpen(null);
     _phases?.cancel();
     _player?.dispose();
     super.dispose();
@@ -119,6 +171,7 @@ class _FocusPageState extends State<FocusPage> {
     final index = _indexIn(tasks.state);
     if (index < 0) return;
     final name = tasks.state.tasks[index].name;
+    _finished = true;
     tasks.add(DoneTaskEvent(index: index));
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();

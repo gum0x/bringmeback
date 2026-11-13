@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'focus/focus_page.dart';
+import 'focus/pomodoro.dart';
 import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
@@ -74,6 +76,22 @@ class _TasksStackState extends State<TasksStack> {
         showCloseIcon: true,
       ));
     });
+    _reopenFocus();
+  }
+
+  /// Opens the focus view again when the app stopped while it was open, from a crash, a closed tab
+  /// or the system ending the app, with its clock paused where it was.
+  Future<void> _reopenFocus() async {
+    final tasks = context.read<TasksBloc>();
+    await tasks.document;
+    final id = await PomodoroMemory.openTask();
+    if (id == null || !mounted) return;
+    final open = tasks.state.tasks.any((t) => t.id.value == id && !t.done);
+    if (!open || await PomodoroMemory.load(id) == null) {
+      await PomodoroMemory.setOpen(null);
+      return;
+    }
+    if (mounted) await openFocus(context, id, autoStart: false);
   }
 
   @override

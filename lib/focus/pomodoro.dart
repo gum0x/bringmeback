@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -105,7 +106,7 @@ class PomodoroState {
   final int remainingSeconds;
   final bool running;
 
-  /// Work sessions finished since the focus view opened.
+  /// Work sessions finished on this task, since its focus began.
   final int completedSessions;
 
   const PomodoroState({
@@ -158,12 +159,15 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   final StreamController<PomodoroPhase> _phaseStarted =
       StreamController<PomodoroPhase>.broadcast();
 
+  /// Starts from [resumeFrom] when given, paused, else from a fresh focus session of [settings].
   PomodoroCubit({
     PomodoroSettings settings = const PomodoroSettings(),
+    PomodoroState? resumeFrom,
     DateTime Function()? now,
     bool startTicking = true,
   })  : _now = now ?? DateTime.now,
-        super(PomodoroState.initial(settings)) {
+        super(resumeFrom?.copyWith(running: false) ??
+            PomodoroState.initial(settings)) {
     if (startTicking) {
       _tick = Timer.periodic(const Duration(seconds: 1), (_) => tick());
     }
@@ -259,6 +263,115 @@ class PomodoroCubit extends Cubit<PomodoroState> {
     _phaseStarted.close();
     return super.close();
   }
+}
+
+/// Where each task's Pomodoro was left, so its focus view picks up there after the view was closed,
+/// the app was quit or crashed, or the page was reloaded. Kept on this device, like the lengths.
+///
+/// A saved clock comes back paused, at the time it showed when it was saved: time away is an
+/// interruption, not focus. One left alone for longer than [maxAge] is forgotten, and the next
+/// focus on that task starts fresh.
+class PomodoroMemory {
+  // Not under "pomodoro.": PomodoroSettings keeps its lengths there, "pomodoro.sessions" among them.
+  static const _sessionsKey = 'focusClocks';
+  static const _openKey = 'focusOpen';
+  static const maxAge = Duration(hours: 12);
+
+  static Map<String, dynamic> _read(SharedPreferences prefs) {
+    final raw = prefs.getString(_sessionsKey);
+    if (raw == null) return {};
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static bool _fresh(Object? saved, DateTime now) {
+    if (saved is! Map) return false;
+    final at = saved['savedAt'];
+    return at is int &&
+        now.difference(DateTime.fromMillisecondsSinceEpoch(at)) < maxAge;
+  }
+
+  /// The clock of the task with [taskId] as it was left, paused, or null when there is none, or it
+  /// is too old.
+  static Future<PomodoroState?> load(String taskId, {DateTime? now}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = _read(prefs)[taskId];
+    if (!_fresh(saved, now ?? DateTime.now())) return null;
+    try {
+      final m = saved as Map;
+      final settings = PomodoroSettings(
+        workMinutes: m['work'] as int,
+        shortBreakMinutes: m['shortBreak'] as int,
+        longBreakMinutes: m['longBreak'] as int,
+        sessionsBeforeLongBreak: m['sessions'] as int,
+      );
+      final phase = PomodoroPhase.values.byName(m['phase'] as String);
+      final remaining = m['remaining'] as int;
+      final completed = m['completed'] as int;
+      if ([
+        settings.workMinutes,
+        settings.shortBreakMinutes,
+        settings.longBreakMinutes,
+        settings.sessionsBeforeLongBreak
+      ].any((v) => v <= 0)) {
+        return null;
+      }
+      return PomodoroState(
+        settings: settings,
+        phase: phase,
+        remainingSeconds: remaining.clamp(1, settings.secondsFor(phase)),
+        running: false,
+        completedSessions: completed < 0 ? 0 : completed,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Keeps [state] as where the task with [taskId] was left. Clocks gone stale are dropped.
+  static Future<void> save(String taskId, PomodoroState state,
+      {DateTime? now}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final at = now ?? DateTime.now();
+    final sessions = _read(prefs)..removeWhere((_, v) => !_fresh(v, at));
+    sessions[taskId] = {
+      'phase': state.phase.name,
+      'remaining': state.remainingSeconds,
+      'completed': state.completedSessions,
+      'work': state.settings.workMinutes,
+      'shortBreak': state.settings.shortBreakMinutes,
+      'longBreak': state.settings.longBreakMinutes,
+      'sessions': state.settings.sessionsBeforeLongBreak,
+      'savedAt': at.millisecondsSinceEpoch,
+    };
+    await prefs.setString(_sessionsKey, jsonEncode(sessions));
+  }
+
+  /// Drops the saved clock of the task with [taskId], so its next focus starts fresh.
+  static Future<void> forget(String taskId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final sessions = _read(prefs);
+    if (sessions.remove(taskId) == null) return;
+    await prefs.setString(_sessionsKey, jsonEncode(sessions));
+  }
+
+  /// Notes which task's focus view is open, or null once it is closed on purpose. One still noted
+  /// when the app starts was cut short, and opens again.
+  static Future<void> setOpen(String? taskId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (taskId == null) {
+      await prefs.remove(_openKey);
+    } else {
+      await prefs.setString(_openKey, taskId);
+    }
+  }
+
+  /// The task whose focus view was open when the app last stopped, if it was not closed.
+  static Future<String?> openTask() async =>
+      (await SharedPreferences.getInstance()).getString(_openKey);
 }
 
 /// Minutes as "45 min", "2 h" or "2 h 10 min".
