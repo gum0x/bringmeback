@@ -23,7 +23,7 @@ class SettingsPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: const [
               _Section('Today\'s note'),
-              _NoteLinesTile(),
+              _TaskLimitTile(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
               _Section('About'),
@@ -109,24 +109,24 @@ class _StepperTile extends StatelessWidget {
   }
 }
 
-class _NoteLinesTile extends StatelessWidget {
-  const _NoteLinesTile();
+class _TaskLimitTile extends StatelessWidget {
+  const _TaskLimitTile();
 
   @override
   Widget build(BuildContext context) {
     final bloc = context.read<TasksBloc>();
     return BlocBuilder<TasksBloc, TasksState>(
-      buildWhen: (a, b) => a.noteLines != b.noteLines,
+      buildWhen: (a, b) => a.taskLimit != b.taskLimit,
       builder: (context, state) => _StepperTile(
-        title: 'Tasks per note',
-        subtitle: 'A small note keeps the day focused. Done tasks count too. '
-            'Making it smaller keeps what is already written.',
-        value: state.noteLines,
-        min: minNoteLines,
-        max: maxNoteLines,
-        lessTooltip: 'Fewer tasks per note',
-        moreTooltip: 'More tasks per note',
-        onChanged: (lines) => bloc.add(SetNoteLinesEvent(lines)),
+        title: 'Open tasks before asking',
+        subtitle: 'A short list keeps the day focused. Past this many tasks not done yet, a new '
+            'task asks first and suggests the backlog. Done tasks don\'t count.',
+        value: state.taskLimit,
+        min: minTaskLimit,
+        max: maxTaskLimit,
+        lessTooltip: 'Lower task limit',
+        moreTooltip: 'Higher task limit',
+        onChanged: (limit) => bloc.add(SetTaskLimitEvent(limit)),
       ),
     );
   }

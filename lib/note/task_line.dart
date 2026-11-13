@@ -9,17 +9,27 @@ import 'paper.dart';
 import 'task_dialog.dart';
 
 /// Asks for a new task in the dialog and writes it at [index]; on top as an interruption when
-/// [onTop].
+/// [onTop]. When the note already holds as many unfinished tasks as the limit, it asks first and
+/// suggests the backlog.
 Future<void> writeTask(BuildContext context,
     {int index = 0, bool onTop = false}) async {
   final tasksBloc = context.read<TasksBloc>();
-  if (tasksBloc.state.full) {
-    showNoteFull(context);
-    return;
-  }
   final details = await showTaskDialog(context);
-  if (details == null) return;
+  if (details == null || !context.mounted) return;
   final id = ValueKey<String>(newId());
+  if (tasksBloc.state.atLimit) {
+    final choice = await askOverLimit(context, name: details.name);
+    if (choice == null || !context.mounted) return;
+    if (choice == OverLimitChoice.backlog) {
+      tasksBloc.add(AddToBacklogEvent(
+          name: details.name,
+          notes: details.notes,
+          id: id,
+          timerLengthSeconds: details.timerLengthSeconds));
+      showSavedToBacklog(context, details.name);
+      return;
+    }
+  }
   tasksBloc.add(onTop
       ? AddTaskOnTopEvent(
           name: details.name,
@@ -53,12 +63,52 @@ Future<void> editTask(BuildContext context, int index) async {
       timerLengthSeconds: details.timerLengthSeconds));
 }
 
-void showNoteFull(BuildContext context) {
+/// What to do with a task that would take the note over its limit.
+enum OverLimitChoice { backlog, note }
+
+/// Asks whether a task goes on the note even though it already holds as many unfinished tasks as
+/// the limit, or into the backlog for later. Null when cancelled. [fromBacklog] is for a task already
+/// in the backlog, which then stays there.
+Future<OverLimitChoice?> askOverLimit(BuildContext context,
+    {required String name, bool fromBacklog = false}) {
+  final state = context.read<TasksBloc>().state;
+  final open = state.openCount;
+  final title = name.trim().isEmpty ? 'This task' : '"${name.trim()}"';
+  return showDialog<OverLimitChoice>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: const Icon(Icons.playlist_add_check),
+      title: Text(open > state.taskLimit
+          ? 'Your note is over its limit'
+          : 'Your note is at its limit'),
+      content: Text(
+          'You have $open ${open == 1 ? 'task' : 'tasks'} not done yet, and your limit is '
+          '${state.taskLimit}. A short list keeps the day focused.\n\n'
+          '${fromBacklog ? '$title can stay in the backlog until you have room, or you can write '
+              'it on the note anyway.' : 'Save $title to the backlog for later, or write it on the '
+              'note anyway?'}'),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, OverLimitChoice.note),
+            child: const Text('Write on note anyway')),
+        if (!fromBacklog)
+          FilledButton.icon(
+              onPressed: () => Navigator.pop(context, OverLimitChoice.backlog),
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: const Text('Save to backlog')),
+      ],
+    ),
+  );
+}
+
+void showSavedToBacklog(BuildContext context, String name) {
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(const SnackBar(
-    content: Text(
-        'This note is full. Finish or delete a task, or start a fresh note.'),
+  messenger.showSnackBar(SnackBar(
+    content: Text(name.trim().isEmpty ? 'Saved to backlog' : 'Saved to backlog: ${name.trim()}'),
   ));
 }
 
@@ -186,14 +236,11 @@ class TaskLine extends StatefulWidget {
   final bool current;
 
   /// Whether new tasks can still be written on the note.
-  final bool canInsert;
-
   const TaskLine({
     super.key,
     required this.task,
     required this.index,
     required this.current,
-    required this.canInsert,
   });
 
   @override
@@ -222,7 +269,7 @@ class _TaskLineState extends State<TaskLine> {
     final colors = NoteColors.of(context);
     final theme = Theme.of(context);
     final active = _hovered || task.inFocus;
-    final showInsert = active && widget.canInsert;
+    final showInsert = active;
 
     final number = SizedBox(
       width: 30,

@@ -97,7 +97,10 @@ History buildHistory(TaskDocument doc, {int? now}) {
   final onNotes = {...currentIds, for (final n in notes) ...n.taskIds};
   final loose = [
     for (final id in allIds)
-      if (!onNotes.contains(id) && statuses[id] != TaskStatus.deleted) read(id, null)
+      if (!onNotes.contains(id) &&
+          statuses[id] != TaskStatus.deleted &&
+          statuses[id] != TaskStatus.backlog)
+        read(id, null)
   ]..sort((a, b) => (b.doneAt ?? 0).compareTo(a.doneAt ?? 0));
 
   final tasks = <HistoryTask>[
