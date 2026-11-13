@@ -81,6 +81,34 @@ void main() {
     });
   });
 
+  testWidgets('up next leaves out tasks already done', (tester) async {
+    await tester.runAsync(() async {
+      tasks = TasksBloc();
+      await tasks.document;
+    });
+    pomodoro = PomodoroCubit(now: () => now, startTicking: false);
+    await addTasks(tester, ['Write docs', 'Review PR', 'Call bank']);
+    tasks.add(SetDoneEvent(index: 0, done: true));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await pumpFocus(tester, 'Review PR');
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+
+    expect(tasks.state.currentIndex, 0);
+    expect(tasks.state.tasks.first.name, 'Review PR');
+    expect(find.text('1. Call bank'), findsOneWidget);
+    expect(find.textContaining('Write docs'), findsNothing);
+
+    await tester.runAsync(() async {
+      await pomodoro.close();
+      await tasks.close();
+    });
+  });
+
   testWidgets('the task timer runs during focus and pauses during breaks',
       (tester) async {
     await tester.runAsync(() async {
@@ -90,13 +118,22 @@ void main() {
     pomodoro = PomodoroCubit(now: () => now, startTicking: false);
     await addTasks(tester, ['Write docs']);
     await pumpFocus(tester, 'Write docs');
-
-    // Pause from the list first, so starting the Pomodoro is what resumes it.
-    tasks.add(StopTimerEvent(index: 0));
+    await tester.pump();
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+
+    // Opening the view starts the first session right away.
+    expect(pomodoro.state.running, isTrue);
+    expect(find.text('Pause'), findsOneWidget);
+    expect(tasks.state.tasks.first.running, isTrue);
+
+    await tester.tap(find.text('Pause'));
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    expect(pomodoro.state.running, isFalse);
     expect(tasks.state.tasks.first.running, isFalse);
 
-    await tester.tap(find.text('Start'));
+    // No time has passed on the test clock, so the button reads Start again.
+    await tester.tap(find.byIcon(Icons.play_arrow));
     await tester.pump();
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     expect(pomodoro.state.running, isTrue);
@@ -116,11 +153,12 @@ void main() {
   });
 
   testWidgets('settings dialog returns the new lengths', (tester) async {
-    PomodoroSettings? result;
+    (PomodoroSettings, bool)? result;
     await tester.pumpWidget(MaterialApp(
       home: Builder(
         builder: (context) => TextButton(
-          onPressed: () async => result = await showDialog<PomodoroSettings>(
+          onPressed: () async =>
+              result = await showDialog<(PomodoroSettings, bool)>(
             context: context,
             builder: (_) =>
                 const PomodoroSettingsDialog(settings: PomodoroSettings()),
@@ -137,9 +175,53 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    expect(result?.workMinutes, 50);
-    expect(result?.shortBreakMinutes, 10);
-    expect(result?.longBreakMinutes, 15);
+    expect(result?.$1.workMinutes, 50);
+    expect(result?.$1.shortBreakMinutes, 10);
+    expect(result?.$1.longBreakMinutes, 15);
+    expect(result?.$2, isTrue, reason: 'kept as the default unless unticked');
+  });
+
+  testWidgets('lengths changed in the focus view apply right away',
+      (tester) async {
+    await tester.runAsync(() async {
+      tasks = TasksBloc();
+      await tasks.document;
+    });
+    pomodoro = PomodoroCubit(now: () => now, startTicking: false);
+    await addTasks(tester, ['Write docs']);
+    await pumpFocus(tester, 'Write docs');
+    await tester.pump();
+    pomodoro.pause();
+    pomodoro.restartPhase();
+    await tester.pump();
+
+    expect(find.text('25 min focus · 5 min break'), findsOneWidget);
+    // 4 × 25 min of focus, 3 short breaks of 5 and a long one of 15.
+    expect(find.text('Full cycle 2 h 10 min: 1 h 40 min of focus in 4 sessions'),
+        findsOneWidget);
+    await tester.tap(find.byKey(const Key('pomodoroLengths')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Focus'), '40');
+    await tester.pump();
+    expect(
+        tester.widget<Text>(find.byKey(const Key('pomodoroDialogCycle'))).data,
+        'Full cycle 3 h 10 min: 2 h 40 min of focus in 4 sessions');
+    await tester.tap(find.text('Use these lengths from now on'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('40:00'), findsOneWidget);
+    expect(find.text('40 min focus · 5 min break'), findsOneWidget);
+    expect(find.text('Full cycle 3 h 10 min: 2 h 40 min of focus in 4 sessions'),
+        findsOneWidget);
+    // Unticked: the next focus still starts from the saved default.
+    final saved = await tester.runAsync(PomodoroSettings.load);
+    expect(saved?.workMinutes, 25);
+
+    await tester.runAsync(() async {
+      await pomodoro.close();
+      await tasks.close();
+    });
   });
 
   testWidgets('settings dialog refuses an empty length', (tester) async {

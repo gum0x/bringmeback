@@ -41,6 +41,16 @@ class PomodoroSettings {
         PomodoroPhase.longBreak => longBreakMinutes * 60,
       };
 
+  /// A whole cycle, up to the end of its long break: every focus session, the short breaks between
+  /// them, and the long break.
+  int get cycleMinutes =>
+      sessionsBeforeLongBreak * workMinutes +
+      (sessionsBeforeLongBreak - 1) * shortBreakMinutes +
+      longBreakMinutes;
+
+  /// Of [cycleMinutes], the time spent in focus.
+  int get cycleFocusMinutes => sessionsBeforeLongBreak * workMinutes;
+
   static const _prefix = 'pomodoro.';
 
   static Future<PomodoroSettings> load() async {
@@ -253,4 +263,20 @@ class PomodoroCubit extends Cubit<PomodoroState> {
     _phaseStarted.close();
     return super.close();
   }
+}
+
+/// Minutes as "45 min", "2 h" or "2 h 10 min".
+String formatMinutes(int minutes) {
+  final h = minutes ~/ 60, m = minutes % 60;
+  if (h == 0) return '$m min';
+  return m == 0 ? '$h h' : '$h h $m min';
+}
+
+/// What a whole cycle of [settings] adds up to, e.g. "Full cycle 2 h 10 min: 1 h 40 min of focus in
+/// 4 sessions".
+String describeCycle(PomodoroSettings settings) {
+  final sessions = settings.sessionsBeforeLongBreak;
+  return 'Full cycle ${formatMinutes(settings.cycleMinutes)}: '
+      '${formatMinutes(settings.cycleFocusMinutes)} of focus in $sessions '
+      '${sessions == 1 ? 'session' : 'sessions'}';
 }

@@ -20,6 +20,24 @@ String newId() => List.generate(
 int nowSeconds() =>
     DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
 
+/// How many tasks fit on a note unless Settings says otherwise, done ones included. A small note
+/// keeps the day focused: when it is full, finish or delete something before writing more.
+const defaultNoteLines = 10;
+
+/// The range Settings offers for the size of a note.
+const minNoteLines = 3;
+const maxNoteLines = 20;
+
+/// A day starts at 4:00, so working past midnight still counts as the same day.
+const dayStartHour = 4;
+
+/// The day [seconds] falls on, as midnight of that date in local time.
+DateTime dayOf(int seconds) {
+  final t = DateTime.fromMillisecondsSinceEpoch(seconds * 1000)
+      .subtract(const Duration(hours: dayStartHour));
+  return DateTime(t.year, t.month, t.day);
+}
+
 /// One stretch of time a task's timer ran. `end` is null while it runs.
 class TimeEntry {
   final int start;
@@ -43,6 +61,9 @@ class TimeEntry {
 /// A task as the UI sees it, read from the [TaskDocument].
 class TaskState {
   final String name;
+
+  /// Longer details written under the name, free text over several lines.
+  final String notes;
   final ValueKey<String> id;
   // Everything about the timer is derived from entries and timestamps, so any device holding the
   // same task state shows the same running state, countdown and total, and fires the same alerts.
@@ -52,15 +73,26 @@ class TaskState {
   final int totalResetAt;
   final bool inFocus;
 
+  /// When the task was checked off, or null while it isn't.
+  final int? doneAt;
+
+  /// The task of an earlier note this one was written again from.
+  final String? carriedFrom;
+
   TaskState(
       {required this.name,
+      this.notes = '',
       required this.id,
       this.timerLengthSeconds = 20 * 60,
       this.timerStartAt = 0,
       List<TimeEntry>? entries,
       this.totalResetAt = 0,
-      this.inFocus = false})
+      this.inFocus = false,
+      this.doneAt,
+      this.carriedFrom})
       : entries = entries ?? [];
+
+  bool get done => doneAt != null;
 
   bool get running => entries.any((e) => e.end == null);
 
@@ -80,34 +112,133 @@ class TaskState {
 }
 
 class TasksState {
+  /// The tasks written on the current note, in order, done ones included.
   final List<TaskState> tasks;
   final bool muted;
 
-  TasksState({required this.tasks, this.muted = false});
+  /// When the current note was started.
+  final int noteStartedAt;
+
+  /// Unfinished tasks of torn-off notes, waiting to be written again or let go.
+  final List<TaskState> pending;
+
+  /// Whether the document has loaded.
+  final bool loaded;
+
+  /// How many tasks fit on a note, set in Settings.
+  final int noteLines;
+
+  TasksState(
+      {required this.tasks,
+      this.muted = false,
+      this.noteLines = defaultNoteLines,
+      int? noteStartedAt,
+      this.pending = const [],
+      this.loaded = false})
+      : noteStartedAt = noteStartedAt ?? nowSeconds();
 
   TasksState copyWith({List<TaskState>? tasks, bool? muted}) {
     return TasksState(
       tasks: tasks ?? this.tasks,
       muted: muted ?? this.muted,
+      noteStartedAt: noteStartedAt,
+      pending: pending,
+      loaded: loaded,
+      noteLines: noteLines,
     );
   }
+
+  /// The index of the task being worked on: the first one not checked off, or -1.
+  int get currentIndex => tasks.indexWhere((t) => !t.done);
+
+  bool get full => tasks.length >= noteLines;
+
+  bool get allDone => tasks.isNotEmpty && tasks.every((t) => t.done);
+
+  /// Whether the note was started on an earlier day and has tasks on it: time to tear it off.
+  bool needsTearOff([int? now]) =>
+      tasks.isNotEmpty && dayOf(noteStartedAt) != dayOf(now ?? nowSeconds());
 }
 
 abstract class TasksEvent {}
 
+/// Writes a task on top of the note, as an interruption: it becomes the current task and its timer
+/// runs.
 class AddTaskOnTopEvent extends TasksEvent {
   final String name;
   final ValueKey<String> id;
+  final int? timerLengthSeconds;
 
-  AddTaskOnTopEvent({required this.name, required this.id});
+  final String notes;
+
+  AddTaskOnTopEvent(
+      {required this.name, required this.id, this.timerLengthSeconds, this.notes = ''});
 }
 
+/// Writes a task right after the one at [index].
 class AddNextTaskEvent extends TasksEvent {
   final int index;
   final String name;
   final ValueKey<String> id;
+  final int? timerLengthSeconds;
 
-  AddNextTaskEvent({required this.index, required this.name, required this.id});
+  AddNextTaskEvent(
+      {required this.index, required this.name, required this.id, this.timerLengthSeconds});
+}
+
+/// Writes a task at [index], pushing the one there down.
+class InsertTaskEvent extends TasksEvent {
+  final int index;
+  final String name;
+  final ValueKey<String> id;
+  final int? timerLengthSeconds;
+
+  final String notes;
+
+  InsertTaskEvent(
+      {required this.index,
+      required this.name,
+      required this.id,
+      this.timerLengthSeconds,
+      this.notes = ''});
+}
+
+/// Checks a task off, or unchecks it. Either way it stays on the note.
+class SetDoneEvent extends TasksEvent {
+  final int index;
+  final bool done;
+
+  SetDoneEvent({required this.index, required this.done});
+}
+
+/// Renames a task and sets its countdown length, from the task dialog.
+class EditTaskEvent extends TasksEvent {
+  final ValueKey<String> id;
+  final String name;
+  final int timerLengthSeconds;
+
+  final String? notes;
+
+  EditTaskEvent(
+      {required this.id, required this.name, required this.timerLengthSeconds, this.notes});
+}
+
+/// Tears off the current note and starts an empty one. Its unfinished tasks wait to be written again
+/// or let go.
+class TearOffNoteEvent extends TasksEvent {}
+
+/// Writes an unfinished task of a torn-off note again, at the end of the current note.
+class CarryTaskEvent extends TasksEvent {
+  final String id;
+
+  CarryTaskEvent({required this.id});
+}
+
+/// Lets go of an unfinished task of a torn-off note, or of all of them when [id] is null.
+class LetGoEvent extends TasksEvent {
+  final String? id;
+
+  LetGoEvent({this.id});
 }
 
 class RemoveTaskEvent extends TasksEvent {
@@ -116,14 +247,14 @@ class RemoveTaskEvent extends TasksEvent {
   RemoveTaskEvent({required this.index});
 }
 
-/// Takes a task off the list as done.
+/// Checks a task off.
 class DoneTaskEvent extends TasksEvent {
   final int index;
 
   DoneTaskEvent({required this.index});
 }
 
-/// Puts a removed or done task back, to undo [RemoveTaskEvent] or [DoneTaskEvent].
+/// Puts a deleted task back, to undo [RemoveTaskEvent].
 class RestoreTaskEvent extends TasksEvent {
   final int index;
   final ValueKey<String> id;
@@ -179,6 +310,14 @@ class ResetTotalEvent extends TasksEvent {
 
 class ToggleMuteEvent extends TasksEvent {}
 
+/// Sets how many tasks fit on a note. Tasks already written stay when it shrinks; only writing more
+/// waits until there is room.
+class SetNoteLinesEvent extends TasksEvent {
+  final int lines;
+
+  SetNoteLinesEvent(this.lines);
+}
+
 /// Says which task, if any, is open in the Pomodoro focus view. That task's own countdown stays
 /// quiet there, with no "Time's up" or reminder, because the Pomodoro clock is the one that counts.
 class SetFocusModeEvent extends TasksEvent {
@@ -212,9 +351,18 @@ class LoadStateEvent extends TasksEvent {}
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
 
+/// Deletes every task and the whole history on this device, see [TasksBloc.clearAll].
+class _ClearAllEvent extends TasksEvent {
+  final Completer<CRDTDocument> done;
+
+  _ClearAllEvent(this.done);
+}
+
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
   SecondTicker? tick;
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  // Made on the first sound, so a list that never rings needs no audio player.
+  AudioPlayer? _audioPlayerOrNull;
+  AudioPlayer get _audioPlayer => _audioPlayerOrNull ??= AudioPlayer();
   // Null until the saved document has been loaded; edits before that are ignored.
   TaskDocument? _doc;
   // Which task has the focus is local to this device.
@@ -222,6 +370,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
+  int _noteLines = defaultNoteLines;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -239,13 +388,23 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   TasksBloc() : super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
-    on<AddNextTaskEvent>(_onAddNextTask);
+    on<AddNextTaskEvent>((e, emit) => _insert(emit, e.index + 1, e.id.value,
+        e.name, e.timerLengthSeconds));
+    on<InsertTaskEvent>((e, emit) => _insert(
+        emit, e.index, e.id.value, e.name, e.timerLengthSeconds,
+        notes: e.notes));
+    on<SetDoneEvent>((e, emit) => _setDone(emit, e.index, e.done));
+    on<EditTaskEvent>(_onEditTask);
+    on<TearOffNoteEvent>(_onTearOff);
+    on<CarryTaskEvent>(_onCarry);
+    on<LetGoEvent>(_onLetGo);
     on<RemoveTaskEvent>(_onRemoveTask);
     on<DoneTaskEvent>(_onDoneTask);
     on<RestoreTaskEvent>(_onRestoreTask);
     on<FocusTaskEvent>(_onFocusTask);
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
+    on<SetNoteLinesEvent>(_onSetNoteLines);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
@@ -256,6 +415,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskNameEvent>(_onUpdateTaskName);
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
+    on<_ClearAllEvent>(_onClearAll);
     on<_RemoteChangesEvent>((event, emit) {
       emit(_view());
       _saveState();
@@ -265,8 +425,23 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     tick = SecondTicker(() => add(UpdateTimerEvent()));
   }
 
-  TasksState _view() =>
-      TasksState(tasks: _doc?.tasks(focusId: _focusId) ?? [], muted: _muted);
+  TasksState _view() {
+    final doc = _doc;
+    if (doc == null) {
+      return TasksState(tasks: [], muted: _muted, noteLines: _noteLines);
+    }
+    return TasksState(
+      tasks: doc.tasks(focusId: _focusId),
+      muted: _muted,
+      noteLines: _noteLines,
+      noteStartedAt: doc.noteStartedAt,
+      pending: [for (final id in doc.pendingIds) doc.task(id)],
+      loaded: true,
+    );
+  }
+
+  /// The task document, for reading the history. Null until loaded.
+  TaskDocument? get taskDocument => _doc;
 
   /// Applies [change] to the document, then shows and saves the result.
   void _edit(Emitter<TasksState> emit, void Function(TaskDocument doc) change) {
@@ -283,37 +458,117 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     return index >= 0 && index < ids.length ? ids[index] : null;
   }
 
-  /// Whether work is under way: the top task's timer runs, rather than a pause or nothing.
+  /// Whether work is under way: the current task's timer runs, rather than a pause or nothing.
   bool _working(TaskDocument doc) => doc.ids.any((id) => doc.task(id).running);
 
-  /// Only the top task is the one being worked on, so only its timer may run. Running it ends any
-  /// pause being logged.
-  void _runTop(TaskDocument doc, bool run) {
-    for (final (i, id) in doc.ids.indexed) {
-      doc.setRunning(id, run && i == 0);
+  /// The task being worked on: the first one on the note not checked off.
+  String? _currentId(TaskDocument doc) {
+    for (final id in doc.ids) {
+      if (doc.doneAt(id) == null) return id;
     }
-    if (run && doc.ids.isNotEmpty) doc.endPauses();
+    return null;
+  }
+
+  /// Only the current task is the one being worked on, so only its timer may run. Running it ends
+  /// any pause being logged.
+  void _runTop(TaskDocument doc, bool run) {
+    final current = _currentId(doc);
+    for (final id in doc.ids) {
+      doc.setRunning(id, run && id == current);
+    }
+    if (run && current != null) doc.endPauses();
   }
 
   void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      doc.insert(0, event.id.value);
+      if (doc.ids.length >= _noteLines) return;
+      doc.insert(0, event.id.value,
+          name: event.name,
+          notes: event.notes,
+          timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60);
       _runTop(doc, true);
       _focusId = event.id.value;
     });
   }
 
-  void _onAddNextTask(AddNextTaskEvent event, Emitter<TasksState> emit) {
+  void _insert(Emitter<TasksState> emit, int index, String id, String name,
+      int? timerLengthSeconds,
+      {String notes = ''}) {
     _edit(emit, (doc) {
+      if (doc.ids.length >= _noteLines) return;
       final working = _working(doc);
-      doc.insert(min(event.index + 1, doc.ids.length), event.id.value);
+      doc.insert(index.clamp(0, doc.ids.length), id,
+          name: name,
+          notes: notes,
+          timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
       _runTop(doc, working);
-      _focusId = event.id.value;
+      _focusId = id;
     });
   }
 
-  /// Takes the task at [index] off the list with [takeOff]. When it was being worked on, work
-  /// carries on with the task that moves up.
+  /// Checking off the current task hands the timer on to the next unchecked one; unchecking a task
+  /// above it takes the timer back.
+  void _setDone(Emitter<TasksState> emit, int index, bool done) {
+    final id = _idAt(index);
+    if (id == null) return;
+    _edit(emit, (doc) {
+      if ((doc.doneAt(id) != null) == done) return;
+      final working = _working(doc);
+      doc.setRunning(id, false);
+      doc.setDone(id, done);
+      _runTop(doc, working);
+    });
+  }
+
+  void _onEditTask(EditTaskEvent event, Emitter<TasksState> emit) {
+    final id = event.id.value;
+    _edit(emit, (doc) {
+      final task = doc.task(id);
+      if (task.name != event.name) doc.setName(id, event.name);
+      final notes = event.notes;
+      if (notes != null && task.notes != notes) doc.setNotes(id, notes);
+      if (task.timerLengthSeconds != event.timerLengthSeconds) {
+        _lastRemaining.remove(id);
+        doc.setTimer(id, event.timerLengthSeconds, nowSeconds());
+      }
+    });
+  }
+
+  void _onTearOff(TearOffNoteEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) {
+      if (doc.ids.isEmpty) {
+        doc.setNoteStartedAt(nowSeconds());
+        return;
+      }
+      // Tearing off ends the work under way, and logs the break until the next task starts.
+      final working = _working(doc);
+      doc.tearOff(newId(), nowSeconds());
+      if (working) doc.startPause(newId());
+      _focusId = null;
+    });
+  }
+
+  void _onCarry(CarryTaskEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) {
+      if (doc.ids.length >= _noteLines) return;
+      if (!doc.pendingIds.contains(event.id)) return;
+      final working = _working(doc);
+      final newTaskId = newId();
+      doc.carry(event.id, newTaskId, doc.ids.length);
+      _runTop(doc, working);
+    });
+  }
+
+  void _onLetGo(LetGoEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) {
+      for (final id in doc.pendingIds) {
+        if (event.id == null || event.id == id) doc.letGo(id);
+      }
+    });
+  }
+
+  /// Takes the task at [index] off the note with [takeOff]. When it was being worked on, work
+  /// carries on with the next unchecked task.
   void _takeOff(Emitter<TasksState> emit, int index,
       void Function(TaskDocument doc, String id) takeOff) {
     final id = _idAt(index);
@@ -329,10 +584,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _onRemoveTask(RemoveTaskEvent event, Emitter<TasksState> emit) =>
-      _takeOff(emit, event.index, (doc, id) => doc.removeAt(event.index));
+      _takeOff(emit, event.index, (doc, id) => doc.removeAt(event.index, id));
 
   void _onDoneTask(DoneTaskEvent event, Emitter<TasksState> emit) =>
-      _takeOff(emit, event.index, (doc, id) => doc.markDone(event.index, id));
+      _setDone(emit, event.index, true);
 
   void _onRestoreTask(RestoreTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
@@ -352,7 +607,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _saveState();
   }
 
-  /// Moving a task to the top makes it the one being worked on.
+  /// Moving an unchecked task above the current one makes it the one being worked on.
   void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
       final working = _working(doc);
@@ -361,10 +616,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
   }
 
-  // Starting, pausing and resuming act on the top task, the only one with a running timer.
+  // Starting, pausing and resuming act on the current task, the only one with a running timer.
 
   void _onStartTimer(StartTimerEvent event, Emitter<TasksState> emit) {
-    if (_idAt(0) == null) return;
+    if (_doc == null || _currentId(_doc!) == null) return;
     _edit(emit, (doc) => _runTop(doc, true));
   }
 
@@ -378,7 +633,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
-    if (_idAt(0) == null) return;
+    if (_doc == null || _currentId(_doc!) == null) return;
     _edit(emit, (doc) => _runTop(doc, true));
   }
 
@@ -398,6 +653,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _edit(emit, (doc) => doc.setTotalResetAt(id, nowSeconds()));
   }
 
+  void _onSetNoteLines(SetNoteLinesEvent event, Emitter<TasksState> emit) {
+    _noteLines = event.lines.clamp(minNoteLines, maxNoteLines);
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setInt('noteLines', _noteLines));
+  }
+
   void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
     _muted = !_muted;
     emit(_view());
@@ -406,6 +668,15 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   void _onUpdateTimer(UpdateTimerEvent event, Emitter<TasksState> emit) {
+    // An empty note left from an earlier day becomes today's, with nothing to tear off.
+    final doc = _doc;
+    final started = doc?.noteStartedAt;
+    if (doc != null &&
+        doc.ids.isEmpty &&
+        (started == null || dayOf(started) != dayOf(nowSeconds()))) {
+      doc.setNoteStartedAt(nowSeconds());
+      _saveState();
+    }
     final view = _view();
     final now = nowSeconds();
     for (final task in view.tasks) {
@@ -450,6 +721,44 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
+  /// Deletes every task, note and logged time on this device and starts over with an empty
+  /// document, written under a new peer id so it shares no change ids with the old one. Returns
+  /// the new document, for sync to use instead of the old one. Settings stay as they are.
+  Future<CRDTDocument> clearAll() {
+    final done = Completer<CRDTDocument>();
+    add(_ClearAllEvent(done));
+    return done.future;
+  }
+
+  Future<void> _onClearAll(_ClearAllEvent event, Emitter<TasksState> emit) async {
+    // Wait for the saved document to load, so it can't come back over the empty one.
+    await document;
+    final prefs = await SharedPreferences.getInstance();
+    final peerId = PeerId.generate().toString();
+    await prefs.setString('peerId', peerId);
+    await prefs.remove('focusId');
+    await _remote?.cancel();
+    final doc = TaskDocument(
+        CRDTDocument(peerId: PeerId.parse(peerId), documentId: 'tasks'));
+    doc.setNoteStartedAt(nowSeconds());
+    _doc = doc;
+    _focusId = null;
+    _focusModeId = null;
+    _lastRemaining.clear();
+    _listenForRemote(doc);
+    emit(_view());
+    await _saveState();
+    event.done.complete(doc.doc);
+  }
+
+  void _listenForRemote(TaskDocument doc) {
+    _remote = doc.doc.events.listen((e) {
+      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
+        add(_RemoteChangesEvent());
+      }
+    });
+  }
+
   Future<void> _saveState() async {
     final doc = _doc;
     if (doc == null) return;
@@ -466,6 +775,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _loading = true;
     final prefs = await SharedPreferences.getInstance();
     _muted = prefs.getBool('muted') ?? false;
+    _noteLines = (prefs.getInt('noteLines') ?? defaultNoteLines)
+        .clamp(minNoteLines, maxNoteLines);
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');
@@ -498,14 +809,12 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       }
     }
 
-    // Earlier versions let any task run; now only the top one may.
+    // Earlier versions let any task run; now only the current one may.
     _runTop(doc, _working(doc));
+    // Documents from before notes: the tasks on the list make up today's note.
+    if (doc.noteStartedAt == null) doc.setNoteStartedAt(nowSeconds());
     _doc = doc;
-    _remote = doc.doc.events.listen((e) {
-      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
-        add(_RemoteChangesEvent());
-      }
-    });
+    _listenForRemote(doc);
     _document.complete(doc.doc);
     emit(_view());
     await _saveState();

@@ -30,6 +30,7 @@ class Signalling {
   final SymbolonEventSigner _signer = symbolon.eventSigner();
   final List<_Relay> _relays = [];
   final _incoming = StreamController<SymbolonSignal>.broadcast();
+  final _relaysUp = StreamController<int>.broadcast();
   final _seen = <String>{};
 
   /// This app run's session id; other devices address their replies to it.
@@ -52,6 +53,17 @@ class Signalling {
 
   /// The group's relay topic, which the Noise prologue also binds.
   Uint8List get topic => _box.topic;
+
+  /// How many relays this device is connected to now, out of [relayCount].
+  int get relaysConnected => _relays.where((r) => r._open).length;
+  int get relayCount => _relays.length;
+
+  /// [relaysConnected], each time it changes.
+  Stream<int> get relayChanges => _relaysUp.stream;
+
+  void _relayChanged() {
+    if (!_relaysUp.isClosed) _relaysUp.add(relaysConnected);
+  }
 
   /// Signals from the group's other devices, to this session or to everyone.
   Stream<SymbolonSignal> get signals => _incoming.stream;
@@ -87,6 +99,7 @@ class Signalling {
     send(SignalKind.bye);
     await Future.wait(_relays.map((r) => r.close()));
     await _incoming.close();
+    await _relaysUp.close();
   }
 
   String _subscription(String id) =>
@@ -196,6 +209,7 @@ class _Relay {
       return;
     }
     _open = true;
+    owner._relayChanged();
     _backoff = const Duration(seconds: 1);
     _listening = channel.messages.listen((m) => owner._receive(id, m),
         onDone: _dropped, onError: (Object _) => _dropped(), cancelOnError: true);
@@ -210,6 +224,7 @@ class _Relay {
 
   void _dropped() {
     _open = false;
+    owner._relayChanged();
     _listening?.cancel();
     _scheduleRetry();
   }

@@ -65,8 +65,10 @@ jobs:
     - name: Run tests
       run: flutter test
 
+    # The commit and its time (or the release number, on a vX.Y.Z tag) are shown in the app.
     - name: Build ${{ matrix.target }} app
-      run: flutter build ${{ matrix.target }} --release
+      shell: bash
+      run: flutter build ${{ matrix.target }} --release $(./tool/build_info.sh defines)
 
     - name: Upload artifacts
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

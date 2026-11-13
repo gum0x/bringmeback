@@ -22,8 +22,14 @@ record of where the time went, without asking you to keep one.
 1. **Tasks are always in priority order.** The list says what is going to be done next. Its order is
    the plan.
 2. **One thing at a time.** The first task is the one being worked on, and the only one being counted.
-3. **An interruption is a new task on top.** It takes the focus and its timer, and the task you were on
+3. **What you are doing is always the most important thing.** The list is a pile in priority order,
+   and the first task not done is the one that runs the clock. Something new that is more important
+   and can't wait goes on top; anything else goes into its own place in the order, below what you
+   are doing.
+4. **An interruption is a new task on top.** It takes the focus and its timer, and the task you were on
    pauses one place below, ready to resume when the interruption is done.
+5. **Every task says how long it should take.** Each line shows the time expected; the running task
+   also shows the time left, or how far over it has gone.
 
 ## The usability path
 
@@ -36,8 +42,8 @@ step or a decision here, it needs a strong reason.
 4. Interrupted? Press **New task** again. The interruption goes on top and is timed; the task you were
    on pauses just below it.
 5. Step away: press **Pause**. The break is logged. Press **Resume** when back.
-6. Finish: press **Done**. The task leaves the list and the next one, often the task the interruption
-   paused, starts timing.
+6. Finish: tick the task's checkbox. It is struck through and stays on the note, and the next one,
+   often the task the interruption paused, starts timing.
 7. Made a mistake? **Undo** in the message at the bottom.
 8. Pick up another device later. The same list is there, in the same state.
 9. At the end of the day, look at what you did and where the time went (History, see
