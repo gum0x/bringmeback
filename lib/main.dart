@@ -7,7 +7,7 @@ import 'note/note_view.dart';
 import 'note/task_line.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
-import 'sync/sync_page.dart';
+import 'sync/sync_status.dart';
 import 'version/build_info.dart';
 import 'version/platform.dart' as platform;
 import 'version/update_cubit.dart';
@@ -227,12 +227,7 @@ class _TasksStackState extends State<TasksStack> {
                   onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const HistoryPage())),
                 ),
-                IconButton(
-                  tooltip: 'Devices',
-                  icon: const Icon(Icons.devices),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SyncPage())),
-                ),
+                const SyncStatusButton(),
                 IconButton(
                   tooltip: 'Keyboard shortcuts',
                   icon: const Icon(Icons.keyboard_outlined),
