@@ -75,7 +75,8 @@ void main() {
         phase: PomodoroPhase.shortBreak,
         remainingSeconds: 200,
         running: false,
-        completedSessions: 2);
+        completedSessions: 2,
+        workSeconds: 30 * 60);
 
     PomodoroRecord? roundTrip(PomodoroRecord r, {DateTime? at}) =>
         PomodoroRecord.decode(r.encode(), now: at ?? now);
@@ -112,7 +113,8 @@ void main() {
               phase: PomodoroPhase.work,
               remainingSeconds: 60,
               running: true,
-              completedSessions: 1),
+              completedSessions: 1,
+              workSeconds: 30 * 60),
           endsAt: now.add(const Duration(seconds: 60)),
           open: true,
           savedAt: now))!;
@@ -125,8 +127,8 @@ void main() {
     });
 
     test('same content, same key; old or damaged reads as none', () {
-      final a = PomodoroRecord(
-          state: paused, endsAt: null, open: true, savedAt: now);
+      final a =
+          PomodoroRecord(state: paused, endsAt: null, open: true, savedAt: now);
       final b = PomodoroRecord(
           state: paused,
           endsAt: null,
@@ -134,8 +136,7 @@ void main() {
           savedAt: now.add(const Duration(minutes: 3)));
       expect(a.key, b.key);
       expect(
-          PomodoroRecord(
-                  state: paused, endsAt: null, open: false, savedAt: now)
+          PomodoroRecord(state: paused, endsAt: null, open: false, savedAt: now)
               .key,
           isNot(a.key));
       expect(
@@ -171,7 +172,8 @@ void main() {
         phase: PomodoroPhase.work,
         remainingSeconds: 600,
         running: true,
-        completedSessions: 1);
+        completedSessions: 1,
+        workSeconds: 30 * 60);
     final paused =
         PomodoroCubit(resumeFrom: clock, now: () => now, startTicking: false);
     expect(paused.state.running, isFalse,
@@ -205,7 +207,7 @@ void main() {
     await settle(tester);
 
     await openFocusOn(tester, 'Write report');
-    expect(find.text('Session 1 of 4'), findsOneWidget);
+    expect(find.textContaining('Session 1 of '), findsOneWidget);
     // One session finished: on to the short break.
     await tester.tap(find.byTooltip('Skip to break'));
     await settle(tester);
@@ -239,7 +241,7 @@ void main() {
     await settle(tester);
     await tester.tap(find.byTooltip('Skip break'));
     await settle(tester);
-    expect(find.text('Session 2 of 4'), findsOneWidget);
+    expect(find.textContaining('Session 2 of '), findsOneWidget);
 
     final kept = await crash(tester, bloc);
     SharedPreferences.setMockInitialValues(kept);
@@ -247,7 +249,7 @@ void main() {
 
     expect(find.byKey(const Key('focusTaskName')), findsOneWidget);
     expect(find.text('Call bank'), findsWidgets);
-    expect(find.text('Session 2 of 4'), findsOneWidget);
+    expect(find.textContaining('Session 2 of '), findsOneWidget);
     expect(find.text('Picked up where you left off'), findsOneWidget);
     // Still running, as is the task's own timer.
     expect(find.widgetWithText(FilledButton, 'Pause'), findsOneWidget);
@@ -311,7 +313,8 @@ void main() {
                     phase: PomodoroPhase.longBreak,
                     remainingSeconds: 600,
                     running: false,
-                    completedSessions: 4),
+                    completedSessions: 4,
+                    workSeconds: 25 * 60),
                 endsAt: null,
                 open: true,
                 savedAt: DateTime.now())

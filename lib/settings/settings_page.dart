@@ -1,8 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
 import '../focus/pomodoro.dart';
+import '../sync/peer.dart' show syncProtocol;
+import '../timer.dart';
+import '../version/build_info.dart';
+import '../version/update_cubit.dart';
 
 /// How the app behaves on this device. Settings are saved here and are not synced.
 class SettingsPage extends StatelessWidget {
@@ -20,8 +25,11 @@ class SettingsPage extends StatelessWidget {
             children: const [
               _Section('Today\'s note'),
               _NoteLinesTile(),
+              _NoteMinutesTile(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
+              _Section('About'),
+              _VersionTiles(),
             ],
           ),
         ),
@@ -55,6 +63,10 @@ class _StepperTile extends StatelessWidget {
   final int min;
   final int max;
   final String unit;
+  final int step;
+
+  /// Shows the value; by default the number and [unit].
+  final String Function(int value)? format;
   final String lessTooltip;
   final String moreTooltip;
   final ValueChanged<int> onChanged;
@@ -67,6 +79,8 @@ class _StepperTile extends StatelessWidget {
     required this.min,
     required this.max,
     this.unit = '',
+    this.step = 1,
+    this.format,
     required this.lessTooltip,
     required this.moreTooltip,
     required this.onChanged,
@@ -82,19 +96,21 @@ class _StepperTile extends StatelessWidget {
         children: [
           IconButton(
             tooltip: lessTooltip,
-            onPressed: value > min ? () => onChanged(value - 1) : null,
+            onPressed:
+                value > min ? () => onChanged((value - step).clamp(min, max)) : null,
             icon: const Icon(Icons.remove),
           ),
           SizedBox(
-            width: unit.isEmpty ? 32 : 64,
-            child: Text(unit.isEmpty ? '$value' : '$value $unit',
+            width: format != null ? 96 : (unit.isEmpty ? 32 : 64),
+            child: Text(format?.call(value) ?? (unit.isEmpty ? '$value' : '$value $unit'),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontFeatures: const [FontFeature.tabularFigures()])),
           ),
           IconButton(
             tooltip: moreTooltip,
-            onPressed: value < max ? () => onChanged(value + 1) : null,
+            onPressed:
+                value < max ? () => onChanged((value + step).clamp(min, max)) : null,
             icon: const Icon(Icons.add),
           ),
         ],
@@ -121,6 +137,32 @@ class _NoteLinesTile extends StatelessWidget {
         lessTooltip: 'Fewer tasks per note',
         moreTooltip: 'More tasks per note',
         onChanged: (lines) => bloc.add(SetNoteLinesEvent(lines)),
+      ),
+    );
+  }
+}
+
+class _NoteMinutesTile extends StatelessWidget {
+  const _NoteMinutesTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => a.noteMinutes != b.noteMinutes,
+      builder: (context, state) => _StepperTile(
+        key: const Key('noteMinutes'),
+        title: 'Time per note',
+        subtitle: 'The expected times of the tasks on a note, added up. '
+            'Committing more shows in red.',
+        value: state.noteMinutes,
+        min: minNoteMinutes,
+        max: maxNoteMinutes,
+        step: noteMinutesStep,
+        format: formatMinutes,
+        lessTooltip: 'Less time per note',
+        moreTooltip: 'More time per note',
+        onChanged: (minutes) => bloc.add(SetNoteMinutesEvent(minutes)),
       ),
     );
   }
@@ -210,6 +252,70 @@ class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
               'and the long break.'),
         ),
       ],
+    );
+  }
+}
+
+/// This build's version, and whether a newer one is out.
+class _VersionTiles extends StatelessWidget {
+  const _VersionTiles();
+
+  static bool _hasUpdates(BuildContext context) {
+    try {
+      context.read<UpdateCubit>();
+      return true;
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final build = BuildInfo.current;
+    // Pages opened on their own, as in tests, may have no update check above them.
+    if (!_hasUpdates(context)) {
+      return ListTile(
+          title: Text('Version ${build.label}'), subtitle: Text('Sync version $syncProtocol'));
+    }
+    return BlocBuilder<UpdateCubit, UpdateState>(
+      builder: (context, state) {
+        final updates = context.read<UpdateCubit>();
+        final latest = state.latest;
+        final String status;
+        if (!UpdateCubit.supported) {
+          status = 'Local builds aren\'t checked for newer versions.';
+        } else if (!kIsWeb && !state.checkReleases) {
+          status = 'Checking for new releases is off.';
+        } else if (state.newer) {
+          status = 'A newer version is out: ${latest!.label}.';
+        } else if (state.error != null && state.checkedAt != null) {
+          status = 'The last check failed: ${state.error}';
+        } else if (state.checkedAt != null) {
+          status = 'This is the latest version.';
+        } else {
+          status = 'Checking…';
+        }
+        return Column(children: [
+          ListTile(
+            title: Text('Version ${build.label}'),
+            subtitle: Text('${build.isRelease ? 'Release' : build.isKnown ? 'Built from commit ${build.commit}' : 'Run it with tool/run.sh to show the commit'}'
+                ', sync version $syncProtocol\n$status'),
+            isThreeLine: true,
+            trailing: UpdateCubit.supported && (kIsWeb || state.checkReleases)
+                ? IconButton(
+                    tooltip: 'Check now', icon: const Icon(Icons.refresh), onPressed: updates.check)
+                : null,
+          ),
+          if (!kIsWeb && build.isRelease)
+            SwitchListTile(
+              title: const Text('Check for new releases'),
+              subtitle: const Text('Asks GitHub for the latest release when the app starts, '
+                  'and every half hour. GitHub sees this device\'s address.'),
+              value: state.checkReleases,
+              onChanged: updates.setCheckReleases,
+            ),
+        ]);
+      },
     );
   }
 }

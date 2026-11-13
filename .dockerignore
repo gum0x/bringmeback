@@ -1,5 +1,5 @@
-# Keep the build context small: only what `flutter build web` needs.
-.git
+# Keep the build context small: only what `flutter build web` needs, and .git for the commit and its
+# time that tool/build_info.sh puts in the build.
 .github
 .dart_tool
 .pub-cache

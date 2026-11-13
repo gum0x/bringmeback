@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ticker.dart';
 import 'task_document.dart';
 
 final Random _random = Random.secure();
@@ -26,6 +27,24 @@ const defaultNoteLines = 10;
 /// The range Settings offers for the size of a note.
 const minNoteLines = 3;
 const maxNoteLines = 20;
+
+/// How much time a note may hold unless Settings says otherwise, in minutes: the expected times of
+/// its tasks added up. More than that shows in red, as a day planned too full.
+const defaultNoteMinutes = 8 * 60;
+
+/// The range Settings offers for the time a note holds, and its step.
+const minNoteMinutes = 60;
+const maxNoteMinutes = 16 * 60;
+const noteMinutesStep = 30;
+
+/// Rounds [seconds] since the epoch up to the next quarter of an hour, so an estimate based on it
+/// doesn't tick.
+int roundUpToQuarterHour(int seconds) {
+  final time = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+  final hour = DateTime(time.year, time.month, time.day, time.hour);
+  final quarters = (time.difference(hour).inSeconds + 15 * 60 - 1) ~/ (15 * 60);
+  return hour.add(Duration(minutes: 15 * quarters)).millisecondsSinceEpoch ~/ 1000;
+}
 
 /// A day starts at 4:00, so working past midnight still counts as the same day.
 const dayStartHour = 4;
@@ -131,10 +150,14 @@ class TasksState {
   /// How many tasks fit on a note, set in Settings.
   final int noteLines;
 
+  /// How much time a note may hold, in minutes, set in Settings.
+  final int noteMinutes;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
       this.noteLines = defaultNoteLines,
+      this.noteMinutes = defaultNoteMinutes,
       int? noteStartedAt,
       this.pending = const [],
       this.loaded = false})
@@ -148,6 +171,7 @@ class TasksState {
       pending: pending,
       loaded: loaded,
       noteLines: noteLines,
+      noteMinutes: noteMinutes,
     );
   }
 
@@ -155,6 +179,25 @@ class TasksState {
   int get currentIndex => tasks.indexWhere((t) => !t.done);
 
   bool get full => tasks.length >= noteLines;
+
+  /// The time committed to on this note: the expected times of all its tasks, done ones included.
+  int get committedSeconds => tasks.fold(0, (sum, t) => sum + t.timerLengthSeconds);
+
+  /// Whether more time is committed than a note holds.
+  bool get overCommitted => committedSeconds > noteMinutes * 60;
+
+  /// Time still to work on what is not done: each task's countdown left, none for one over time.
+  /// Breaks are not counted.
+  int secondsLeftAt(int now) =>
+      tasks.where((t) => !t.done).fold(0, (sum, t) => sum + max(0, t.remainingSecondsAt(now)));
+
+  /// When everything on the note would be done, working on without breaks, rounded up to the
+  /// quarter hour. Null when nothing is left to do.
+  int? finishAt([int? now]) {
+    final at = now ?? nowSeconds();
+    final left = secondsLeftAt(at);
+    return left == 0 ? null : roundUpToQuarterHour(at + left);
+  }
 
   bool get allDone => tasks.isNotEmpty && tasks.every((t) => t.done);
 
@@ -321,6 +364,13 @@ class SetNoteLinesEvent extends TasksEvent {
   SetNoteLinesEvent(this.lines);
 }
 
+/// Sets how much time a note may hold, in minutes.
+class SetNoteMinutesEvent extends TasksEvent {
+  final int minutes;
+
+  SetNoteMinutesEvent(this.minutes);
+}
+
 /// Says which task, if any, is open in the Pomodoro focus view. That task's own countdown stays
 /// quiet there, with no "Time's up" or reminder, because the Pomodoro clock is the one that counts.
 class SetFocusModeEvent extends TasksEvent {
@@ -362,8 +412,15 @@ class LoadStateEvent extends TasksEvent {}
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
 
+/// Deletes every task and the whole history on this device, see [TasksBloc.clearAll].
+class _ClearAllEvent extends TasksEvent {
+  final Completer<CRDTDocument> done;
+
+  _ClearAllEvent(this.done);
+}
+
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
-  Timer? tick;
+  SecondTicker? tick;
   // Made on the first sound, so a list that never rings needs no audio player.
   AudioPlayer? _audioPlayerOrNull;
   AudioPlayer get _audioPlayer => _audioPlayerOrNull ??= AudioPlayer();
@@ -375,6 +432,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
   int _noteLines = defaultNoteLines;
+  int _noteMinutes = defaultNoteMinutes;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -409,6 +467,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
     on<SetNoteLinesEvent>(_onSetNoteLines);
+    on<SetNoteMinutesEvent>(_onSetNoteMinutes);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
     on<SetPomodoroEvent>((e, emit) =>
         _edit(emit, (doc) => doc.setPomodoro(e.taskId, e.record)));
@@ -421,26 +480,27 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskNameEvent>(_onUpdateTaskName);
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
+    on<_ClearAllEvent>(_onClearAll);
     on<_RemoteChangesEvent>((event, emit) {
       emit(_view());
       _saveState();
     });
 
     add(LoadStateEvent());
-    tick = Timer.periodic(Duration(seconds: 1), (_) {
-      add(UpdateTimerEvent());
-    });
+    tick = SecondTicker(() => add(UpdateTimerEvent()));
   }
 
   TasksState _view() {
     final doc = _doc;
     if (doc == null) {
-      return TasksState(tasks: [], muted: _muted, noteLines: _noteLines);
+      return TasksState(
+          tasks: [], muted: _muted, noteLines: _noteLines, noteMinutes: _noteMinutes);
     }
     return TasksState(
       tasks: doc.tasks(focusId: _focusId),
       muted: _muted,
       noteLines: _noteLines,
+      noteMinutes: _noteMinutes,
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
       loaded: true,
@@ -667,6 +727,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         .then((prefs) => prefs.setInt('noteLines', _noteLines));
   }
 
+  void _onSetNoteMinutes(SetNoteMinutesEvent event, Emitter<TasksState> emit) {
+    _noteMinutes = event.minutes.clamp(minNoteMinutes, maxNoteMinutes);
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setInt('noteMinutes', _noteMinutes));
+  }
+
   void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
     _muted = !_muted;
     emit(_view());
@@ -728,6 +795,44 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
+  /// Deletes every task, note and logged time on this device and starts over with an empty
+  /// document, written under a new peer id so it shares no change ids with the old one. Returns
+  /// the new document, for sync to use instead of the old one. Settings stay as they are.
+  Future<CRDTDocument> clearAll() {
+    final done = Completer<CRDTDocument>();
+    add(_ClearAllEvent(done));
+    return done.future;
+  }
+
+  Future<void> _onClearAll(_ClearAllEvent event, Emitter<TasksState> emit) async {
+    // Wait for the saved document to load, so it can't come back over the empty one.
+    await document;
+    final prefs = await SharedPreferences.getInstance();
+    final peerId = PeerId.generate().toString();
+    await prefs.setString('peerId', peerId);
+    await prefs.remove('focusId');
+    await _remote?.cancel();
+    final doc = TaskDocument(
+        CRDTDocument(peerId: PeerId.parse(peerId), documentId: 'tasks'));
+    doc.setNoteStartedAt(nowSeconds());
+    _doc = doc;
+    _focusId = null;
+    _focusModeId = null;
+    _lastRemaining.clear();
+    _listenForRemote(doc);
+    emit(_view());
+    await _saveState();
+    event.done.complete(doc.doc);
+  }
+
+  void _listenForRemote(TaskDocument doc) {
+    _remote = doc.doc.events.listen((e) {
+      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
+        add(_RemoteChangesEvent());
+      }
+    });
+  }
+
   Future<void> _saveState() async {
     final doc = _doc;
     if (doc == null) return;
@@ -746,6 +851,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _muted = prefs.getBool('muted') ?? false;
     _noteLines = (prefs.getInt('noteLines') ?? defaultNoteLines)
         .clamp(minNoteLines, maxNoteLines);
+    _noteMinutes = (prefs.getInt('noteMinutes') ?? defaultNoteMinutes)
+        .clamp(minNoteMinutes, maxNoteMinutes);
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');
@@ -783,11 +890,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     // Documents from before notes: the tasks on the list make up today's note.
     if (doc.noteStartedAt == null) doc.setNoteStartedAt(nowSeconds());
     _doc = doc;
-    _remote = doc.doc.events.listen((e) {
-      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
-        add(_RemoteChangesEvent());
-      }
-    });
+    _listenForRemote(doc);
     _document.complete(doc.doc);
     emit(_view());
     await _saveState();

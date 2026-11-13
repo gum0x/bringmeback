@@ -28,6 +28,11 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
 - **The note is small on purpose**: it holds 10 tasks, done ones included. When it is full, finish
   or delete something, or start a fresh note. Change the size in **Settings** (the gear in the top
   bar), from 3 to 20 tasks. Making it smaller keeps what is already written.
+- **Committed time**: under the date, the note adds up the expected times of all its tasks, and says
+  roughly when everything will be done if you work on without breaks, e.g. "Committed 3 h 20 min ·
+  done by ~14:45". The finish is rounded up to the quarter hour, so it doesn't tick like another
+  clock. A note holds 8 hours by default; when you commit more, the time turns red. Change it in
+  **Settings → Time per note**.
 
 ## A new day
 
@@ -78,6 +83,12 @@ below or beside it, the rest of the list in a quiet **Up next**.
 - The first focus session starts as soon as the view opens, 25 minutes by default. **Pause** (or
   Space) stops the clock and **Resume** carries on. When a session ends a sound plays and a short
   break starts on its own; after every fourth session the break is a long one.
+- **The sessions fit the task.** They are cut to the time the task has left: a task with an hour
+  left gets sessions of 25, 25 and 10 minutes, and one with 20 minutes a single 20-minute session. A
+  rest of 5 minutes or less joins the session before it. Under the clock the view shows the plan,
+  e.g. "Fits the task's 1 h: 25 + 25 + 10 min of focus, 1 h 10 min with breaks". Once the task's
+  time is used up, sessions go back to full length. A task already over its time gets full
+  sessions.
 - The task's own timer runs during focus sessions and pauses during breaks or when you pause the clock,
   so the breaks are logged like any other pause.
 - While the focus view is open, the task's own countdown stays quiet: no "Time's up" and no
@@ -125,7 +136,22 @@ off instead. A message at the bottom offers **Undo**, which puts the task back w
 Browsers keep Ctrl+N and Ctrl+D for themselves, so use the Alt variants in the web app. The keyboard
 icon in the top bar shows this list.
 
+## Sync between your devices
+
+The devices icon in the top bar opens **Devices**. Start a group on one device and enter its code
+on the other. With **Find my devices online** on, the devices find each other through public Nostr
+relays (which only see encrypted messages) and then sync directly, while both are open and on the
+same network. Sync starts with the app and reconnects when you come back to it.
+
+- **Start empty**, under the code box, deletes this device's tasks and history before it joins, so
+  it only gets the group's tasks and sends none of its own. It asks before deleting.
+- Devices sync only when they run the same sync version, shown under **This device**. When they
+  don't, the Devices page says which one is older; reload the page (or update the app) there.
+- When sync can't work, the Devices page says why: no relay reachable, no direct connection (not
+  on the same network, or a browser setting that blocks WebRTC), another version, or a failed
+  handshake.
+
 ## Where your data is
 
 Everything is saved on the device you use, in the browser's storage for the web app. Nothing is sent
-anywhere. Sync between your devices is planned and will be opt-in (see [ROADMAP.md](ROADMAP.md)).
+anywhere unless you turn on sync, which is opt-in and sends tasks only to your own paired devices.

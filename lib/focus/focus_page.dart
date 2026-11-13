@@ -19,14 +19,22 @@ Future<void> openFocus(BuildContext context, String taskId,
     {bool autoStart = true}) async {
   final settings = await PomodoroSettings.load();
   if (!context.mounted) return;
-  final tasks = context.read<TasksBloc>().state.tasks;
-  final task = tasks.where((t) => t.id.value == taskId).firstOrNull;
+  final task = context
+      .read<TasksBloc>()
+      .state
+      .tasks
+      .where((t) => t.id.value == taskId)
+      .firstOrNull;
   final record = PomodoroRecord.decode(task?.pomodoro);
   final (resumeFrom, endsAt) = record?.at(DateTime.now()) ?? (null, null);
   await Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => BlocProvider(
+      // A fresh focus cuts its sessions to fit the time the task has left.
       create: (_) => PomodoroCubit(
-          settings: settings, resumeFrom: resumeFrom, endsAt: endsAt),
+          settings: settings,
+          taskSeconds: task?.taskTimerSeconds,
+          resumeFrom: resumeFrom,
+          endsAt: endsAt),
       child: FocusPage(
           taskId: taskId, autoStart: autoStart, resumed: record != null),
     ),
@@ -319,6 +327,17 @@ class _ClockPanel extends StatelessWidget {
         final session =
             p.completedSessions % p.settings.sessionsBeforeLongBreak +
                 (p.phase == PomodoroPhase.work ? 1 : 0);
+        final slices = p.taskSlices;
+        final plan = describeTaskPlan(p);
+        final sessionText = switch (p.phase) {
+          PomodoroPhase.work when p.taskTimeUsed =>
+            "Past the task's time: session ${p.completedSessions + 1}",
+          PomodoroPhase.work when slices.isNotEmpty =>
+            'Session ${p.completedSessions + 1} of ${slices.length} for this task',
+          PomodoroPhase.work =>
+            'Session $session of ${p.settings.sessionsBeforeLongBreak}',
+          _ => '${p.completedSessions} done',
+        };
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
@@ -366,9 +385,8 @@ class _ClockPanel extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                p.phase == PomodoroPhase.work
-                    ? 'Session $session of ${p.settings.sessionsBeforeLongBreak}'
-                    : '${p.completedSessions} done',
+                sessionText,
+                key: const Key('pomodoroSession'),
                 style: theme.textTheme.bodyMedium,
               ),
               TextButton.icon(
@@ -379,7 +397,7 @@ class _ClockPanel extends StatelessWidget {
                     '${p.settings.shortBreakMinutes} min break'),
               ),
               Text(
-                describeCycle(p.settings),
+                plan ?? describeCycle(p.settings),
                 key: const Key('pomodoroCycle'),
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall
