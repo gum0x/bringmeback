@@ -132,7 +132,15 @@ icon in the top bar shows this list.
 The devices icon in the top bar opens **Devices**. Start a group on one device and enter its code
 on the other. With **Find my devices online** on, the devices find each other through public Nostr
 relays (which only see encrypted messages) and then sync directly, while both are open and on the
-same network. Sync starts with the app and reconnects when you come back to it.
+same network. Sync starts with the app and reconnects when you come back to it. While two devices
+are both open they keep syncing on their own: every edit goes across at once, and every 30 seconds
+they check that nothing is missing.
+
+- **Sync now** (the circular arrows in the bottom bar, once the device is in a group) syncs at once:
+  it compares with the connected devices, connects again to online devices whose link dropped, or
+  looks for the others again when none is online. Pressing it more than once does no harm.
+- When devices that worked apart sync again, the later edit of the same thing wins on both, and a
+  task is never duplicated. [SYNC.md](SYNC.md) describes the cases.
 
 - **Start empty**, under the code box, deletes this device's tasks and history before it joins, so
   it only gets the group's tasks and sends none of its own. It asks before deleting.
