@@ -24,6 +24,9 @@ import 'tasks_bloc.dart';
 /// `<newId>/carriedFrom` and `<oldId>/carriedTo`) or let go (`<oldId>/letGoAt`).
 /// `current/startedAt` is when the note in the order was started.
 ///
+/// `<taskId>/pomodoro` is where the task's Pomodoro is, as a `PomodoroRecord` in JSON, so a focus
+/// picks up where it was on any device.
+///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
 class TaskDocument {
@@ -79,6 +82,7 @@ class TaskDocument {
       totalResetAt: field<int>('totalResetAt', 0),
       entries: entries,
       inFocus: inFocus,
+      pomodoro: field<String?>('pomodoro', null),
     );
   }
 
@@ -272,6 +276,9 @@ class TaskDocument {
           ..set('$id/timerLength', lengthSeconds)
           ..set('$id/timerStartAt', startAt);
       });
+
+  /// Keeps where the task's Pomodoro is, or forgets it with null.
+  void setPomodoro(String id, String? record) => _fields.set('$id/pomodoro', record);
 
   void setTotalResetAt(String id, int at) => _fields.set('$id/totalResetAt', at);
 
