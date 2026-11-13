@@ -350,6 +350,13 @@ class LoadStateEvent extends TasksEvent {}
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
 
+/// Deletes every task and the whole history on this device, see [TasksBloc.clearAll].
+class _ClearAllEvent extends TasksEvent {
+  final Completer<CRDTDocument> done;
+
+  _ClearAllEvent(this.done);
+}
+
 class TasksBloc extends Bloc<TasksEvent, TasksState> {
   Timer? tick;
   // Made on the first sound, so a list that never rings needs no audio player.
@@ -407,6 +414,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskNameEvent>(_onUpdateTaskName);
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
+    on<_ClearAllEvent>(_onClearAll);
     on<_RemoteChangesEvent>((event, emit) {
       emit(_view());
       _saveState();
@@ -714,6 +722,44 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
+  /// Deletes every task, note and logged time on this device and starts over with an empty
+  /// document, written under a new peer id so it shares no change ids with the old one. Returns
+  /// the new document, for sync to use instead of the old one. Settings stay as they are.
+  Future<CRDTDocument> clearAll() {
+    final done = Completer<CRDTDocument>();
+    add(_ClearAllEvent(done));
+    return done.future;
+  }
+
+  Future<void> _onClearAll(_ClearAllEvent event, Emitter<TasksState> emit) async {
+    // Wait for the saved document to load, so it can't come back over the empty one.
+    await document;
+    final prefs = await SharedPreferences.getInstance();
+    final peerId = PeerId.generate().toString();
+    await prefs.setString('peerId', peerId);
+    await prefs.remove('focusId');
+    await _remote?.cancel();
+    final doc = TaskDocument(
+        CRDTDocument(peerId: PeerId.parse(peerId), documentId: 'tasks'));
+    doc.setNoteStartedAt(nowSeconds());
+    _doc = doc;
+    _focusId = null;
+    _focusModeId = null;
+    _lastRemaining.clear();
+    _listenForRemote(doc);
+    emit(_view());
+    await _saveState();
+    event.done.complete(doc.doc);
+  }
+
+  void _listenForRemote(TaskDocument doc) {
+    _remote = doc.doc.events.listen((e) {
+      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
+        add(_RemoteChangesEvent());
+      }
+    });
+  }
+
   Future<void> _saveState() async {
     final doc = _doc;
     if (doc == null) return;
@@ -769,11 +815,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     // Documents from before notes: the tasks on the list make up today's note.
     if (doc.noteStartedAt == null) doc.setNoteStartedAt(nowSeconds());
     _doc = doc;
-    _remote = doc.doc.events.listen((e) {
-      if (e is DocumentChangesApplied && e.source == ChangeSource.ingested) {
-        add(_RemoteChangesEvent());
-      }
-    });
+    _listenForRemote(doc);
     _document.complete(doc.doc);
     emit(_view());
     await _saveState();
