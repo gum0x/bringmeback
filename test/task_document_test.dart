@@ -136,4 +136,72 @@ void main() {
       expect(d.task('b').name, 'call bank');
     }
   });
+
+  group('categories', () {
+    test('are added, renamed, ordered and deleted, and a deleted one still reads', () {
+      final d = newDoc()
+        ..addCategory('w', 'Work', keywords: 'office', at: 2)
+        ..addCategory('h', 'Health', at: 1);
+      expect(d.categories().map((c) => c.name), ['Health', 'Work']);
+      d.setCategoryName('w', 'Job');
+      d.setCategoryKeywords('w', 'office meeting');
+      expect(d.categories().last.keywords, 'office meeting');
+      d.removeCategory('h');
+      expect(d.categories().map((c) => c.name), ['Job']);
+      expect(d.categories(deleted: true).map((c) => (c.name, c.deleted)),
+          [('Health', true), ('Job', false)]);
+    });
+
+    test('are not listed as tasks', () {
+      final d = newDoc()
+        ..insert(0, 'a', name: 'task')
+        ..addCategory('w', 'Work');
+      expect(d.allTaskIds, ['a']);
+    });
+
+    test('a task keeps its category and who chose it, and carries both to a new note', () {
+      final d = newDoc()
+        ..addCategory('w', 'Work')
+        ..insert(0, 'a', name: 'report', category: 'w')
+        ..insert(1, 'b', name: 'standup');
+      expect((d.task('a').category, d.task('a').categoryByHand), ('w', false));
+      d.setTaskCategory('b', 'w', byHand: true);
+      expect((d.task('b').category, d.task('b').categoryByHand), ('w', true));
+      expect(d.categoryExamples().map((e) => (e.id, e.name, e.category)), [('b', 'standup', 'w')]);
+      d.tearOff('n', 10);
+      d.carry('b', 'b2', 0);
+      expect((d.task('b2').category, d.task('b2').categoryByHand), ('w', true));
+      d.clearTaskCategory('b2');
+      expect((d.task('b2').category, d.task('b2').categoryByHand), (null, false));
+    });
+
+    test('sync between devices, and edits to different fields both survive', () {
+      final a = newDoc()..addCategory('w', 'Work', keywords: 'office');
+      final b = newDoc();
+      exchange(a, b);
+      expect(b.categories().single.name, 'Work');
+      a.setCategoryName('w', 'Job');
+      b.setCategoryKeywords('w', 'office meeting');
+      b.insert(0, 't', name: 'report', category: 'w');
+      exchange(a, b);
+      for (final d in [a, b]) {
+        final c = d.categories().single;
+        expect((c.name, c.keywords), ('Job', 'office meeting'));
+        expect(d.task('t').category, 'w');
+      }
+    });
+
+    test('fields of the wrong type from another device read as no category', () {
+      final d = newDoc()..insert(0, 'a', name: 'x');
+      final other = CRDTDocument(peerId: PeerId.generate(), documentId: 'tasks');
+      CRDTMapHandler<Object?>(other, 'fields', handlerType: 'bmb.fields')
+        ..set('a/category', 42)
+        ..set('category/c/name', 7)
+        ..set('category/d/name', 'Ok')
+        ..set('category/d/addedAt', 'soon');
+      d.doc.importChanges(other.exportChanges());
+      expect(d.task('a').category, isNull);
+      expect(d.categories().map((c) => (c.id, c.addedAt)), [('d', 0)]);
+    });
+  });
 }

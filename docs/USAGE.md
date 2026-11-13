@@ -29,6 +29,23 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
   or delete something, or start a fresh note. Change the size in **Settings** (the gear in the top
   bar), from 3 to 20 tasks. Making it smaller keeps what is already written.
 
+## Categories
+
+Each task can be filed under a category, shown next to its name: Work, Health, Home or whatever
+list you set. Set the list in **Settings → Categories**: add, rename or delete categories, or start
+from **Add suggested categories**. Each category can have **keywords**, words that tasks in it often
+use, which help tell categories apart. The list syncs with your other devices, like the tasks.
+
+When you write or rename a task, the app picks the category that fits its name best (✨ on the tag).
+It runs entirely on the device, with no service behind it: it compares the words of the task with
+each category's name and keywords using word vectors bundled with the app (English). When nothing
+fits well enough, the task gets no category rather than a wrong one.
+
+To correct it, tap the tag and pick another category, or **No category**; or pick one in the task
+dialog. Your choice stays, even when you rename the task, until you pick **Choose automatically**.
+Tasks you filed by hand also teach the app: a new task much like one of them goes the same way.
+The category is saved with the task, so it is kept in History for statistics later.
+
 ## A new day
 
 A note belongs to the day it was started (a day starts at 4:00). The next day the app asks you to

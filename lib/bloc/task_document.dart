@@ -26,6 +26,17 @@ import 'tasks_bloc.dart';
 ///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
+///
+/// Categories, set in Settings, live in the same document so they sync with the tasks:
+/// `category/<categoryId>/name`, `category/<categoryId>/keywords` (words that help the categoriser
+/// tell it apart), `category/<categoryId>/addedAt` (milliseconds, to order the list) and
+/// `category/<categoryId>/deletedAt`. A deleted category keeps its fields, so tasks filed under it
+/// still read for statistics. Each field is its own last-writer-wins entry, so a rename on one device
+/// and a keyword change on another both survive.
+///
+/// A task's category is `<taskId>/category` (a category id, or null for none) and
+/// `<taskId>/categoryBy`: `ai` when the categoriser chose it, `hand` when the user did. A category
+/// chosen by hand, none included, is never replaced by the categoriser.
 class TaskDocument {
   final CRDTDocument doc;
   final CRDTFugueMovableListHandler<String> _order;
@@ -73,6 +84,8 @@ class TaskDocument {
       notes: field<String>('notes', ''),
       doneAt: fields['$id/doneAt'] is int ? fields['$id/doneAt'] as int : null,
       carriedFrom: field<String?>('carriedFrom', null),
+      category: field<String?>('category', null),
+      categoryByHand: fields['$id/categoryBy'] == _byHand,
       id: ValueKey<String>(id),
       timerLengthSeconds: field<int>('timerLength', 20 * 60),
       timerStartAt: field<int>('timerStartAt', 0),
@@ -89,6 +102,8 @@ class TaskDocument {
   void insert(int index, String id,
       {String name = '',
       String notes = '',
+      String? category,
+      bool categoryByHand = false,
       int timerLengthSeconds = 20 * 60,
       int? timerStartAt,
       int totalResetAt = 0,
@@ -102,6 +117,9 @@ class TaskDocument {
         ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
         ..set('$id/totalResetAt', totalResetAt);
       if (notes.isNotEmpty) _fields.set('$id/notes', notes);
+      if (category != null || categoryByHand) {
+        setTaskCategory(id, category, byHand: categoryByHand);
+      }
       for (final e in entries) {
         _fields.set('$id/e/${e.start}', e.end);
       }
@@ -175,6 +193,8 @@ class TaskDocument {
         insert(index, newId,
             name: from.name,
             notes: from.notes,
+            category: from.category,
+            categoryByHand: from.categoryByHand,
             timerLengthSeconds: from.timerLengthSeconds);
         _fields
           ..set('$newId/carriedFrom', fromId)
@@ -216,7 +236,10 @@ class TaskDocument {
     final fields = _values;
     return [
       for (final key in fields.keys)
-        if (key.endsWith('/name') && !key.startsWith('note/') && !key.startsWith('current/'))
+        if (key.endsWith('/name') &&
+            !key.startsWith('note/') &&
+            !key.startsWith('current/') &&
+            !key.startsWith('category/'))
           if (key.substring(0, key.length - '/name'.length) case final id
               when fields['$id/kind'] != 'pause')
             id
@@ -288,6 +311,80 @@ class TaskDocument {
     }
   }
 
+  /// The categories set in Settings, in the order they were added. With [deleted], the deleted ones
+  /// too, for reading what older tasks were filed under.
+  List<TaskCategory> categories({bool deleted = false}) {
+    final fields = _values;
+    final list = <TaskCategory>[];
+    for (final MapEntry(:key, :value) in fields.entries) {
+      if (!key.startsWith('category/') || !key.endsWith('/name') || value is! String) continue;
+      final id = key.substring('category/'.length, key.length - '/name'.length);
+      if (id.isEmpty || id.contains('/')) continue;
+      final deletedAt = fields['category/$id/deletedAt'];
+      if (deletedAt is int && !deleted) continue;
+      list.add(TaskCategory(
+        id: id,
+        name: value,
+        keywords: switch (fields['category/$id/keywords']) { String k => k, _ => '' },
+        addedAt: switch (fields['category/$id/addedAt']) { int a => a, _ => 0 },
+        deleted: deletedAt is int,
+      ));
+    }
+    return list
+      ..sort((a, b) => a.addedAt != b.addedAt ? a.addedAt.compareTo(b.addedAt) : a.id.compareTo(b.id));
+  }
+
+  void addCategory(String id, String name, {String keywords = '', int? at}) =>
+      doc.runInTransaction(() {
+        _fields
+          ..set('category/$id/name', name)
+          ..set('category/$id/keywords', keywords)
+          ..set('category/$id/addedAt', at ?? DateTime.now().millisecondsSinceEpoch);
+      });
+
+  void setCategoryName(String id, String name) => _fields.set('category/$id/name', name);
+
+  void setCategoryKeywords(String id, String keywords) =>
+      _fields.set('category/$id/keywords', keywords);
+
+  /// Takes a category out of the list. Its fields stay, so tasks filed under it still say what it was.
+  void removeCategory(String id) => _fields.set('category/$id/deletedAt', nowSeconds());
+
+  /// Files task [id] under [category], or under none when null. [byHand] marks the user's own choice,
+  /// which the categoriser leaves alone.
+  void setTaskCategory(String id, String? category, {required bool byHand}) =>
+      doc.runInTransaction(() {
+        _fields
+          ..set('$id/category', category)
+          ..set('$id/categoryBy', byHand ? _byHand : _byAi);
+      });
+
+  /// The tasks the user filed under a category by hand, newest first, for the categoriser to learn
+  /// from. Read in one pass.
+  List<({String id, String name, String category})> categoryExamples() {
+    final fields = _values;
+    final examples = <({String id, String name, String category, int at})>[];
+    for (final MapEntry(:key, :value) in fields.entries) {
+      if (value != _byHand || !key.endsWith('/categoryBy')) continue;
+      final id = key.substring(0, key.length - '/categoryBy'.length);
+      if (id.contains('/')) continue;
+      final category = fields['$id/category'];
+      final name = fields['$id/name'];
+      if (category is! String || name is! String || name.isEmpty) continue;
+      final at = fields['$id/timerStartAt'];
+      examples.add((id: id, name: name, category: category, at: at is int ? at : 0));
+    }
+    examples.sort((a, b) => b.at.compareTo(a.at));
+    return [for (final e in examples) (id: e.id, name: e.name, category: e.category)];
+  }
+
+  /// Hands task [id]'s category back to the categoriser.
+  void clearTaskCategory(String id) => doc.runInTransaction(() {
+        _fields
+          ..set('$id/category', null)
+          ..set('$id/categoryBy', null);
+      });
+
   /// Every change in the document, encoded for storage.
   String encodeChanges() => jsonEncode(
       [for (final c in doc.exportChanges()) base64Encode(c.toBytes())]);
@@ -298,6 +395,43 @@ class TaskDocument {
       for (final c in list) Change.fromBytes(Uint8List.fromList(base64Decode(c)))
     ]);
   }
+}
+
+/// `<taskId>/categoryBy` when the categoriser chose the category.
+const _byAi = 'ai';
+
+/// `<taskId>/categoryBy` when the user chose the category, or chose none.
+const _byHand = 'hand';
+
+/// A category tasks are filed under, set in Settings.
+class TaskCategory {
+  final String id;
+  final String name;
+
+  /// Words that describe what goes in it, separated by spaces or commas. The categoriser compares a
+  /// task with these and the name.
+  final String keywords;
+  final int addedAt;
+  final bool deleted;
+
+  const TaskCategory(
+      {required this.id,
+      required this.name,
+      this.keywords = '',
+      this.addedAt = 0,
+      this.deleted = false});
+
+  @override
+  bool operator ==(Object other) =>
+      other is TaskCategory &&
+      other.id == id &&
+      other.name == name &&
+      other.keywords == keywords &&
+      other.addedAt == addedAt &&
+      other.deleted == deleted;
+
+  @override
+  int get hashCode => Object.hash(id, name, keywords, addedAt, deleted);
 }
 
 /// What became of a task.
