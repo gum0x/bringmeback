@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 
+import '../version/build_info.dart';
 import 'pairing.dart';
 
 /// A direct, ordered and reliable channel to one other device, before any encryption. The offer and
@@ -55,20 +56,25 @@ enum LinkFailure {
   protocol,
 }
 
-/// The offer or answer as signalled: the version, then the SDP.
-List<int> _envelope(String sdp) => utf8.encode(jsonEncode({'v': syncProtocol, 'sdp': sdp}));
+/// The offer or answer as signalled: the sync version, this app's build (to show only), and the SDP.
+List<int> _envelope(String sdp) => utf8.encode(
+    jsonEncode({'v': syncProtocol, 'build': BuildInfo.current.toJson(), 'sdp': sdp}));
 
 /// The version and SDP in a signalled offer or answer. A bare SDP is from version 1. Throws
 /// [FormatException] for anything else.
-({int version, String? sdp}) _openEnvelope(List<int> body) {
+({int version, String? sdp, BuildInfo build}) _openEnvelope(List<int> body) {
   final text = utf8.decode(body);
-  if (text.startsWith('v=')) return (version: 1, sdp: null);
+  if (text.startsWith('v=')) return (version: 1, sdp: null, build: const BuildInfo());
   final parsed = jsonDecode(text);
   if (parsed is! Map || parsed['v'] is! int) throw const FormatException('Not an envelope');
   final version = parsed['v'] as int;
   final sdp = parsed['sdp'];
   if (version == syncProtocol && sdp is! String) throw const FormatException('No SDP');
-  return (version: version, sdp: version == syncProtocol ? sdp as String : null);
+  return (
+    version: version,
+    sdp: version == syncProtocol ? sdp as String : null,
+    build: BuildInfo.fromJson(parsed['build'])
+  );
 }
 
 /// Makes a fresh [PeerTransport]. Tests pass an in-memory one.
@@ -108,6 +114,10 @@ class PeerLink {
   SymbolonChannel? _channel;
   LinkFailure? _failure;
   int? _remoteProtocol;
+  BuildInfo? _remoteBuild;
+
+  /// The other device's app build, as it says, once its offer or answer has arrived. Only shown.
+  BuildInfo? get remoteBuild => _remoteBuild;
 
   /// Why the link closed, once it has; null when it was closed on purpose.
   LinkFailure? get failure => _failure;
@@ -163,7 +173,7 @@ class PeerLink {
   /// Handles the offer (responder) or answer (initiator) from [remoteSession].
   Future<void> signalled(SymbolonSignal signal) async {
     if (isClosed) return;
-    final ({int version, String? sdp}) opened;
+    final ({int version, String? sdp, BuildInfo build}) opened;
     try {
       opened = _openEnvelope(signal.body);
     } on Object {
@@ -171,6 +181,7 @@ class PeerLink {
       return;
     }
     _remoteProtocol = opened.version;
+    _remoteBuild = opened.build;
     final sdp = opened.sdp;
     if (sdp == null) {
       await fail(LinkFailure.version);

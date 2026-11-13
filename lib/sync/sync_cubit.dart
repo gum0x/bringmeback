@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 
+import '../version/build_info.dart';
 import 'doc_sync.dart';
 import 'pairing.dart';
 import 'peer.dart';
@@ -72,6 +73,9 @@ class SyncState {
   /// Why the link to a device failed last, by device id, until it connects.
   final Map<String, SyncProblem> problems;
 
+  /// The app build each device that offered or answered runs, by device id.
+  final Map<String, BuildInfo> builds;
+
   /// How many relays this device is connected to, out of [relayCount], while it looks for devices.
   final int relaysUp;
   final int relayCount;
@@ -89,6 +93,7 @@ class SyncState {
       this.online = const {},
       this.connected = const {},
       this.problems = const {},
+      this.builds = const {},
       this.relaysUp = 0,
       this.relayCount = 0,
       this.relaysUnreachable = false});
@@ -100,6 +105,7 @@ class SyncState {
           Set<String>? online,
           Set<String>? connected,
           Map<String, SyncProblem>? problems,
+          Map<String, BuildInfo>? builds,
           int? relaysUp,
           int? relayCount,
           bool? relaysUnreachable}) =>
@@ -113,6 +119,7 @@ class SyncState {
           online: online ?? this.online,
           connected: connected ?? this.connected,
           problems: problems ?? this.problems,
+          builds: builds ?? this.builds,
           relaysUp: relaysUp ?? this.relaysUp,
           relayCount: relayCount ?? this.relayCount,
           relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable);
@@ -259,7 +266,7 @@ class SyncCubit extends Cubit<SyncState> {
     _answered.clear();
     await _closeLinks();
     _emit(state.copyWith(
-        problems: const {}, relaysUp: 0, relayCount: 0, relaysUnreachable: false));
+        problems: const {}, builds: const {}, relaysUp: 0, relayCount: 0, relaysUnreachable: false));
   }
 
   Future<void> _restartSignalling() async {
@@ -368,14 +375,19 @@ class SyncCubit extends Cubit<SyncState> {
       if (_links[id] != link) return;
       wasConnected = true;
       _sync?.attach(link);
+      final build = link.remoteBuild;
       _emit(state.copyWith(
-          connected: {...state.connected, id}, problems: {...state.problems}..remove(id)));
+          connected: {...state.connected, id},
+          problems: {...state.problems}..remove(id),
+          builds: build == null ? null : {...state.builds, id: build}));
     }, onError: (Object _) {});
     link.closed.then((_) {
       if (_links[id] != link) return;
       _links.remove(id);
       final failure = link.failure;
+      final build = link.remoteBuild;
       _emit(state.copyWith(
+          builds: build == null ? null : {...state.builds, id: build},
           connected: {...state.connected}..remove(id),
           problems: failure == null
               ? null

@@ -1,8 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
 import '../focus/pomodoro.dart';
+import '../sync/peer.dart' show syncProtocol;
+import '../version/build_info.dart';
+import '../version/update_cubit.dart';
 
 /// How the app behaves on this device. Settings are saved here and are not synced.
 class SettingsPage extends StatelessWidget {
@@ -22,6 +26,8 @@ class SettingsPage extends StatelessWidget {
               _NoteLinesTile(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
+              _Section('About'),
+              _VersionTiles(),
             ],
           ),
         ),
@@ -210,6 +216,70 @@ class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
               'and the long break.'),
         ),
       ],
+    );
+  }
+}
+
+/// This build's version, and whether a newer one is out.
+class _VersionTiles extends StatelessWidget {
+  const _VersionTiles();
+
+  static bool _hasUpdates(BuildContext context) {
+    try {
+      context.read<UpdateCubit>();
+      return true;
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final build = BuildInfo.current;
+    // Pages opened on their own, as in tests, may have no update check above them.
+    if (!_hasUpdates(context)) {
+      return ListTile(
+          title: Text('Version ${build.label}'), subtitle: Text('Sync version $syncProtocol'));
+    }
+    return BlocBuilder<UpdateCubit, UpdateState>(
+      builder: (context, state) {
+        final updates = context.read<UpdateCubit>();
+        final latest = state.latest;
+        final String status;
+        if (!UpdateCubit.supported) {
+          status = 'Local builds aren\'t checked for newer versions.';
+        } else if (!kIsWeb && !state.checkReleases) {
+          status = 'Checking for new releases is off.';
+        } else if (state.newer) {
+          status = 'A newer version is out: ${latest!.label}.';
+        } else if (state.error != null && state.checkedAt != null) {
+          status = 'The last check failed: ${state.error}';
+        } else if (state.checkedAt != null) {
+          status = 'This is the latest version.';
+        } else {
+          status = 'Checking…';
+        }
+        return Column(children: [
+          ListTile(
+            title: Text('Version ${build.label}'),
+            subtitle: Text('${build.isRelease ? 'Release' : build.isKnown ? 'Built from commit ${build.commit}' : 'Not built with version information'}'
+                ', sync version $syncProtocol\n$status'),
+            isThreeLine: true,
+            trailing: UpdateCubit.supported && (kIsWeb || state.checkReleases)
+                ? IconButton(
+                    tooltip: 'Check now', icon: const Icon(Icons.refresh), onPressed: updates.check)
+                : null,
+          ),
+          if (!kIsWeb && build.isRelease)
+            SwitchListTile(
+              title: const Text('Check for new releases'),
+              subtitle: const Text('Asks GitHub for the latest release when the app starts, '
+                  'and every half hour. GitHub sees this device\'s address.'),
+              value: state.checkReleases,
+              onChanged: updates.setCheckReleases,
+            ),
+        ]);
+      },
     );
   }
 }

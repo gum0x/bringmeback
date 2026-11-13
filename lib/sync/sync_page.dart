@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../bloc/tasks_bloc.dart';
+import '../version/build_info.dart';
 import 'pairing.dart';
 import 'peer.dart' show syncProtocol;
 import 'sync_cubit.dart';
@@ -71,7 +72,9 @@ class SyncPage extends StatelessWidget {
         const SizedBox(height: 16),
         ListTile(
           title: const Text('This device'),
-          subtitle: Text('Device ${_shortId(state.device!.id)}, sync version $syncProtocol'),
+          subtitle: Text('Device ${_shortId(state.device!.id)}\n'
+              'Version ${BuildInfo.current.label}, sync version $syncProtocol'),
+          isThreeLine: true,
         ),
         ListTile(
           title: const Text('Group fingerprint'),
@@ -131,7 +134,25 @@ class SyncPage extends StatelessWidget {
         ),
       for (final MapEntry(key: id, value: p) in state.problems.entries)
         problem('Device ${_shortId(id)} isn\'t syncing', p.message),
+      for (final id in state.online)
+        if (state.builds[id] case final build?)
+          ListTile(
+            dense: true,
+            leading: Icon(
+                state.connected.contains(id) ? Icons.sync : Icons.sync_disabled),
+            title: Text('Device ${_shortId(id)}: version ${build.label}'),
+            subtitle: _compare(build) == null ? null : Text(_compare(build)!),
+          ),
     ];
+  }
+
+  /// How another device's build compares with this one, when it differs.
+  static String? _compare(BuildInfo other) {
+    final mine = BuildInfo.current;
+    if (!other.isKnown || !mine.isKnown || other.sameAs(mine)) return null;
+    if (mine.isOlderThan(other)) return 'Newer than this device. Reload or update this one.';
+    if (other.isOlderThan(mine)) return 'Older than this device. Reload or update it.';
+    return 'A different build from this device.';
   }
 
   static String _shortId(String id) => id.length > 6 ? id.substring(0, 6) : id;

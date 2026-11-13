@@ -29,10 +29,18 @@ COPY pubspec.yaml pubspec.lock ./
 RUN flutter pub get
 
 COPY . .
-# A checkout on Windows may have CRLF line endings, which break the bash script and the checksum file.
-RUN sed -i 's/\r$//' tool/build_symbolon.sh tool/symbolon-web.sha256 \
+# A checkout on Windows may have CRLF line endings, which break the bash scripts and the checksum file.
+# tool/build_info.sh reads the commit and its time from .git, for the version the app shows and the
+# build-info.json it checks for a newer build. Without .git, pass them in:
+#   docker build --build-arg BUILD_COMMIT=abc1234 --build-arg BUILD_TIME=2026-11-13T12:00:00Z ...
+ARG APP_VERSION=""
+ARG BUILD_COMMIT=""
+ARG BUILD_TIME=""
+RUN sed -i 's/\r$//' tool/build_symbolon.sh tool/build_info.sh tool/symbolon-web.sha256 \
+ && git config --global --add safe.directory /app \
  && bash tool/build_symbolon.sh web \
- && flutter build web --release --no-web-resources-cdn
+ && flutter build web --release --no-web-resources-cdn $(bash tool/build_info.sh defines) \
+ && bash tool/build_info.sh json build/web
 
 # ---- Serve stage ---------------------------------------------------------------------------
 FROM nginxinc/nginx-unprivileged:1.29-alpine

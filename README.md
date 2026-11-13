@@ -38,6 +38,24 @@ docker run --rm -p 8080:8080 bringmeback-web
 Then open http://localhost:8080. The first build downloads the Flutter SDK and takes several minutes;
 later builds reuse it.
 
+## Versions
+
+Every build shows its version in **Settings** (under About) and on the **Devices** page, where each
+paired device's version is listed too:
+
+- a release (a commit tagged `vX.Y.Z`) shows its number, such as `v1.2.0`;
+- any other build shows the time of its last commit and the commit, such as
+  `2026-11-13 12:30 UTC · 70135a09b6`, with `-dirty` when it was built with uncommitted changes.
+
+`tool/build_info.sh defines` prints the `--dart-define` flags that set this, so a local build gets it
+with `flutter build web $(tool/build_info.sh defines)`. The Docker build and the CI builds do this on
+their own. A build without them shows "Development build".
+
+The web app also checks `build-info.json` on its own server (written by `tool/build_info.sh json`) when
+it starts, every half hour and when you come back to it, and offers **Reload** when a newer build is
+served. Released desktop and phone apps can check GitHub for a newer release, which is off until you
+turn it on in Settings.
+
 ## Tests
 
 Unit tests: `flutter test`

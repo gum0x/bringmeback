@@ -8,6 +8,9 @@ import 'note/task_line.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_page.dart';
+import 'version/build_info.dart';
+import 'version/platform.dart' as platform;
+import 'version/update_cubit.dart';
 import 'dart:async';
 
 export 'note/note_view.dart' show NoteView, CarryOverPanel, TearOffView;
@@ -32,10 +35,12 @@ class App extends StatelessWidget {
               create: (context) =>
                   SyncCubit(document: context.read<TasksBloc>().document)
                     ..load()),
+          BlocProvider(lazy: false, create: (_) => UpdateCubit()..load()),
         ],
-        child: _SyncLifecycle(
+        child: _AppLifecycle(
             child: MaterialApp(
           title: 'bringmeback',
+          scaffoldMessengerKey: _messenger,
           theme: ThemeData(colorSchemeSeed: Colors.blue),
           darkTheme: ThemeData(
               colorSchemeSeed: Colors.blue, brightness: Brightness.dark),
@@ -46,27 +51,37 @@ class App extends StatelessWidget {
   }
 }
 
+final _messenger = GlobalKey<ScaffoldMessengerState>();
+
 /// Tells sync when the app goes to the background and comes back, so it reconnects right away
-/// after a phone kept the app (or a browser kept the tab) asleep.
-class _SyncLifecycle extends StatefulWidget {
+/// after a phone kept the app (or a browser kept the tab) asleep, and checks for a newer version
+/// then. Shows a banner when a newer version is out.
+class _AppLifecycle extends StatefulWidget {
   final Widget child;
 
-  const _SyncLifecycle({required this.child});
+  const _AppLifecycle({required this.child});
 
   @override
-  State<_SyncLifecycle> createState() => _SyncLifecycleState();
+  State<_AppLifecycle> createState() => _AppLifecycleState();
 }
 
-class _SyncLifecycleState extends State<_SyncLifecycle> {
+class _AppLifecycleState extends State<_AppLifecycle> {
   late final AppLifecycleListener _listener;
+
+  /// The newer build the banner was shown for, so it shows once per build.
+  BuildInfo? _announced;
 
   @override
   void initState() {
     super.initState();
     final sync = context.read<SyncCubit>();
+    final updates = context.read<UpdateCubit>();
     _listener = AppLifecycleListener(
       onHide: sync.paused,
-      onShow: sync.resumed,
+      onShow: () {
+        sync.resumed();
+        updates.check();
+      },
     );
   }
 
@@ -76,8 +91,31 @@ class _SyncLifecycleState extends State<_SyncLifecycle> {
     super.dispose();
   }
 
+  void _updated(UpdateState state) {
+    final latest = state.latest;
+    final messenger = _messenger.currentState;
+    if (!state.newer || latest == null || messenger == null) return;
+    if (_announced != null && _announced!.sameAs(latest)) return;
+    _announced = latest;
+    messenger.showMaterialBanner(MaterialBanner(
+      leading: const Icon(Icons.system_update),
+      content: Text(platform.canReload
+          ? 'A newer version of bringmeback is out (${latest.label}). '
+              'This one is ${BuildInfo.current.label}.'
+          : 'bringmeback ${latest.label} is out. This is ${BuildInfo.current.label}.'),
+      actions: [
+        TextButton(
+            onPressed: messenger.hideCurrentMaterialBanner,
+            child: const Text('Later')),
+        if (platform.canReload)
+          TextButton(onPressed: platform.reloadApp, child: const Text('Reload')),
+      ],
+    ));
+  }
+
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) => BlocListener<UpdateCubit, UpdateState>(
+      listener: (context, state) => _updated(state), child: widget.child);
 }
 
 /// Keyboard shortcuts, with the Alt variants for browsers, which keep Ctrl+N and Ctrl+D to
