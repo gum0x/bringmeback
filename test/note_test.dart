@@ -69,6 +69,10 @@ void main() {
     // A task on top is an interruption: it is timed.
     expect(bloc.state.tasks.first.running, isTrue);
     expect(find.byType(TaskClock), findsOneWidget);
+    // Every task waiting its turn shows how long it is expected to take.
+    expect(find.text('Expected 25:00'), findsOneWidget);
+    expect(find.text('Expected 20:00'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^Left \d+:\d+ of 20:00$')), findsOneWidget);
   });
 
   noteTest('checking a task off strikes it through and hands the timer on', (tester, bloc) async {
