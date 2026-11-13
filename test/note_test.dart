@@ -1,6 +1,7 @@
 import 'package:bringmeback/bloc/history.dart';
 import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
+import 'package:bringmeback/focus/pomodoro.dart';
 import 'package:bringmeback/main.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -132,13 +133,61 @@ void main() {
   });
 
   noteTest('the note holds a limited number of tasks', (tester, bloc) async {
-    for (var i = 0; i < noteLines + 2; i++) {
+    for (var i = 0; i < defaultNoteLines + 2; i++) {
       bloc.add(InsertTaskEvent(index: i, name: 'Task $i', id: ValueKey('t$i')));
     }
     await settle(tester);
-    expect(bloc.state.tasks, hasLength(noteLines));
+    expect(bloc.state.tasks, hasLength(defaultNoteLines));
     expect(find.text('Add a task'), findsNothing);
     expect(find.textContaining('The note is full'), findsOneWidget);
+  });
+
+  noteTest('the size of the note is set in Settings and kept', (tester, bloc) async {
+    for (var i = 0; i < 4; i++) {
+      bloc.add(InsertTaskEvent(index: i, name: 'Task $i', id: ValueKey('t$i')));
+    }
+    await settle(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('$defaultNoteLines'), findsOneWidget);
+    for (var i = 0; i < defaultNoteLines - minNoteLines + 1; i++) {
+      await tester.tap(find.byTooltip('Fewer tasks per note'));
+      await settle(tester);
+    }
+    expect(bloc.state.noteLines, minNoteLines);
+    expect(find.text('$minNoteLines'), findsOneWidget);
+
+    // A smaller note keeps what is written, and takes no more.
+    expect(bloc.state.tasks, hasLength(4));
+    expect(bloc.state.full, isTrue);
+    bloc.add(InsertTaskEvent(index: 0, name: 'One more', id: const ValueKey('x')));
+    await settle(tester);
+    expect(bloc.state.tasks, hasLength(4));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('noteLines'), minNoteLines);
+  });
+
+  noteTest('the Pomodoro lengths are set in Settings and kept', (tester, bloc) async {
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Long break every'), 100);
+    expect(find.text('25 min'), findsOneWidget);
+    for (final tooltip in ['Longer focus', 'Longer focus', 'Shorter short break']) {
+      await tester.tap(find.byTooltip(tooltip));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('27 min'), findsOneWidget);
+    expect(find.text('4 min'), findsOneWidget);
+    // 4 × 27 min of focus, 3 short breaks of 4 and a long one of 15.
+    await tester.scrollUntilVisible(find.byKey(const Key('pomodoroCycle')), 100);
+    expect(find.text('Full cycle 2 h 15 min: 1 h 48 min of focus in 4 sessions'),
+        findsOneWidget);
+
+    final saved = await tester.runAsync(PomodoroSettings.load);
+    expect(saved?.workMinutes, 27);
+    expect(saved?.shortBreakMinutes, 4);
+    expect(saved?.longBreakMinutes, 15);
   });
 
   noteTest('tearing off the note carries over what is not done', (tester, bloc) async {

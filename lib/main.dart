@@ -5,6 +5,7 @@ import 'bloc/tasks_bloc.dart';
 import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
+import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_page.dart';
 import 'dart:async';
@@ -161,6 +162,12 @@ class _TasksStackState extends State<TasksStack> {
                   tooltip: 'Keyboard shortcuts',
                   icon: const Icon(Icons.keyboard_outlined),
                   onPressed: () => _showShortcuts(context),
+                ),
+                IconButton(
+                  tooltip: 'Settings',
+                  icon: const Icon(Icons.settings_outlined),
+                  onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsPage())),
                 ),
               ],
             ),

@@ -25,8 +25,9 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
 - **Edit a task** with a double tap or double click on it.
 - **Reorder** by dragging the handle on the right of a task. Dragging an unchecked task above the
   current one makes it the current task.
-- **The note is small on purpose**: it holds 10 lines, done tasks included. When it is full, finish
-  or delete something, or start a fresh note.
+- **The note is small on purpose**: it holds 10 tasks, done ones included. When it is full, finish
+  or delete something, or start a fresh note. Change the size in **Settings** (the gear in the top
+  bar), from 3 to 20 tasks. Making it smaller keeps what is already written.
 
 ## A new day
 
@@ -87,7 +88,7 @@ below or beside it, the rest of the list in a quiet **Up next**.
   and long break lengths and how many sessions come before a long break. They apply right away; leave
   **Use these lengths from now on** ticked to keep them on this device for the next focus. Under them
   the view shows what a full cycle adds up to, up to the end of the long break, and how much of it
-  is focus.
+  is focus. The defaults, with the same total, are also in **Settings**, under **Pomodoro**.
 - The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
   carries on as it was.
 

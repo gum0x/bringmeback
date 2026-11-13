@@ -49,7 +49,7 @@ class _TodayNote extends StatelessWidget {
     final tasks = state.tasks;
     final current = state.currentIndex;
     final done = tasks.where((t) => t.done).length;
-    final left = noteLines - tasks.length;
+    final left = state.noteLines - tasks.length;
 
     final header = Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 0, 8),
@@ -67,7 +67,7 @@ class _TodayNote extends StatelessWidget {
                 Text(
                   [
                     if (tasks.isNotEmpty) '$done of ${tasks.length} done',
-                    if (left <= 3) left == 0 ? 'note full' : '$left ${left == 1 ? 'line' : 'lines'} left',
+                    if (left <= 3) left <= 0 ? 'note full' : '$left ${left == 1 ? 'line' : 'lines'} left',
                   ].join(' · '),
                   style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
                 ),
