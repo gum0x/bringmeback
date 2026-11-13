@@ -118,11 +118,19 @@ icon in the top bar shows this list.
 
 ## Sync between your devices
 
-The devices icon in the top bar opens **Devices**. Start a group on one device and enter its code
-on the other. With **Find my devices online** on, the devices find each other through public Nostr
+The devices icon in the top bar opens **Devices**. Start a group on one device, then on the other
+scan its QR code with the camera, or open its link (**Share link** or **Copy link**). The link opens
+the web app on the Devices page with the code filled in; press **Join group**. The code is in the
+link's `#` part, which browsers never send to the server, and the app removes it from the address
+bar once read. Pasting the link, or only the code (**Show the code**), into the join box works too.
+With **Find my devices online** on, the devices find each other through public Nostr
 relays (which only see encrypted messages) and then sync directly, while both are open and on the
 same network. Sync starts with the app and reconnects when you come back to it.
 
+- On Android, a link to the app's web address opens the app if it is installed and set to open
+  supported links, and **bringmeback** shows in the share menu for text, so a link received in a
+  message can be shared to it. Builds for another address set `--dart-define=SHARE_LINK_BASE=` and
+  the Gradle properties `shareLinkHost` and `shareLinkPath` to match.
 - **Start empty**, under the code box, deletes this device's tasks and history before it joins, so
   it only gets the group's tasks and sends none of its own. It asks before deleting.
 - Devices sync only when they run the same sync version, shown under **This device**. When they

@@ -26,6 +26,25 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Share links to join a sync group (lib/sync/share_link.dart). The host and path are where the
+                 web app is served, set in build.gradle. Android opens them here without asking only when
+                 that domain serves /.well-known/assetlinks.json for this app; until then, people can
+                 turn on "Open supported links" in the app's settings, or share the link to the app. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"
+                      android:host="${shareLinkHost}"
+                      android:pathPrefix="${shareLinkPath}"/>
+            </intent-filter>
+            <!-- Shows bringmeback in the share menu for text, so a share link sent in a message can be
+                 shared to the app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

@@ -6,6 +6,8 @@ import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
 import 'settings/settings_page.dart';
+import 'sync/app_links.dart';
+import 'sync/share_link.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_page.dart';
 import 'version/build_info.dart';
@@ -41,17 +43,26 @@ class App extends StatelessWidget {
             child: MaterialApp(
           title: 'bringmeback',
           scaffoldMessengerKey: _messenger,
+          navigatorKey: _navigator,
+          // The web app's address may carry a share link's fragment, which isn't a route: always
+          // start on the tasks, and let the share link open the Devices page.
+          onGenerateInitialRoutes: (_) => [
+            MaterialPageRoute(
+                settings: const RouteSettings(name: Navigator.defaultRouteName),
+                builder: (_) => const TasksStack())
+          ],
+          home: const TasksStack(),
           theme: ThemeData(colorSchemeSeed: Colors.blue),
           darkTheme: ThemeData(
               colorSchemeSeed: Colors.blue, brightness: Brightness.dark),
           // The app is laid out for portrait: on a wide window it stays a column in the middle.
           builder: (context, child) => _PortraitFrame(child: child!),
-          home: const TasksStack(),
         )));
   }
 }
 
 final _messenger = GlobalKey<ScaffoldMessengerState>();
+final _navigator = GlobalKey<NavigatorState>();
 
 /// Tells sync when the app goes to the background and comes back, so it reconnects right away
 /// after a phone kept the app (or a browser kept the tab) asleep, and checks for a newer version
@@ -71,6 +82,8 @@ class _AppLifecycleState extends State<_AppLifecycle> {
   /// The newer build the banner was shown for, so it shows once per build.
   BuildInfo? _announced;
 
+  StreamSubscription<ShareLink>? _links;
+
   @override
   void initState() {
     super.initState();
@@ -83,10 +96,23 @@ class _AppLifecycleState extends State<_AppLifecycle> {
         updates.check();
       },
     );
+    AppLinks.initial().then((link) {
+      if (link != null) WidgetsBinding.instance.addPostFrameCallback((_) => _openLink(link));
+    });
+    _links = AppLinks.later.listen(_openLink);
+  }
+
+  /// Opens the Devices page to join the group of a share link, on top of the tasks.
+  void _openLink(ShareLink link) {
+    final navigator = _navigator.currentState;
+    if (navigator == null) return;
+    navigator.popUntil((route) => route.isFirst);
+    navigator.push(MaterialPageRoute(builder: (_) => SyncPage(joinCode: link.code)));
   }
 
   @override
   void dispose() {
+    _links?.cancel();
     _listener.dispose();
     super.dispose();
   }

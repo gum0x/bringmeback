@@ -5,13 +5,18 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../bloc/tasks_bloc.dart';
 import '../version/build_info.dart';
+import 'app_links.dart';
 import 'pairing.dart';
 import 'peer.dart' show syncProtocol;
+import 'share_link.dart';
 import 'sync_cubit.dart';
 
 /// Pairs this device with others. Every device in a group shares the same group secret.
 class SyncPage extends StatelessWidget {
-  const SyncPage({super.key});
+  /// The code from a share link the app was opened with, to join that group.
+  final String? joinCode;
+
+  const SyncPage({super.key, this.joinCode});
 
   @override
   Widget build(BuildContext context) {
@@ -29,46 +34,95 @@ class SyncPage extends StatelessWidget {
               ? const [Center(child: CircularProgressIndicator())]
               : state.paired
                   ? _paired(context, state)
-                  : _unpaired(context),
+                  : _unpaired(context, state),
         ),
       ),
     );
   }
 
-  List<Widget> _unpaired(BuildContext context) => [
-        const Text('Pair your devices to keep the same tasks and timers on all of them. '
-            'Start a group here, then enter its code on your other device.'),
-        const SizedBox(height: 16),
-        ElevatedButton(
-            onPressed: () => context.read<SyncCubit>().createGroup(),
-            child: const Text('Start a new group')),
-        const SizedBox(height: 32),
-        const _JoinForm(),
-      ];
+  List<Widget> _unpaired(BuildContext context, SyncState state) => joinCode != null
+      ? [
+          const Text('You opened a link to join another device\'s group. This device then gets '
+              'the group\'s tasks and timers, and its own tasks go to the group too, unless it '
+              'starts empty.'),
+          const SizedBox(height: 16),
+          _JoinForm(code: joinCode),
+        ]
+      : [
+          const Text('Pair your devices to keep the same tasks and timers on all of them. '
+              'Start a group here, then open its link or scan its QR code on your other device.'),
+          const SizedBox(height: 16),
+          ElevatedButton(
+              onPressed: () => context.read<SyncCubit>().createGroup(),
+              child: const Text('Start a new group')),
+          const SizedBox(height: 32),
+          const _JoinForm(),
+        ];
+
+  /// Shown when a share link opened the app on a device that is already in a group.
+  Widget? _linkNotice(BuildContext context, SyncState state) {
+    final code = joinCode;
+    if (code == null) return null;
+    final same = code == state.code;
+    return Card(
+      child: ListTile(
+        leading: Icon(same ? Icons.check_circle_outline : Icons.info_outline),
+        title: Text(same
+            ? 'This device is in the group from the link'
+            : 'The link is for another group'),
+        subtitle: same
+            ? null
+            : const Text('This device is already in a group. To join the one from the link, '
+                'leave this group first, then join.'),
+      ),
+    );
+  }
+
+  /// The link to this group, which another device opens to join it.
+  static String _link(SyncState state) =>
+      ShareLink.build(AppLinks.ownBase ?? Uri.parse(ShareLink.defaultBase), state.code!).toString();
 
   List<Widget> _paired(BuildContext context, SyncState state) => [
-        const Text('Show this code to your other device, or copy it there. '
-            'Anyone with the code can join the group, so only share it with your own devices.'),
+        if (_linkNotice(context, state) case final notice?) ...[notice, const SizedBox(height: 16)],
+        const Text('Scan this QR code with your other device\'s camera, or send it the link. '
+            'Anyone with the link can join the group, so only share it with your own devices.'),
         const SizedBox(height: 16),
         Center(
           child: QrImageView(
-            data: state.code!,
+            data: _link(state),
             size: 240,
             backgroundColor: Colors.white,
           ),
         ),
         const SizedBox(height: 8),
-        SelectableText(state.code!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
-        TextButton.icon(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: state.code!));
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('Code copied')));
-            },
-            icon: const Icon(Icons.copy),
-            label: const Text('Copy code')),
+        Wrap(
+          alignment: WrapAlignment.center,
+          children: [
+            if (AppLinks.canShare)
+              TextButton.icon(
+                  onPressed: () => AppLinks.share(_link(state)),
+                  icon: const Icon(Icons.share),
+                  label: const Text('Share link')),
+            TextButton.icon(
+                onPressed: () => _copy(context, _link(state), 'Link copied'),
+                icon: const Icon(Icons.link),
+                label: const Text('Copy link')),
+            TextButton.icon(
+                onPressed: () => _copy(context, state.code!, 'Code copied'),
+                icon: const Icon(Icons.copy),
+                label: const Text('Copy code')),
+          ],
+        ),
+        ExpansionTile(
+          title: const Text('Show the code'),
+          subtitle: const Text('To type into a device that can\'t open the link'),
+          children: [
+            SelectableText(state.code!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
+            const SizedBox(height: 8),
+          ],
+        ),
         const SizedBox(height: 16),
         ListTile(
           title: const Text('This device'),
@@ -155,6 +209,11 @@ class SyncPage extends StatelessWidget {
     return 'A different build from this device.';
   }
 
+  static void _copy(BuildContext context, String text, String done) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
+  }
+
   static String _shortId(String id) => id.length > 6 ? id.substring(0, 6) : id;
 
   Future<void> _confirmLeave(BuildContext context) async {
@@ -163,7 +222,7 @@ class SyncPage extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Leave this group?'),
-        content: const Text('Your tasks stay on this device. To pair again you need the code from another device in the group.'),
+        content: const Text('Your tasks stay on this device. To pair again you need the link or code from another device in the group.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Leave')),
@@ -175,14 +234,17 @@ class SyncPage extends StatelessWidget {
 }
 
 class _JoinForm extends StatefulWidget {
-  const _JoinForm();
+  /// A code to join with, from a share link.
+  final String? code;
+
+  const _JoinForm({this.code});
 
   @override
   State<_JoinForm> createState() => _JoinFormState();
 }
 
 class _JoinFormState extends State<_JoinForm> {
-  final _controller = TextEditingController();
+  late final _controller = TextEditingController(text: widget.code);
   String? _error;
   bool _clearFirst = false;
 
@@ -235,13 +297,15 @@ class _JoinFormState extends State<_JoinForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Or join the group of another device:'),
-        const SizedBox(height: 8),
+        if (widget.code == null) ...[
+          const Text('Or join the group of another device, with its link or code:'),
+          const SizedBox(height: 8),
+        ],
         TextField(
           controller: _controller,
           decoration: InputDecoration(
             border: const OutlineInputBorder(),
-            hintText: 'bmb1-…',
+            hintText: 'https://… or bmb1-…',
             errorText: _error,
           ),
           onChanged: (_) {
