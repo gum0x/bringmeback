@@ -3,6 +3,7 @@ import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
 import 'package:bringmeback/focus/pomodoro.dart';
 import 'package:bringmeback/main.dart';
+import 'package:bringmeback/note/note_view.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -99,6 +100,61 @@ void main() {
     await settle(tester);
     expect(bloc.state.currentIndex, 0);
     expect(find.text('ALL DONE'), findsNothing);
+  });
+
+  Future<void> pickFilter(WidgetTester tester, String label) async {
+    await tester.tap(find.byTooltip('Filter tasks'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<TaskFilter>, label));
+    await settle(tester);
+  }
+
+  noteTest('the filter shows only what is done, or only what is not', (tester, bloc) async {
+    for (final (i, name) in ['Write report', 'Call the bank', 'Answer email'].indexed) {
+      bloc.add(InsertTaskEvent(index: i, name: name, id: ValueKey('t$i')));
+    }
+    await settle(tester);
+    bloc.add(SetDoneEvent(index: 1, done: true));
+    await settle(tester);
+
+    await pickFilter(tester, 'Done');
+    expect(find.text('Call the bank'), findsOneWidget);
+    expect(find.text('Write report'), findsNothing);
+    expect(find.text('Answer email'), findsNothing);
+    expect(find.textContaining('showing done'), findsOneWidget);
+    // A done task keeps its number on the note, and nothing is written while showing done.
+    expect(find.text('2.'), findsOneWidget);
+    expect(find.text('Add a task'), findsNothing);
+    expect(find.byIcon(Icons.drag_indicator), findsNothing);
+
+    // Unchecking it here reaches the right task, and it leaves the filtered list.
+    await tester.tap(find.byType(Checkbox));
+    await settle(tester);
+    expect(bloc.state.tasks.map((t) => t.done), [false, false, false]);
+    expect(find.text('Nothing is done yet.'), findsOneWidget);
+
+    bloc.add(SetDoneEvent(index: 0, done: true));
+    await settle(tester);
+    await pickFilter(tester, 'Not done');
+    expect(find.text('Write report'), findsNothing);
+    expect(find.text('Call the bank'), findsOneWidget);
+    expect(find.text('Answer email'), findsOneWidget);
+    expect(find.text('Add a task'), findsOneWidget);
+
+    // Checking off what is left here leaves nothing to show.
+    await tester.tap(find.byType(Checkbox).last);
+    await settle(tester);
+    expect(bloc.state.tasks[2].done, isTrue);
+    await tester.tap(find.byType(Checkbox).last);
+    await settle(tester);
+    expect(find.text('Everything is done.'), findsOneWidget);
+
+    await pickFilter(tester, 'All tasks');
+    expect(find.textContaining('showing'), findsNothing);
+    expect(find.byType(Checkbox), findsNWidgets(3));
+    expect(find.byIcon(Icons.drag_indicator), findsNWidgets(3));
+    expect(names(bloc), ['Write report', 'Call the bank', 'Answer email'],
+        reason: 'filtering never changes the note');
   });
 
   noteTest('the (+) buttons of a selected task write above and below it', (tester, bloc) async {

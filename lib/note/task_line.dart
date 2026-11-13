@@ -188,12 +188,16 @@ class TaskLine extends StatefulWidget {
   /// Whether new tasks can still be written on the note.
   final bool canInsert;
 
+  /// Whether the line sits in a reorderable list and shows a drag handle.
+  final bool reorderable;
+
   const TaskLine({
     super.key,
     required this.task,
     required this.index,
     required this.current,
     required this.canInsert,
+    this.reorderable = true,
   });
 
   @override
@@ -345,7 +349,7 @@ class _TaskLineState extends State<TaskLine> {
               ),
             ),
           ),
-          dragHandle,
+          if (widget.reorderable) dragHandle else const SizedBox(width: 36),
         ],
       ),
     );

@@ -37,19 +37,51 @@ class NoteView extends StatelessWidget {
   }
 }
 
-class _TodayNote extends StatelessWidget {
+/// Which tasks of today's note are shown.
+enum TaskFilter {
+  all('All tasks'),
+  open('Not done'),
+  done('Done');
+
+  final String label;
+
+  const TaskFilter(this.label);
+
+  bool shows(TaskState task) => switch (this) {
+        TaskFilter.all => true,
+        TaskFilter.open => !task.done,
+        TaskFilter.done => task.done,
+      };
+}
+
+class _TodayNote extends StatefulWidget {
   final TasksState state;
 
   const _TodayNote({required this.state});
 
   @override
+  State<_TodayNote> createState() => _TodayNoteState();
+}
+
+class _TodayNoteState extends State<_TodayNote> {
+  /// Only changes what this screen shows: the note itself, and other devices, are untouched.
+  TaskFilter _filter = TaskFilter.all;
+
+  @override
   Widget build(BuildContext context) {
+    final state = widget.state;
     final colors = NoteColors.of(context);
     final theme = Theme.of(context);
     final tasks = state.tasks;
     final current = state.currentIndex;
     final done = tasks.where((t) => t.done).length;
     final left = state.noteLines - tasks.length;
+    final filtered = _filter != TaskFilter.all;
+    // Positions on the note of the tasks shown, so every action still reaches the right task.
+    final shown = [
+      for (var i = 0; i < tasks.length; i++)
+        if (_filter.shows(tasks[i])) i
+    ];
 
     final header = Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 0, 8),
@@ -68,11 +100,27 @@ class _TodayNote extends StatelessWidget {
                   [
                     if (tasks.isNotEmpty) '$done of ${tasks.length} done',
                     if (left <= 3) left <= 0 ? 'note full' : '$left ${left == 1 ? 'line' : 'lines'} left',
+                    if (filtered) 'showing ${_filter.label.toLowerCase()}',
                   ].join(' · '),
                   style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
                 ),
               ],
             ),
+          ),
+          PopupMenuButton<TaskFilter>(
+            tooltip: 'Filter tasks',
+            initialValue: _filter,
+            icon: Icon(filtered ? Icons.filter_alt : Icons.filter_alt_outlined,
+                color: filtered ? colors.ink : colors.faded),
+            onSelected: (filter) => setState(() => _filter = filter),
+            itemBuilder: (context) => [
+              for (final filter in TaskFilter.values)
+                CheckedPopupMenuItem(
+                  value: filter,
+                  checked: filter == _filter,
+                  child: Text(filter.label),
+                ),
+            ],
           ),
           PopupMenuButton<void>(
             tooltip: 'Note actions',
@@ -91,7 +139,20 @@ class _TodayNote extends StatelessWidget {
       ),
     );
 
-    final list = ReorderableListView.builder(
+    // Filtered, the lines are not in a row on the note, so they are not dragged to reorder.
+    final list = filtered
+        ? Column(children: [
+            for (final index in shown)
+              TaskLine(
+                key: tasks[index].id,
+                task: tasks[index],
+                index: index,
+                current: index == current,
+                canInsert: !state.full && _filter == TaskFilter.open,
+                reorderable: false,
+              ),
+          ])
+        : ReorderableListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       buildDefaultDragHandles: false,
@@ -116,8 +177,21 @@ class _TodayNote extends StatelessWidget {
           .add(MoveTaskEvent(fromIndex: oldIndex, toIndex: newIndex)),
     );
 
-    // The next empty line on the paper, to write on.
-    final nextLine = state.full
+    final emptyFilter = filtered && shown.isEmpty && tasks.isNotEmpty
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
+            child: Text(
+              _filter == TaskFilter.done ? 'Nothing is done yet.' : 'Everything is done.',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: colors.faded, fontStyle: FontStyle.italic),
+            ),
+          )
+        : null;
+
+    // The next empty line on the paper, to write on. Not while showing only what is done.
+    final nextLine = _filter == TaskFilter.done
+        ? null
+        : state.full
         ? Padding(
             padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
             child: Text(
@@ -169,7 +243,8 @@ class _TodayNote extends StatelessWidget {
                   ),
                 ),
               list,
-              nextLine,
+              if (emptyFilter != null) emptyFilter,
+              if (nextLine != null) nextLine,
             ],
           ),
         ),
