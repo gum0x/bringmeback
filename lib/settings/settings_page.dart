@@ -24,8 +24,10 @@ class SettingsPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: const [
               _Section('Today\'s note'),
-              _NoteLinesTile(),
+              _TaskLimitTile(),
               _NoteMinutesTile(),
+              _Section('Experimental'),
+              _BacklogSwitch(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
               _Section('About'),
@@ -119,24 +121,44 @@ class _StepperTile extends StatelessWidget {
   }
 }
 
-class _NoteLinesTile extends StatelessWidget {
-  const _NoteLinesTile();
+/// The backlog is a trial: it may change, or move elsewhere.
+class _BacklogSwitch extends StatelessWidget {
+  const _BacklogSwitch();
 
   @override
   Widget build(BuildContext context) {
     final bloc = context.read<TasksBloc>();
     return BlocBuilder<TasksBloc, TasksState>(
-      buildWhen: (a, b) => a.noteLines != b.noteLines,
+      buildWhen: (a, b) => a.backlogEnabled != b.backlogEnabled,
+      builder: (context, state) => SwitchListTile(
+        title: const Text('Backlog'),
+        subtitle: const Text('Past the limit, offer to keep a new task for later, in a backlog '
+            'under the note. A trial: it may change or move.'),
+        value: state.backlogEnabled,
+        onChanged: (on) => bloc.add(SetBacklogEnabledEvent(on)),
+      ),
+    );
+  }
+}
+
+class _TaskLimitTile extends StatelessWidget {
+  const _TaskLimitTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => a.taskLimit != b.taskLimit,
       builder: (context, state) => _StepperTile(
-        title: 'Tasks per note',
-        subtitle: 'A small note keeps the day focused. Done tasks count too. '
-            'Making it smaller keeps what is already written.',
-        value: state.noteLines,
-        min: minNoteLines,
-        max: maxNoteLines,
-        lessTooltip: 'Fewer tasks per note',
-        moreTooltip: 'More tasks per note',
-        onChanged: (lines) => bloc.add(SetNoteLinesEvent(lines)),
+        title: 'Open tasks before asking',
+        subtitle: 'A short list keeps the day focused. Past this many tasks not done yet, a new '
+            'task asks first: write it anyway, or let it go. Done tasks don\'t count.',
+        value: state.taskLimit,
+        min: minTaskLimit,
+        max: maxTaskLimit,
+        lessTooltip: 'Lower task limit',
+        moreTooltip: 'Higher task limit',
+        onChanged: (limit) => bloc.add(SetTaskLimitEvent(limit)),
       ),
     );
   }

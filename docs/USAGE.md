@@ -25,9 +25,16 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
 - **Edit a task** with a double tap or double click on it.
 - **Reorder** by dragging the handle on the right of a task. Dragging an unchecked task above the
   current one makes it the current task.
-- **The note is small on purpose**: it holds 10 tasks, done ones included. When it is full, finish
-  or delete something, or start a fresh note. Change the size in **Settings** (the gear in the top
-  bar), from 3 to 20 tasks. Making it smaller keeps what is already written.
+- **The note stays short on purpose**: once it holds 7 tasks not done yet, writing another one asks
+  first. **Write on note anyway** adds it as usual; **Let it go** drops it on purpose, because not
+  everything has to be done (History keeps it as let go). Done tasks don't count. The note's header
+  says when you are at or over the limit. Change the limit in **Settings** (the gear in the top bar),
+  from 3 to 20 open tasks.
+- **Backlog (experimental)**, off unless turned on under **Settings › Experimental**. The prompt then
+  also offers **Save to backlog**, which keeps the task for later in a backlog under the note. Open it
+  to **Write on note** a task (past the limit this asks first too) or let it go. Unfinished tasks of a
+  torn-off note can also be moved there instead of written again. It is a trial and may change or
+  move.
 - **Committed time**: under the date, the note adds up the expected times of all its tasks, and says
   roughly when everything will be done if you work on without breaks, e.g. "Committed 3 h 20 min ·
   done by ~14:45". The finish is rounded up to the quarter hour, so it doesn't tick like another
