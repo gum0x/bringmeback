@@ -7,6 +7,7 @@ import 'focus/pomodoro.dart';
 import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
+import 'reminders/reminders_cubit.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_status.dart';
@@ -38,6 +39,8 @@ class App extends StatelessWidget {
                   SyncCubit(document: context.read<TasksBloc>().document)
                     ..load()),
           BlocProvider(lazy: false, create: (_) => UpdateCubit()..load()),
+          // Not lazy: this device's reminders are scheduled when the app starts.
+          BlocProvider(lazy: false, create: (_) => RemindersCubit()..load()),
         ],
         child: _AppLifecycle(
             child: MaterialApp(
@@ -78,11 +81,13 @@ class _AppLifecycleState extends State<_AppLifecycle> {
     super.initState();
     final sync = context.read<SyncCubit>();
     final updates = context.read<UpdateCubit>();
+    final reminders = context.read<RemindersCubit>();
     _listener = AppLifecycleListener(
       onHide: sync.paused,
       onShow: () {
         sync.resumed();
         updates.check();
+        reminders.resumed();
       },
     );
   }

@@ -4,6 +4,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
 import '../focus/pomodoro.dart';
+import '../reminders/reminders_cubit.dart';
+import '../reminders/routine_reminders.dart';
 import '../sync/peer.dart' show syncProtocol;
 import '../timer.dart';
 import '../version/build_info.dart';
@@ -28,6 +30,8 @@ class SettingsPage extends StatelessWidget {
               _NoteMinutesTile(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
+              _Section('Reminders'),
+              _RemindersTiles(),
               _Section('About'),
               _VersionTiles(),
             ],
@@ -252,6 +256,80 @@ class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
               'and the long break.'),
         ),
       ],
+    );
+  }
+}
+
+/// The morning and afternoon reminders: on or off, and when, on this device only.
+class _RemindersTiles extends StatelessWidget {
+  const _RemindersTiles();
+
+  static const _what = {
+    RoutineReminder.morning: 'Update the note with what you will do today.',
+    RoutineReminder.afternoon: 'Start closing today\'s open tasks.',
+  };
+
+  static bool _hasReminders(BuildContext context) {
+    try {
+      context.read<RemindersCubit>();
+      return true;
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
+
+  Future<void> _pickTime(BuildContext context, RoutineReminder reminder, ReminderTime time) async {
+    final reminders = context.read<RemindersCubit>();
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: time.hour, minute: time.minute),
+      helpText: reminder.label,
+    );
+    if (picked != null) await reminders.setMinutes(reminder, picked.hour * 60 + picked.minute);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Pages opened on their own, as in tests, may have no reminders above them.
+    if (!_hasReminders(context)) return const SizedBox.shrink();
+    return BlocBuilder<RemindersCubit, RemindersState>(
+      builder: (context, state) {
+        final reminders = context.read<RemindersCubit>();
+        if (!state.loaded) return const SizedBox(height: 48);
+        return Column(children: [
+          for (final r in RoutineReminder.values)
+            ListTile(
+              key: Key('reminder.${r.name}'),
+              title: Text(r.label),
+              subtitle: Text(_what[r]!),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                TextButton(
+                  key: Key('reminder.${r.name}.time'),
+                  onPressed: () => _pickTime(context, r, state.settings[r]),
+                  child: Text(state.settings[r].label,
+                      style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),
+                ),
+                Switch(
+                  key: Key('reminder.${r.name}.on'),
+                  value: state.settings[r].enabled,
+                  onChanged: (on) => reminders.setEnabled(r, on),
+                ),
+              ]),
+            ),
+          ListTile(
+            leading: Icon(state.denied ? Icons.notifications_off : Icons.info_outline),
+            subtitle: Text(state.denied
+                ? 'Notifications are blocked for bringmeback. Allow them in this '
+                    '${kIsWeb ? 'browser\'s site settings' : 'device\'s settings'}, then turn the '
+                    'reminder on again.'
+                : reminders.ringsInBackground
+                    ? 'Reminders ring every day, with the app closed too. They are set on this '
+                        'device only.'
+                    : 'Reminders ring every day while bringmeback is open${kIsWeb ? ' in a tab' : ''}. '
+                        'They are set on this device only.'),
+          ),
+        ]);
+      },
     );
   }
 }
