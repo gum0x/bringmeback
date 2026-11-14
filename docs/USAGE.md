@@ -122,6 +122,27 @@ Press **Pause** on the current task when you step away. The time until you press
 as a break, so the record shows the gaps between tasks too. Adding a new task on top also ends the
 break.
 
+## Daily reminders
+
+Two reminders frame the day. Turn them on in **Settings**, under **Reminders**:
+
+- **Morning reminder** (09:00 by default): "Plan your day", to bring the note up to date with what
+  you will do today.
+- **Afternoon reminder** (17:00 by default): "Start wrapping up", to close today's open tasks:
+  finish them or let them go.
+
+Each has its own switch, and the time next to it changes when it rings. Both are off until you turn
+them on; turning one on asks to show notifications. They are kept on each device and not synced, so
+the phone can ring at 08:30 while the laptop stays quiet.
+
+- **Android, iPhone and iPad, macOS:** the system rings them every day, with the app closed too.
+  The next two weeks are set at a time and topped up each time the app opens, so open it at least
+  once every two weeks.
+- **Web app, Linux, Windows:** they ring while bringmeback is open (in a tab, for the web app). A
+  reminder missed by more than 30 minutes, because the computer slept, is skipped. On the web the
+  browser must allow notifications for the site; Safari on iPhone and iPad shows them only for a web
+  app added to the home screen.
+
 ## Delete
 
 **Delete task** is in the bottom bar's ⋮ menu, for the selected task. Use it for tasks you wrote by mistake; to finish a task, check it
