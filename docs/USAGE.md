@@ -35,6 +35,11 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
   to **Write on note** a task (past the limit this asks first too) or let it go. Unfinished tasks of a
   torn-off note can also be moved there instead of written again. It is a trial and may change or
   move.
+- **Committed time**: under the date, the note adds up the expected times of all its tasks, and says
+  roughly when everything will be done if you work on without breaks, e.g. "Committed 3 h 20 min ·
+  done by ~14:45". The finish is rounded up to the quarter hour, so it doesn't tick like another
+  clock. A note holds 8 hours by default; when you commit more, the time turns red. Change it in
+  **Settings → Time per note**.
 
 ## A new day
 
@@ -61,8 +66,20 @@ it with the button on the left of the bottom bar.
 
 - **Left 19:56** is the countdown. When it runs out it turns into **+02:10 over** in red, a sound plays
   and a "Time's up" message appears.
-- **Total 00:42** is all the time worked on the task so far. "Paused" is shown next to it while work
-  is paused.
+- **Total 00:42** is all the time worked on the task so far. "Paused, not counting" is shown next to
+  it while work is paused.
+
+## Breaks
+
+Pausing starts a break. While it lasts, an **On a break** line sits on top of the note with how long
+the break has lasted and "No task clock is running", so it is clear that nothing is being counted.
+The break ends, and the line goes away, when you:
+
+- press play on the bottom bar, or **Back to work** on the break line;
+- put another task first: a **New task** on top, a task written above the current one, or a task
+  dragged above it. That task's clock starts.
+
+Writing or moving tasks lower down the note doesn't end the break.
 
 Set the countdown length in the task dialog (default 20 minutes). The bottom bar has **Restart
 countdown**, and its ⋮ menu **Reset total time**.
@@ -85,6 +102,12 @@ below or beside it, the rest of the list in a quiet **Up next**.
 - The first focus session starts as soon as the view opens, 25 minutes by default. **Pause** (or
   Space) stops the clock and **Resume** carries on. When a session ends a sound plays and a short
   break starts on its own; after every fourth session the break is a long one.
+- **The sessions fit the task.** They are cut to the time the task has left: a task with an hour
+  left gets sessions of 25, 25 and 10 minutes, and one with 20 minutes a single 20-minute session. A
+  rest of 5 minutes or less joins the session before it. Under the clock the view shows the plan,
+  e.g. "Fits the task's 1 h: 25 + 25 + 10 min of focus, 1 h 10 min with breaks". Once the task's
+  time is used up, sessions go back to full length. A task already over its time gets full
+  sessions.
 - The task's own timer runs during focus sessions and pauses during breaks or when you pause the clock,
   so the breaks are logged like any other pause.
 - While the focus view is open, the task's own countdown stays quiet: no "Time's up" and no
@@ -96,8 +119,21 @@ below or beside it, the rest of the list in a quiet **Up next**.
   **Use these lengths from now on** ticked to keep them on this device for the next focus. Under them
   the view shows what a full cycle adds up to, up to the end of the long break, and how much of it
   is focus. The defaults, with the same total, are also in **Settings**, under **Pomodoro**.
-- The back arrow (or Esc) goes back to the list. The Pomodoro clock stops there; the task's timer
-  carries on as it was.
+- The back arrow (or Esc) goes back to the list and pauses the Pomodoro; the task's timer carries
+  on as it was.
+- Each task remembers where its Pomodoro is: the phase, the time left, the sessions done and how far
+  along the plan for the task's time it is (the focus already counted and the length of the current
+  session). It is kept with the task, so it syncs to your other devices like the rest of the list.
+  Focus on the task again, here or on another device, and it picks up there, on the same plan,
+  instead of starting over and cutting a new one. A fresh plan is cut only when the Pomodoro starts
+  fresh.
+- If the app closes while the focus view is open (a crash, a closed tab, the phone ending the app),
+  the next start opens the focus view again: a running clock carries on as if nothing happened, a
+  paused one waits for **Resume**. If a phase ran out while nobody was looking, it waits at the
+  start of the next one instead of running on, and a focus session that ran out counts in full
+  towards the task's time.
+- With the focus view open on two devices, pausing, skipping or changing the lengths on one shows on
+  the other. A Pomodoro left alone for 12 hours, or one whose task was marked done, starts fresh.
 
 ## Pause and breaks
 

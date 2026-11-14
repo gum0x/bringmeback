@@ -38,6 +38,8 @@ Future<void> settle(WidgetTester tester) async {
 /// Writes a task through the dialog the button at [button] opens.
 Future<void> writeThrough(WidgetTester tester, Finder button, String name,
     {String? minutes}) async {
+  await tester.ensureVisible(button);
+  await tester.pumpAndSettle();
   await tester.tap(button);
   await tester.pumpAndSettle();
   await tester.enterText(find.widgetWithText(TextField, 'Task'), name);
@@ -309,6 +311,41 @@ void main() {
     expect(prefs.getInt('taskLimit'), minTaskLimit);
   });
 
+  noteTest('the note shows the time committed, in red past the time per note',
+      (tester, bloc) async {
+    for (var i = 0; i < 3; i++) {
+      bloc.add(InsertTaskEvent(
+          index: i, name: 'Task $i', id: ValueKey('t$i'), timerLengthSeconds: 2 * 3600));
+    }
+    await settle(tester);
+    final committed = find.byKey(const Key('committedTime'));
+    String header() => tester.widget<Text>(committed).textSpan!.toPlainText();
+    expect(header(), startsWith('Committed 6 h · done by ~'));
+    // The finish is a quarter hour, not a ticking clock.
+    expect(header(), matches(RegExp(r'~\d+:(00|15|30|45)')));
+    expect(bloc.state.overCommitted, isFalse);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('8 h'), findsOneWidget);
+    for (var i = 0; i < 5; i++) {
+      await tester.tap(find.byTooltip('Less time per note'));
+      await settle(tester);
+    }
+    expect(find.text('5 h 30 min'), findsOneWidget);
+    expect(bloc.state.noteMinutes, 5 * 60 + 30);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('noteMinutes'), 5 * 60 + 30);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(bloc.state.overCommitted, isTrue);
+    expect(header(), startsWith('Committed 6 h of 5 h 30 min · done by ~'));
+    final span = tester.widget<Text>(committed).textSpan! as TextSpan;
+    expect((span.children!.first as TextSpan).style?.color,
+        Theme.of(tester.element(committed)).colorScheme.error);
+  });
+
   noteTest('the Pomodoro lengths are set in Settings and kept', (tester, bloc) async {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
@@ -386,5 +423,65 @@ void main() {
     await tester.tap(find.textContaining('A fairly long'));
     await tester.pump(kDoubleTapTimeout);
     await settle(tester);
+  });
+
+  noteTest('pausing shows a break on top, and resuming clears it', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+        'Write report');
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.any((t) => t.running), isFalse);
+    expect(find.byKey(const ValueKey('break-line')), findsOneWidget);
+    expect(find.textContaining('On a break'), findsOneWidget);
+    expect(find.text('No task clock is running'), findsOneWidget);
+    expect(find.textContaining('Paused, not counting', findRichText: true), findsOneWidget);
+
+    // Pressing the pause button again ends the break.
+    await tester.tap(find.byTooltip('Resume work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+    expect(find.textContaining('Paused, not counting', findRichText: true), findsNothing);
+
+    // So does Back to work on the break itself.
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    await tester.tap(find.text('Back to work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+  });
+
+  noteTest('putting another task first ends the break and starts its clock', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'First');
+    await writeThrough(tester, find.text('Add a task'), 'Second');
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+
+    // Writing a task lower down is not prioritising: the break goes on.
+    await writeThrough(tester, find.text('Add a task'), 'Third');
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.any((t) => t.running), isFalse);
+
+    // Moving a task above the current one is.
+    bloc.add(MoveTaskEvent(fromIndex: 1, toIndex: 0));
+    await settle(tester);
+    expect(names(bloc).first, 'Second');
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+
+    // And so is a new task on top.
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'Phone');
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.name, 'Phone');
+    expect(bloc.state.tasks.first.running, isTrue);
   });
 }

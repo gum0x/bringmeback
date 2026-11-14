@@ -29,6 +29,9 @@ import 'tasks_bloc.dart';
 /// unfinished task of a torn-off note moved to the backlog is written as a new task instead, as
 /// when it is carried.
 ///
+/// `<taskId>/pomodoro` is where the task's Pomodoro is, as a `PomodoroRecord` in JSON, so a focus
+/// picks up where it was on any device.
+///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
 class TaskDocument {
@@ -84,6 +87,7 @@ class TaskDocument {
       totalResetAt: field<int>('totalResetAt', 0),
       entries: entries,
       inFocus: inFocus,
+      pomodoro: field<String?>('pomodoro', null),
     );
   }
 
@@ -323,6 +327,18 @@ class TaskDocument {
           ..set('$id/e/${nowSeconds()}', null);
       });
 
+  /// When the pause under way started, or null when no pause is running. Should a merge leave
+  /// more than one open, the earliest counts.
+  int? get pauseStartedAt {
+    int? start;
+    for (final id in pauseIds) {
+      for (final e in task(id).entries) {
+        if (e.end == null && (start == null || e.start < start)) start = e.start;
+      }
+    }
+    return start;
+  }
+
   /// Ends every pause still running.
   void endPauses() {
     for (final id in pauseIds) {
@@ -342,6 +358,9 @@ class TaskDocument {
           ..set('$id/timerLength', lengthSeconds)
           ..set('$id/timerStartAt', startAt);
       });
+
+  /// Keeps where the task's Pomodoro is, or forgets it with null.
+  void setPomodoro(String id, String? record) => _fields.set('$id/pomodoro', record);
 
   void setTotalResetAt(String id, int at) => _fields.set('$id/totalResetAt', at);
 

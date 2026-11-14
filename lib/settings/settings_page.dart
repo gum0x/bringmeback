@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/tasks_bloc.dart';
 import '../focus/pomodoro.dart';
 import '../sync/peer.dart' show syncProtocol;
+import '../timer.dart';
 import '../version/build_info.dart';
 import '../version/update_cubit.dart';
 
@@ -24,6 +25,7 @@ class SettingsPage extends StatelessWidget {
             children: const [
               _Section('Today\'s note'),
               _TaskLimitTile(),
+              _NoteMinutesTile(),
               _Section('Experimental'),
               _BacklogSwitch(),
               _Section('Pomodoro'),
@@ -63,6 +65,10 @@ class _StepperTile extends StatelessWidget {
   final int min;
   final int max;
   final String unit;
+  final int step;
+
+  /// Shows the value; by default the number and [unit].
+  final String Function(int value)? format;
   final String lessTooltip;
   final String moreTooltip;
   final ValueChanged<int> onChanged;
@@ -75,6 +81,8 @@ class _StepperTile extends StatelessWidget {
     required this.min,
     required this.max,
     this.unit = '',
+    this.step = 1,
+    this.format,
     required this.lessTooltip,
     required this.moreTooltip,
     required this.onChanged,
@@ -90,19 +98,21 @@ class _StepperTile extends StatelessWidget {
         children: [
           IconButton(
             tooltip: lessTooltip,
-            onPressed: value > min ? () => onChanged(value - 1) : null,
+            onPressed:
+                value > min ? () => onChanged((value - step).clamp(min, max)) : null,
             icon: const Icon(Icons.remove),
           ),
           SizedBox(
-            width: unit.isEmpty ? 32 : 64,
-            child: Text(unit.isEmpty ? '$value' : '$value $unit',
+            width: format != null ? 96 : (unit.isEmpty ? 32 : 64),
+            child: Text(format?.call(value) ?? (unit.isEmpty ? '$value' : '$value $unit'),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontFeatures: const [FontFeature.tabularFigures()])),
           ),
           IconButton(
             tooltip: moreTooltip,
-            onPressed: value < max ? () => onChanged(value + 1) : null,
+            onPressed:
+                value < max ? () => onChanged((value + step).clamp(min, max)) : null,
             icon: const Icon(Icons.add),
           ),
         ],
@@ -149,6 +159,32 @@ class _TaskLimitTile extends StatelessWidget {
         lessTooltip: 'Lower task limit',
         moreTooltip: 'Higher task limit',
         onChanged: (limit) => bloc.add(SetTaskLimitEvent(limit)),
+      ),
+    );
+  }
+}
+
+class _NoteMinutesTile extends StatelessWidget {
+  const _NoteMinutesTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => a.noteMinutes != b.noteMinutes,
+      builder: (context, state) => _StepperTile(
+        key: const Key('noteMinutes'),
+        title: 'Time per note',
+        subtitle: 'The expected times of the tasks on a note, added up. '
+            'Committing more shows in red.',
+        value: state.noteMinutes,
+        min: minNoteMinutes,
+        max: maxNoteMinutes,
+        step: noteMinutesStep,
+        format: formatMinutes,
+        lessTooltip: 'Less time per note',
+        moreTooltip: 'More time per note',
+        onChanged: (minutes) => bloc.add(SetNoteMinutesEvent(minutes)),
       ),
     );
   }

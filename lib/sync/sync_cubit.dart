@@ -83,6 +83,12 @@ class SyncState {
   /// True when no relay could be reached for a while: then no device can be found.
   final bool relaysUnreachable;
 
+  /// The device ids of the connected devices that have every change this one has, and no other.
+  final Set<String> inSync;
+
+  /// When a connected device was last confirmed in sync, in this run of the app.
+  final DateTime? lastSynced;
+
   const SyncState(
       {this.device,
       this.pairing,
@@ -96,7 +102,9 @@ class SyncState {
       this.builds = const {},
       this.relaysUp = 0,
       this.relayCount = 0,
-      this.relaysUnreachable = false});
+      this.relaysUnreachable = false,
+      this.inSync = const {},
+      this.lastSynced});
 
   bool get paired => pairing != null;
 
@@ -108,7 +116,9 @@ class SyncState {
           Map<String, BuildInfo>? builds,
           int? relaysUp,
           int? relayCount,
-          bool? relaysUnreachable}) =>
+          bool? relaysUnreachable,
+          Set<String>? inSync,
+          DateTime? lastSynced}) =>
       SyncState(
           device: device,
           pairing: pairing,
@@ -122,7 +132,12 @@ class SyncState {
           builds: builds ?? this.builds,
           relaysUp: relaysUp ?? this.relaysUp,
           relayCount: relayCount ?? this.relayCount,
-          relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable);
+          relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable,
+          inSync: inSync ?? this.inSync,
+          lastSynced: lastSynced ?? this.lastSynced);
+
+  /// Whether every connected device is in sync. False with none connected.
+  bool get allInSync => connected.isNotEmpty && connected.every(inSync.contains);
 }
 
 class SyncCubit extends Cubit<SyncState> {
@@ -179,24 +194,32 @@ class SyncCubit extends Cubit<SyncState> {
         super(const SyncState()) {
     document?.then((doc) {
       if (isClosed) return;
-      final sync = DocumentSync(doc);
-      _sync = sync;
-      for (final link in _links.values) {
-        if (link.isConnected) sync.attach(link);
-      }
+      _start(DocumentSync(doc));
     });
+  }
+
+  /// Syncs through `sync` from now on, over every connected link.
+  void _start(DocumentSync sync) {
+    _sync = sync;
+    sync.inSync.listen((links) {
+      if (_sync != sync) return;
+      final ids = {
+        for (final link in links)
+          if (_links[_id(link.remoteDevice)] == link) _id(link.remoteDevice),
+      };
+      _emit(state.copyWith(inSync: ids, lastSynced: ids.isEmpty ? null : DateTime.now()));
+    });
+    for (final link in _links.values) {
+      if (link.isConnected) sync.attach(link);
+    }
   }
 
   /// Syncs `doc` from now on instead of the document it synced before, after the task list replaced
   /// its document (see `TasksBloc.clearAll`).
   Future<void> useDocument(CRDTDocument doc) async {
     final old = _sync;
-    final sync = DocumentSync(doc);
-    _sync = sync;
+    _start(DocumentSync(doc));
     await old?.close();
-    for (final link in _links.values) {
-      if (link.isConnected) sync.attach(link);
-    }
   }
 
   /// The app went to the background.
@@ -309,6 +332,7 @@ class SyncCubit extends Cubit<SyncState> {
         _emit(state.copyWith(
             online: {...state.online}..remove(device),
             connected: {...state.connected}..remove(device),
+            inSync: {...state.inSync}..remove(device),
             problems: {...state.problems}..remove(device)));
       case SignalKind.offer:
         // Only the device that doesn't initiate takes offers, so two devices never cross offers.
@@ -389,6 +413,7 @@ class SyncCubit extends Cubit<SyncState> {
       _emit(state.copyWith(
           builds: build == null ? null : {...state.builds, id: build},
           connected: {...state.connected}..remove(id),
+          inSync: {...state.inSync}..remove(id),
           problems: failure == null
               ? null
               : {
@@ -432,7 +457,7 @@ class SyncCubit extends Cubit<SyncState> {
     final links = _links.values.toList();
     _links.clear();
     await Future.wait(links.map((l) => l.close()));
-    _emit(state.copyWith(connected: const {}));
+    _emit(state.copyWith(connected: const {}, inSync: const {}));
   }
 
   void _emit(SyncState next) {

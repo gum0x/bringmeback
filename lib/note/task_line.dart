@@ -574,10 +574,96 @@ class TaskClock extends StatelessWidget {
           ),
         ),
         Text(
-          'Total ${formatClock(totalSeconds)}${paused ? ' · Paused' : ''}',
+          'Total ${formatClock(totalSeconds)}',
           style: small,
         ),
+        if (paused)
+          Text.rich(
+            TextSpan(children: [
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Icon(Icons.pause,
+                    size: 16, color: theme.colorScheme.tertiary),
+              ),
+              const TextSpan(text: 'Paused, not counting'),
+            ]),
+            style: small?.copyWith(
+                color: theme.colorScheme.tertiary, fontWeight: FontWeight.w600),
+          ),
       ],
+    );
+  }
+}
+
+/// Shown on top of the note while on a break: how long the break has lasted, and that no task's
+/// clock is running. It goes away when work resumes, from here or the pause button, or when another
+/// task is put first.
+class BreakLine extends StatelessWidget {
+  final TasksState state;
+
+  const BreakLine({super.key, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = NoteColors.of(context);
+    final current = state.currentIndex;
+    final seconds = state.breakSecondsAt(nowSeconds());
+    final small = theme.textTheme.bodyMedium?.copyWith(
+      color: colors.faded,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'On a break. No task clock is running.',
+      child: Container(
+        key: const ValueKey('break-line'),
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.55),
+          border: Border(bottom: BorderSide(color: colors.rule)),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 30,
+              child: Icon(Icons.coffee_outlined,
+                  size: 20, color: theme.colorScheme.onTertiaryContainer),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'On a break · ${formatClock(seconds)}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: colors.ink,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  Text('No task clock is running', style: small),
+                ],
+              ),
+            ),
+            if (current >= 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: TextButton.icon(
+                  onPressed: () => context
+                      .read<TasksBloc>()
+                      .add(ResumeTimerEvent(index: current)),
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('Back to work'),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

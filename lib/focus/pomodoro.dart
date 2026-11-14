@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../ticker.dart';
+import '../timer.dart';
 
 /// The lengths of a Pomodoro cycle, in minutes. Kept on this device, like mute.
 class PomodoroSettings {
@@ -99,14 +103,51 @@ enum PomodoroPhase {
   bool get isBreak => this != PomodoroPhase.work;
 }
 
+/// The focus sessions that fit [taskSeconds]: full sessions of [workSeconds], and the rest in a
+/// shorter last one. A rest of 5 minutes or less joins the session before it rather than making a
+/// slice too short to start on.
+List<int> sliceTask(int taskSeconds, int workSeconds) {
+  final slices = <int>[];
+  var left = taskSeconds;
+  while (left > 0) {
+    final slice = left - workSeconds <= _smallestSlice ? left : workSeconds;
+    slices.add(slice);
+    left -= slice;
+  }
+  return slices;
+}
+
+const _smallestSlice = 5 * 60;
+
+/// How long the session should be after [focusedSeconds] of focus on a task with [taskSeconds]
+/// given: the next slice of [sliceTask], or a full session when there is no task time, or it is
+/// used up.
+int workSecondsFor(PomodoroSettings settings, int? taskSeconds, int focusedSeconds) {
+  final work = settings.secondsFor(PomodoroPhase.work);
+  if (taskSeconds == null) return work;
+  final left = taskSeconds - focusedSeconds;
+  if (left <= 0) return work;
+  return sliceTask(left, work).first;
+}
+
 class PomodoroState {
   final PomodoroSettings settings;
   final PomodoroPhase phase;
   final int remainingSeconds;
   final bool running;
 
-  /// Work sessions finished since the focus view opened.
+  /// Work sessions finished on this task, since its focus began.
   final int completedSessions;
+
+  /// The time the task has left, when focus started; the sessions are cut to fit it. Null when the
+  /// task has no time left to fit.
+  final int? taskSeconds;
+
+  /// Focus time from sessions already over, counted against [taskSeconds].
+  final int focusedSeconds;
+
+  /// The length of the current focus session: a full one, or a slice of the task's time.
+  final int workSeconds;
 
   const PomodoroState({
     required this.settings,
@@ -114,17 +155,39 @@ class PomodoroState {
     required this.remainingSeconds,
     required this.running,
     required this.completedSessions,
+    this.taskSeconds,
+    this.focusedSeconds = 0,
+    required this.workSeconds,
   });
 
-  factory PomodoroState.initial(PomodoroSettings settings) => PomodoroState(
-        settings: settings,
-        phase: PomodoroPhase.work,
-        remainingSeconds: settings.secondsFor(PomodoroPhase.work),
-        running: false,
-        completedSessions: 0,
-      );
+  factory PomodoroState.initial(PomodoroSettings settings, {int? taskSeconds}) {
+    final work = workSecondsFor(settings, taskSeconds, 0);
+    return PomodoroState(
+      settings: settings,
+      phase: PomodoroPhase.work,
+      remainingSeconds: work,
+      running: false,
+      completedSessions: 0,
+      taskSeconds: taskSeconds,
+      workSeconds: work,
+    );
+  }
 
-  int get phaseSeconds => settings.secondsFor(phase);
+  int get phaseSeconds =>
+      phase == PomodoroPhase.work ? workSeconds : settings.secondsFor(phase);
+
+  /// The focus sessions planned for the task's time, from the start: e.g. 25, 25 and 10 minutes for
+  /// an hour. Empty when there is no task time to fit.
+  List<int> get taskSlices {
+    final task = taskSeconds;
+    return task == null ? const [] : sliceTask(task, settings.secondsFor(PomodoroPhase.work));
+  }
+
+  /// Whether the focus time already covers all the task's time.
+  bool get taskTimeUsed {
+    final task = taskSeconds;
+    return task != null && focusedSeconds >= task;
+  }
 
   /// How much of the phase is done, from 0 to 1.
   double get progress =>
@@ -136,6 +199,7 @@ class PomodoroState {
     int? remainingSeconds,
     bool? running,
     int? completedSessions,
+    int? workSeconds,
   }) =>
       PomodoroState(
         settings: settings ?? this.settings,
@@ -143,6 +207,9 @@ class PomodoroState {
         remainingSeconds: remainingSeconds ?? this.remainingSeconds,
         running: running ?? this.running,
         completedSessions: completedSessions ?? this.completedSessions,
+        taskSeconds: taskSeconds,
+        focusedSeconds: focusedSeconds,
+        workSeconds: workSeconds ?? this.workSeconds,
       );
 }
 
@@ -152,21 +219,46 @@ class PomodoroState {
 /// shows the right time. A phase that runs out moves on to the next one, which starts running.
 class PomodoroCubit extends Cubit<PomodoroState> {
   final DateTime Function() _now;
-  Timer? _tick;
+  SecondTicker? _tick;
   // When the running phase ends; null while paused.
   DateTime? _endsAt;
   final StreamController<PomodoroPhase> _phaseStarted =
       StreamController<PomodoroPhase>.broadcast();
 
+  /// Starts from [resumeFrom] when given, else from a fresh focus session of [settings], cut to
+  /// fit [taskSeconds], the time the task has left. A running [resumeFrom] needs [endsAt], when its
+  /// phase ends; without it, it comes back paused.
   PomodoroCubit({
     PomodoroSettings settings = const PomodoroSettings(),
+    int? taskSeconds,
+    PomodoroState? resumeFrom,
+    DateTime? endsAt,
     DateTime Function()? now,
     bool startTicking = true,
   })  : _now = now ?? DateTime.now,
-        super(PomodoroState.initial(settings)) {
+        _endsAt = resumeFrom?.running == true ? endsAt : null,
+        super(resumeFrom == null
+            ? PomodoroState.initial(settings,
+                taskSeconds: taskSeconds == null || taskSeconds <= 0
+                    ? null
+                    : taskSeconds)
+            : resumeFrom.copyWith(
+                running: resumeFrom.running && endsAt != null)) {
     if (startTicking) {
-      _tick = Timer.periodic(const Duration(seconds: 1), (_) => tick());
+      // The countdown turns over at the end time's milliseconds, not the wall clock's.
+      _tick = SecondTicker(tick,
+          turnoverMs: () => (_endsAt?.millisecondsSinceEpoch ?? 0) % 1000);
     }
+  }
+
+  /// When the running phase ends; null while paused.
+  DateTime? get endsAt => _endsAt;
+
+  /// Takes on a clock changed elsewhere, on another device, without the sound of a new phase:
+  /// that device made it.
+  void apply(PomodoroState state, DateTime? endsAt) {
+    _endsAt = state.running ? endsAt : null;
+    emit(state.copyWith(running: _endsAt != null));
   }
 
   /// Each phase the clock moves into when the previous one runs out or is skipped, after the
@@ -202,10 +294,12 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   void updateSettings(PomodoroSettings settings) {
     final untouched =
         !state.running && state.remainingSeconds == state.phaseSeconds;
-    emit(state.copyWith(
-      settings: settings,
-      remainingSeconds: untouched ? settings.secondsFor(state.phase) : null,
-    ));
+    final work =
+        workSecondsFor(settings, state.taskSeconds, state.focusedSeconds);
+    final next = state.copyWith(
+        settings: settings, workSeconds: untouched ? work : null);
+    emit(next.copyWith(
+        remainingSeconds: untouched ? next.phaseSeconds : null));
   }
 
   /// Brings the shown time up to date, and moves on when the phase has run out.
@@ -219,6 +313,10 @@ class PomodoroCubit extends Cubit<PomodoroState> {
     }
   }
 
+  /// What was worked of the current focus session: all of it unless it ends early.
+  int _workedSeconds() =>
+      state.phase == PomodoroPhase.work ? state.workSeconds - _remaining() : 0;
+
   int _remaining() {
     final endsAt = _endsAt;
     if (endsAt == null) return state.remainingSeconds;
@@ -230,27 +328,12 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   /// The phase after the current one. A skipped work session counts as done too: skipping says
   /// "I'm finished with this one".
   void _advance({required bool running}) {
-    final s = state;
-    PomodoroPhase next;
-    var completed = s.completedSessions;
-    if (s.phase == PomodoroPhase.work) {
-      completed++;
-      next = completed % s.settings.sessionsBeforeLongBreak == 0
-          ? PomodoroPhase.longBreak
-          : PomodoroPhase.shortBreak;
-    } else {
-      next = PomodoroPhase.work;
-    }
-    final seconds = s.settings.secondsFor(next);
-    _endsAt = running ? _now().add(Duration(seconds: seconds)) : null;
-    emit(PomodoroState(
-      settings: s.settings,
-      phase: next,
-      remainingSeconds: seconds,
-      running: running,
-      completedSessions: completed,
-    ));
-    _phaseStarted.add(next);
+    final next =
+        nextPhase(state, running: running, workedSeconds: _workedSeconds());
+    _endsAt =
+        running ? _now().add(Duration(seconds: next.remainingSeconds)) : null;
+    emit(next);
+    _phaseStarted.add(next.phase);
   }
 
   @override
@@ -261,11 +344,170 @@ class PomodoroCubit extends Cubit<PomodoroState> {
   }
 }
 
-/// Minutes as "45 min", "2 h" or "2 h 10 min".
-String formatMinutes(int minutes) {
-  final h = minutes ~/ 60, m = minutes % 60;
-  if (h == 0) return '$m min';
-  return m == 0 ? '$h h' : '$h h $m min';
+/// Where a task's Pomodoro is, as kept in the task document (`<taskId>/pomodoro`), so it syncs
+/// with the task: leave the view, crash, or pick up the phone, and the focus picks up there.
+///
+/// It is written when something happens (start, pause, skip, a new phase, new lengths, leaving the
+/// view), never per second: a running clock is kept as when its phase ends, a paused one as the
+/// time left.
+class PomodoroRecord {
+  final PomodoroState state;
+
+  /// When the running phase ends, by the wall clock; null while paused.
+  final DateTime? endsAt;
+
+  /// Whether a focus view is open on it. One still open when the app starts was cut short.
+  final bool open;
+  final DateTime savedAt;
+
+  /// A record not touched for this long is forgotten: the next focus starts fresh.
+  static const maxAge = Duration(hours: 12);
+
+  const PomodoroRecord(
+      {required this.state,
+      required this.endsAt,
+      required this.open,
+      required this.savedAt});
+
+  /// The settled part of the record, without when it was written: two records with the same key
+  /// say the same thing.
+  Map<String, Object?> get _key => {
+        'phase': state.phase.name,
+        'completed': state.completedSessions,
+        'work': state.settings.workMinutes,
+        'shortBreak': state.settings.shortBreakMinutes,
+        'longBreak': state.settings.longBreakMinutes,
+        'sessions': state.settings.sessionsBeforeLongBreak,
+        if (state.taskSeconds case final t?) 'taskSeconds': t,
+        'focused': state.focusedSeconds,
+        'workSeconds': state.workSeconds,
+        if (endsAt case final e?)
+          'endsAt': e.millisecondsSinceEpoch
+        else
+          'remaining': state.remainingSeconds,
+        'open': open,
+      };
+
+  String get key => jsonEncode(_key);
+
+  String encode() =>
+      jsonEncode({..._key, 'savedAt': savedAt.millisecondsSinceEpoch});
+
+  /// Reads a record, or null when [encoded] is missing, doesn't read (another device's changes are
+  /// untrusted) or is older than [maxAge].
+  static PomodoroRecord? decode(String? encoded, {DateTime? now}) {
+    if (encoded == null) return null;
+    try {
+      final m = jsonDecode(encoded) as Map<String, dynamic>;
+      final savedAt = DateTime.fromMillisecondsSinceEpoch(m['savedAt'] as int);
+      if ((now ?? DateTime.now()).difference(savedAt) >= maxAge) return null;
+      final settings = PomodoroSettings(
+        workMinutes: m['work'] as int,
+        shortBreakMinutes: m['shortBreak'] as int,
+        longBreakMinutes: m['longBreak'] as int,
+        sessionsBeforeLongBreak: m['sessions'] as int,
+      );
+      if ([
+        settings.workMinutes,
+        settings.shortBreakMinutes,
+        settings.longBreakMinutes,
+        settings.sessionsBeforeLongBreak
+      ].any((v) => v <= 0 || v > 999)) {
+        return null;
+      }
+      final phase = PomodoroPhase.values.byName(m['phase'] as String);
+      final endsAt = switch (m['endsAt']) {
+        int ms => DateTime.fromMillisecondsSinceEpoch(ms),
+        _ => null,
+      };
+      final remaining = switch (m['remaining']) { int r => r, _ => null };
+      if (endsAt == null && remaining == null) return null;
+      final completed = m['completed'] as int;
+      final taskSeconds = switch (m['taskSeconds']) {
+        int t when t > 0 => t,
+        _ => null,
+      };
+      final focused = switch (m['focused']) { int f when f > 0 => f, _ => 0 };
+      final full = settings.secondsFor(PomodoroPhase.work);
+      final work = switch (m['workSeconds']) {
+        int w when w > 0 && w <= full + _smallestSlice => w,
+        _ => workSecondsFor(settings, taskSeconds, focused),
+      };
+      final phaseSeconds =
+          phase == PomodoroPhase.work ? work : settings.secondsFor(phase);
+      return PomodoroRecord(
+        state: PomodoroState(
+          settings: settings,
+          phase: phase,
+          remainingSeconds: (remaining ?? phaseSeconds).clamp(1, phaseSeconds),
+          running: endsAt != null,
+          completedSessions: completed < 0 ? 0 : completed,
+          taskSeconds: taskSeconds,
+          focusedSeconds: focused,
+          workSeconds: work,
+        ),
+        endsAt: endsAt,
+        open: m['open'] == true,
+        savedAt: savedAt,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The clock as it stands at [now]. A running phase that ended meanwhile, with nobody watching,
+  /// doesn't roll on through more phases: it waits, paused, at the start of the next one.
+  (PomodoroState, DateTime?) at(DateTime now) {
+    final endsAt = this.endsAt;
+    if (endsAt == null) return (state.copyWith(running: false), null);
+    final ms = endsAt.difference(now).inMilliseconds;
+    if (ms > 0) {
+      return (
+        state.copyWith(
+            running: true,
+            remainingSeconds:
+                ((ms + 999) ~/ 1000).clamp(1, state.phaseSeconds)),
+        endsAt
+      );
+    }
+    return (
+      nextPhase(state,
+          running: false,
+          workedSeconds:
+              state.phase == PomodoroPhase.work ? state.workSeconds : 0),
+      null
+    );
+  }
+}
+
+/// The phase after [s]'s, at its full length. A work session left counts as done, with
+/// [workedSeconds] of it counted against the task's time.
+PomodoroState nextPhase(PomodoroState s,
+    {required bool running, required int workedSeconds}) {
+  var completed = s.completedSessions;
+  var focused = s.focusedSeconds;
+  final PomodoroPhase next;
+  if (s.phase == PomodoroPhase.work) {
+    completed++;
+    focused += workedSeconds;
+    next = completed % s.settings.sessionsBeforeLongBreak == 0
+        ? PomodoroPhase.longBreak
+        : PomodoroPhase.shortBreak;
+  } else {
+    next = PomodoroPhase.work;
+  }
+  final work = workSecondsFor(s.settings, s.taskSeconds, focused);
+  return PomodoroState(
+    settings: s.settings,
+    phase: next,
+    remainingSeconds:
+        next == PomodoroPhase.work ? work : s.settings.secondsFor(next),
+    running: running,
+    completedSessions: completed,
+    taskSeconds: s.taskSeconds,
+    focusedSeconds: focused,
+    workSeconds: work,
+  );
 }
 
 /// What a whole cycle of [settings] adds up to, e.g. "Full cycle 2 h 10 min: 1 h 40 min of focus in
@@ -275,4 +517,23 @@ String describeCycle(PomodoroSettings settings) {
   return 'Full cycle ${formatMinutes(settings.cycleMinutes)}: '
       '${formatMinutes(settings.cycleFocusMinutes)} of focus in $sessions '
       '${sessions == 1 ? 'session' : 'sessions'}';
+}
+
+/// The plan for a task's time, e.g. "Fits the task's 1 h: 25 + 25 + 10 min of focus, 1 h 10 min
+/// with breaks". Null when there is no task time to fit.
+String? describeTaskPlan(PomodoroState state) {
+  final task = state.taskSeconds;
+  if (task == null) return null;
+  final slices = [for (final s in state.taskSlices) (s / 60).round()];
+  final settings = state.settings;
+  var breaks = 0;
+  for (var i = 1; i < slices.length; i++) {
+    breaks += i % settings.sessionsBeforeLongBreak == 0
+        ? settings.longBreakMinutes
+        : settings.shortBreakMinutes;
+  }
+  final focus = slices.fold(0, (a, b) => a + b);
+  return "Fits the task's ${formatMinutes((task / 60).round())}: "
+      '${slices.join(' + ')} min of focus'
+      '${breaks == 0 ? '' : ', ${formatMinutes(focus + breaks)} with breaks'}';
 }

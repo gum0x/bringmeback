@@ -8,6 +8,7 @@ import '../version/build_info.dart';
 import 'pairing.dart';
 import 'peer.dart' show syncProtocol;
 import 'sync_cubit.dart';
+import 'sync_status.dart';
 
 /// Pairs this device with others. Every device in a group shares the same group secret.
 class SyncPage extends StatelessWidget {
@@ -101,7 +102,7 @@ class SyncPage extends StatelessWidget {
             subtitle: Text(state.online.isEmpty
                 ? 'Open bringmeback on another device in this group.'
                 : state.connected.length == state.online.length
-                    ? 'Syncing directly, end to end encrypted.'
+                    ? '${SyncStatus.of(state).label}. Directly, end to end encrypted.'
                     : '${state.connected.length} of ${state.online.length} connected directly. '
                         'Devices connect only when they are on the same network.'),
           ),
