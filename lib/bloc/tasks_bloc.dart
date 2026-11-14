@@ -153,9 +153,14 @@ class TasksState {
   /// How much time a note may hold, in minutes, set in Settings.
   final int noteMinutes;
 
+  /// When the break under way started, or null while working or when no break was logged. During
+  /// a break no task's clock runs.
+  final int? breakStartedAt;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
+      this.breakStartedAt,
       this.noteLines = defaultNoteLines,
       this.noteMinutes = defaultNoteMinutes,
       int? noteStartedAt,
@@ -172,7 +177,16 @@ class TasksState {
       loaded: loaded,
       noteLines: noteLines,
       noteMinutes: noteMinutes,
+      breakStartedAt: breakStartedAt,
     );
+  }
+
+  bool get onBreak => breakStartedAt != null;
+
+  /// How long the break under way has lasted, or 0 when there is none.
+  int breakSecondsAt(int now) {
+    final start = breakStartedAt;
+    return start == null || now < start ? 0 : now - start;
   }
 
   /// The index of the task being worked on: the first one not checked off, or -1.
@@ -496,9 +510,11 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       return TasksState(
           tasks: [], muted: _muted, noteLines: _noteLines, noteMinutes: _noteMinutes);
     }
+    final tasks = doc.tasks(focusId: _focusId);
     return TasksState(
-      tasks: doc.tasks(focusId: _focusId),
+      tasks: tasks,
       muted: _muted,
+      breakStartedAt: tasks.any((t) => t.running) ? null : doc.pauseStartedAt,
       noteLines: _noteLines,
       noteMinutes: _noteMinutes,
       noteStartedAt: doc.noteStartedAt,
@@ -564,13 +580,23 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _edit(emit, (doc) {
       if (doc.ids.length >= _noteLines) return;
       final working = _working(doc);
+      final current = _currentId(doc);
       doc.insert(index.clamp(0, doc.ids.length), id,
           name: name,
           notes: notes,
           timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
-      _runTop(doc, working);
+      _runTop(doc, working || _breakEndsFor(doc, current));
       _focusId = id;
     });
+  }
+
+  /// Whether a break under way ends because a task other than [previousCurrent] was put first:
+  /// prioritising a task means getting back to work on it.
+  bool _breakEndsFor(TaskDocument doc, String? previousCurrent) {
+    final current = _currentId(doc);
+    return current != null &&
+        current != previousCurrent &&
+        doc.pauseStartedAt != null;
   }
 
   /// Checking off the current task hands the timer on to the next unchecked one; unchecking a task
@@ -674,12 +700,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _saveState();
   }
 
-  /// Moving an unchecked task above the current one makes it the one being worked on.
+  /// Moving an unchecked task above the current one makes it the one being worked on. During a
+  /// break that also ends the break and starts its clock.
   void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
       final working = _working(doc);
+      final current = _currentId(doc);
       doc.move(event.fromIndex, event.toIndex);
-      _runTop(doc, working);
+      _runTop(doc, working || _breakEndsFor(doc, current));
     });
   }
 

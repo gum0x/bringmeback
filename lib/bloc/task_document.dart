@@ -257,6 +257,18 @@ class TaskDocument {
           ..set('$id/e/${nowSeconds()}', null);
       });
 
+  /// When the pause under way started, or null when no pause is running. Should a merge leave
+  /// more than one open, the earliest counts.
+  int? get pauseStartedAt {
+    int? start;
+    for (final id in pauseIds) {
+      for (final e in task(id).entries) {
+        if (e.end == null && (start == null || e.start < start)) start = e.start;
+      }
+    }
+    return start;
+  }
+
   /// Ends every pause still running.
   void endPauses() {
     for (final id in pauseIds) {

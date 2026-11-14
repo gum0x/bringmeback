@@ -59,8 +59,20 @@ it with the button on the left of the bottom bar.
 
 - **Left 19:56** is the countdown. When it runs out it turns into **+02:10 over** in red, a sound plays
   and a "Time's up" message appears.
-- **Total 00:42** is all the time worked on the task so far. "Paused" is shown next to it while work
-  is paused.
+- **Total 00:42** is all the time worked on the task so far. "Paused, not counting" is shown next to
+  it while work is paused.
+
+## Breaks
+
+Pausing starts a break. While it lasts, an **On a break** line sits on top of the note with how long
+the break has lasted and "No task clock is running", so it is clear that nothing is being counted.
+The break ends, and the line goes away, when you:
+
+- press play on the bottom bar, or **Back to work** on the break line;
+- put another task first: a **New task** on top, a task written above the current one, or a task
+  dragged above it. That task's clock starts.
+
+Writing or moving tasks lower down the note doesn't end the break.
 
 Set the countdown length in the task dialog (default 20 minutes). The bottom bar has **Restart
 countdown**, and its ⋮ menu **Reset total time**.

@@ -281,4 +281,64 @@ void main() {
     await tester.pump(kDoubleTapTimeout);
     await settle(tester);
   });
+
+  noteTest('pausing shows a break on top, and resuming clears it', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+        'Write report');
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.any((t) => t.running), isFalse);
+    expect(find.byKey(const ValueKey('break-line')), findsOneWidget);
+    expect(find.textContaining('On a break'), findsOneWidget);
+    expect(find.text('No task clock is running'), findsOneWidget);
+    expect(find.textContaining('Paused, not counting', findRichText: true), findsOneWidget);
+
+    // Pressing the pause button again ends the break.
+    await tester.tap(find.byTooltip('Resume work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+    expect(find.textContaining('Paused, not counting', findRichText: true), findsNothing);
+
+    // So does Back to work on the break itself.
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    await tester.tap(find.text('Back to work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+  });
+
+  noteTest('putting another task first ends the break and starts its clock', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'First');
+    await writeThrough(tester, find.text('Add a task'), 'Second');
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+
+    // Writing a task lower down is not prioritising: the break goes on.
+    await writeThrough(tester, find.text('Add a task'), 'Third');
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.any((t) => t.running), isFalse);
+
+    // Moving a task above the current one is.
+    bloc.add(MoveTaskEvent(fromIndex: 1, toIndex: 0));
+    await settle(tester);
+    expect(names(bloc).first, 'Second');
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+
+    // And so is a new task on top.
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'Phone');
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.name, 'Phone');
+    expect(bloc.state.tasks.first.running, isTrue);
+  });
 }
