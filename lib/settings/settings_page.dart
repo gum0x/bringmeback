@@ -150,9 +150,9 @@ class _TaskLimitTile extends StatelessWidget {
     return BlocBuilder<TasksBloc, TasksState>(
       buildWhen: (a, b) => a.taskLimit != b.taskLimit,
       builder: (context, state) => _StepperTile(
-        title: 'Open tasks before asking',
-        subtitle: 'A short list keeps the day focused. Past this many tasks not done yet, a new '
-            'task asks first: write it anyway, or let it go. Done tasks don\'t count.',
+        title: 'Tasks per note before asking',
+        subtitle: 'A short list keeps the day focused. Past this many tasks on today\'s note, a '
+            'new task asks first: write it anyway, or let it go. Done tasks count too.',
         value: state.taskLimit,
         min: minTaskLimit,
         max: maxTaskLimit,

@@ -151,8 +151,9 @@ class TasksState {
   /// Whether the document has loaded.
   final bool loaded;
 
-  /// How many unfinished tasks the note holds before writing another one asks first, set in
-  /// Settings.
+  /// How many tasks the note holds before writing another one asks first, set in Settings. Done
+  /// tasks count too: the limit is on what a day commits to, and checking tasks off doesn't make
+  /// room for more.
   final int taskLimit;
 
   /// Whether the experimental backlog is on, set in Settings. Off, the backlog is hidden and the
@@ -208,8 +209,12 @@ class TasksState {
   /// How many tasks on the note are not done yet.
   int get openCount => tasks.where((t) => !t.done).length;
 
-  /// Whether writing one more task would go over the limit, so the app asks first.
-  bool get atLimit => openCount >= taskLimit;
+  /// Whether writing one more task would go over the limit, so the app asks first. Every task on
+  /// the note counts, done ones included.
+  bool get atLimit => tasks.length >= taskLimit;
+
+  /// Whether the note holds more tasks than the limit: more was committed to than planned.
+  bool get overLimit => tasks.length > taskLimit;
 
   /// The time committed to on this note: the expected times of all its tasks, done ones included.
   int get committedSeconds => tasks.fold(0, (sum, t) => sum + t.timerLengthSeconds);

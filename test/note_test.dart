@@ -4,6 +4,7 @@ import 'package:bringmeback/bloc/tasks_bloc.dart';
 import 'package:bringmeback/focus/pomodoro.dart';
 import 'package:bringmeback/main.dart';
 import 'package:bringmeback/note/note_view.dart';
+import 'package:bringmeback/note/task_line.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -257,14 +258,45 @@ void main() {
     expect(bloc.state.tasks, hasLength(defaultTaskLimit + 1));
   });
 
-  noteTest('done tasks don\'t count towards the limit', (tester, bloc) async {
+  noteTest('done tasks count towards the limit: checking off makes no room', (tester, bloc) async {
     await fill(tester, bloc, defaultTaskLimit);
     bloc.add(SetDoneEvent(index: 0, done: true));
     await settle(tester);
-    expect(bloc.state.atLimit, isFalse);
+    expect(bloc.state.atLimit, isTrue);
     await writeThrough(tester, find.text('Add a task'), 'One more');
-    expect(find.text('Your note is at its limit'), findsNothing);
-    expect(names(bloc), contains('One more'));
+    expect(find.text('Your note is at its limit'), findsOneWidget);
+    expect(find.textContaining('already has $defaultTaskLimit tasks, done ones included'),
+        findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+    expect(names(bloc), isNot(contains('One more')));
+  });
+
+  noteTest('over the limit, the header counts every task and warns of over-committing',
+      (tester, bloc) async {
+    // As reported: 14 tasks, 6 of them done, on a limit of 7.
+    await fill(tester, bloc, 14);
+    for (var i = 0; i < 6; i++) {
+      bloc.add(SetDoneEvent(index: i, done: true));
+    }
+    await settle(tester);
+    expect(bloc.state.overLimit, isTrue);
+    expect(find.text('6 of 14 done'), findsOneWidget);
+    final warning = find.byKey(const Key('overLimit'));
+    expect(warning, findsOneWidget);
+    expect(
+        find.descendant(
+            of: warning,
+            matching: find.textContaining(
+                'Over-committed: 14 tasks, over your limit of $defaultTaskLimit')),
+        findsOneWidget);
+    expect(find.textContaining('8 open'), findsNothing);
+  });
+
+  noteTest('at the limit, the header says so quietly, with no warning', (tester, bloc) async {
+    await fill(tester, bloc, defaultTaskLimit);
+    expect(find.textContaining('at your limit of $defaultTaskLimit tasks'), findsOneWidget);
+    expect(find.byKey(const Key('overLimit')), findsNothing);
   });
 
   noteTest('a backlog task is written on the note, or removed', (tester, bloc) async {
@@ -540,4 +572,85 @@ void main() {
     expect(bloc.state.tasks.first.name, 'Phone');
     expect(bloc.state.tasks.first.running, isTrue);
   });
+
+  noteTest('a right click on a task opens its menu with the bottom bar\'s actions',
+      (tester, bloc) async {
+    await fill(tester, bloc, 3);
+    await tester.tap(find.text('Task 1'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    for (final label in [
+      'Focus with Pomodoro',
+      'Restart countdown',
+      'Edit task',
+      'Reset total time',
+      'Delete task',
+    ]) {
+      expect(find.widgetWithText(PopupMenuItem<TaskMenuAction>, label), findsOneWidget,
+          reason: label);
+    }
+    // Not the current task, so play/pause, which acts on the current one, is not offered.
+    expect(find.text('Resume work'), findsNothing);
+    // Opening the menu selects the task, so the bottom bar acts on it as well.
+    expect(bloc.state.tasks[1].inFocus, isTrue);
+
+    await tester.tap(find.text('Delete task'));
+    await settle(tester);
+    expect(names(bloc), ['Task 0', 'Task 2']);
+    expect(find.text('Deleted: Task 1'), findsOneWidget);
+  });
+
+  noteTest('a long press on the current task opens its menu, with pause', (tester, bloc) async {
+    await fill(tester, bloc, 2);
+    bloc.add(ResumeTimerEvent(index: 0));
+    await settle(tester);
+    expect(bloc.state.tasks[0].running, isTrue);
+
+    await tester.longPress(find.text('Task 0'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit task'), findsOneWidget);
+    await tester.tap(find.text('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.tasks[0].running, isFalse);
+    expect(bloc.state.onBreak, isTrue);
+
+    await tester.longPress(find.text('Task 0'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Resume work'));
+    await settle(tester);
+    expect(bloc.state.tasks[0].running, isTrue);
+  });
+
+  noteTest('dragging a task to the top edge scrolls the note, so it moves to the top in one drag',
+      (tester, bloc) async {
+    await fill(tester, bloc, 15);
+    final page = find.descendant(of: find.byType(NoteView), matching: find.byType(Scrollable));
+    final position = tester.state<ScrollableState>(page.first).position;
+    position.jumpTo(position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(position.pixels, greaterThan(0));
+    // The top of the note is off screen.
+    expect(tester.getTopLeft(find.text('Task 0')).dy,
+        lessThan(tester.getTopLeft(page.first).dy));
+
+    final handle = find.descendant(
+        of: find.byKey(const ValueKey('t14')), matching: find.byIcon(Icons.drag_indicator));
+    final top = tester.getTopLeft(page.first).dy;
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    await tester.pump(const Duration(milliseconds: 100));
+    // Up to the top edge of the page, in steps, and hold it there while the page scrolls.
+    var y = tester.getCenter(handle).dy;
+    while (y > top + 20) {
+      y -= 20;
+      await gesture.moveBy(const Offset(0, -20));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    for (var i = 0; i < 200 && position.pixels > 0; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(position.pixels, 0, reason: 'the page scrolls up to the top while dragging');
+    await gesture.up();
+    await settle(tester);
+    expect(names(bloc).first, 'Task 14');
+    expect(names(bloc), hasLength(15));
+  }, size: const Size(420, 700));
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -10,8 +11,8 @@ import 'paper.dart';
 import 'task_dialog.dart';
 
 /// Asks for a new task in the dialog and writes it at [index]; on top as an interruption when
-/// [onTop]. When the note already holds as many unfinished tasks as the limit, it asks first and
-/// suggests the backlog.
+/// [onTop]. When the note already holds as many tasks as the limit, done ones included, it asks
+/// first and suggests the backlog.
 Future<void> writeTask(BuildContext context,
     {int index = 0, bool onTop = false}) async {
   final tasksBloc = context.read<TasksBloc>();
@@ -83,14 +84,13 @@ enum OverLimitChoice {
   letGo,
 }
 
-/// Asks whether a task goes on the note even though it already holds as many unfinished tasks as
-/// the limit, is let go on purpose, or, with the experimental backlog on, kept there for later.
+/// Asks whether a task goes on the note even though it already holds as many tasks as the limit, is let go on purpose, or, with the experimental backlog on, kept there for later.
 /// Null when cancelled. [fromBacklog] is for a task already in the backlog, which then stays
 /// there unless let go.
 Future<OverLimitChoice?> askOverLimit(BuildContext context,
     {required String name, bool fromBacklog = false}) {
   final state = context.read<TasksBloc>().state;
-  final open = state.openCount;
+  final count = state.tasks.length;
   final title = name.trim().isEmpty ? 'This task' : '"${name.trim()}"';
   final offerBacklog = state.backlogEnabled && !fromBacklog;
   final question = fromBacklog
@@ -104,12 +104,13 @@ Future<OverLimitChoice?> askOverLimit(BuildContext context,
     context: context,
     builder: (context) => AlertDialog(
       icon: const Icon(Icons.playlist_add_check),
-      title: Text(open > state.taskLimit
+      title: Text(state.overLimit
           ? 'Your note is over its limit'
           : 'Your note is at its limit'),
       content: Text(
-          'You have $open ${open == 1 ? 'task' : 'tasks'} not done yet, and your limit is '
-          '${state.taskLimit}. A short list keeps the day focused.\n\n$question'),
+          'Today\'s note already has $count ${count == 1 ? 'task' : 'tasks'}, done ones '
+          'included, and your limit is ${state.taskLimit}. A short list keeps the day '
+          'focused.\n\n$question'),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
@@ -178,6 +179,88 @@ int targetIndex(TasksState state) {
 }
 
 enum _BarAction { edit, resetTotal, delete }
+
+/// What the menu of a task, opened with a right click or a long press, can do: the bottom bar's
+/// actions, for that task.
+enum TaskMenuAction { pause, resume, focus, restart, edit, resetTotal, delete }
+
+/// Opens the menu of the task at [index] at [position], selecting it first so the bottom bar acts
+/// on it too, and does what is picked.
+Future<void> showTaskMenu(BuildContext context, int index, Offset position) async {
+  final bloc = context.read<TasksBloc>();
+  final state = bloc.state;
+  if (index < 0 || index >= state.tasks.length) return;
+  final task = state.tasks[index];
+  final open = !task.done;
+  final isCurrent = index == state.currentIndex;
+  bloc.add(FocusTaskEvent(index: index));
+  final theme = Theme.of(context);
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+  final action = await showMenu<TaskMenuAction>(
+    context: context,
+    position: RelativeRect.fromRect(
+        position & const Size(1, 1), Offset.zero & overlay.size),
+    items: [
+      if (isCurrent)
+        task.running
+            ? const PopupMenuItem(
+                value: TaskMenuAction.pause,
+                child: ListTile(
+                    leading: Icon(Icons.pause), title: Text('Pause (logs a break)')))
+            : const PopupMenuItem(
+                value: TaskMenuAction.resume,
+                child: ListTile(leading: Icon(Icons.play_arrow), title: Text('Resume work'))),
+      PopupMenuItem(
+        value: TaskMenuAction.focus,
+        enabled: open,
+        child: const ListTile(
+            leading: Icon(Icons.center_focus_strong), title: Text('Focus with Pomodoro')),
+      ),
+      PopupMenuItem(
+        value: TaskMenuAction.restart,
+        enabled: open,
+        child: const ListTile(
+            leading: Icon(Icons.restart_alt), title: Text('Restart countdown')),
+      ),
+      const PopupMenuDivider(),
+      const PopupMenuItem(
+        value: TaskMenuAction.edit,
+        child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit task')),
+      ),
+      const PopupMenuItem(
+        value: TaskMenuAction.resetTotal,
+        child: ListTile(leading: Icon(Icons.history), title: Text('Reset total time')),
+      ),
+      PopupMenuItem(
+        value: TaskMenuAction.delete,
+        child: ListTile(
+            leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+            title: const Text('Delete task')),
+      ),
+    ],
+  );
+  if (action == null || !context.mounted) return;
+  // The note may have changed while the menu was open, here or on another device: act on the same
+  // task, wherever it is now.
+  final now = bloc.state.tasks.indexWhere((t) => t.id == task.id);
+  if (now < 0) return;
+  switch (action) {
+    case TaskMenuAction.pause:
+      bloc.add(StopTimerEvent(index: now));
+    case TaskMenuAction.resume:
+      bloc.add(ResumeTimerEvent(index: now));
+    case TaskMenuAction.focus:
+      openFocus(context, task.id.value);
+    case TaskMenuAction.restart:
+      bloc.add(ResetTimerEvent(index: now));
+    case TaskMenuAction.edit:
+      editTask(context, now);
+    case TaskMenuAction.resetTotal:
+      bloc.add(ResetTotalEvent(index: now));
+    case TaskMenuAction.delete:
+      removeTask(context, now);
+  }
+}
 
 /// The bar at the bottom of today's note: play/pause for the current task; focus, restart and more
 /// actions for the selected task (or the current one when none is selected). New task sits at its
@@ -266,6 +349,7 @@ class NoteToolbar extends StatelessWidget {
 /// The current task, the first one not checked off, also shows its clocks.
 ///
 /// Tap a task to select it; the bottom bar then acts on it. Double tap or double click edits it.
+/// Right click or long press opens its menu, with the bottom bar's actions.
 /// Pointing at a task, or selecting it, shows small (+) buttons on its top and bottom edges to
 /// write a new task right there.
 class TaskLine extends StatefulWidget {
@@ -307,6 +391,24 @@ class _TaskLineState extends State<TaskLine> {
   }
 
   void _select() => _bloc.add(FocusTaskEvent(index: widget.index));
+
+  void _openMenu(Offset position) => showTaskMenu(context, widget.index, position);
+
+  /// On the web, the browser's own menu would open on a right click over the task too.
+  void _setBrowserMenu(bool enabled) {
+    if (!kIsWeb) return;
+    if (enabled) {
+      BrowserContextMenu.enableContextMenu();
+    } else {
+      BrowserContextMenu.disableContextMenu();
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_hovered) _setBrowserMenu(true);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -427,6 +529,8 @@ class _TaskLineState extends State<TaskLine> {
               excludeFromSemantics: true,
               onTap: _select,
               onDoubleTap: () => editTask(context, widget.index),
+              onLongPressStart: (details) => _openMenu(details.globalPosition),
+              onSecondaryTapUp: (details) => _openMenu(details.globalPosition),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Column(
@@ -447,8 +551,14 @@ class _TaskLineState extends State<TaskLine> {
     return Semantics(
       container: true,
       child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        onEnter: (_) {
+          _setBrowserMenu(false);
+          setState(() => _hovered = true);
+        },
+        onExit: (_) {
+          _setBrowserMenu(true);
+          setState(() => _hovered = false);
+        },
         child: Stack(
           children: [
             line,
