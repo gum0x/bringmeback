@@ -112,6 +112,7 @@ class _NotesHistory extends StatelessWidget {
                       TaskStatus.carried => 'written again',
                       TaskStatus.letGo => 'let go',
                       TaskStatus.pending => 'waiting',
+                      TaskStatus.backlog => 'in backlog',
                       _ => null,
                     },
                   ),
@@ -151,6 +152,7 @@ class _TaskHistory extends StatelessWidget {
         TaskStatus.pending => 'Waiting to be written again',
         TaskStatus.carried => 'Not finished, written again on a later note',
         TaskStatus.letGo => 'Not finished, let go',
+        TaskStatus.backlog => 'In the backlog',
         TaskStatus.deleted => 'Deleted',
       };
       rows.add(ListTile(

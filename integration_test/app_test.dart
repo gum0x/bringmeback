@@ -7,6 +7,7 @@ import 'dart:convert';
 
 import 'package:bringmeback/main.dart';
 import 'package:bringmeback/sync/pairing.dart';
+import 'package:bringmeback/sync/sync_status.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -403,7 +404,7 @@ void main() {
   // On the web this runs Symbolon's JavaScript binding, and elsewhere its native library.
   testWidgets('devices can start a group and run the handshake', (tester) async {
     await startApp(tester);
-    await tester.tap(find.byTooltip('Devices'));
+    await tester.tap(find.byType(SyncStatusButton));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Start a new group'));
     await tester.pumpAndSettle();

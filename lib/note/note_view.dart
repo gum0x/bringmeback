@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
+import '../timer.dart';
 import 'paper.dart';
 import 'task_line.dart';
 
@@ -24,16 +25,59 @@ class NoteView extends StatelessWidget {
             child: Column(
               children: [
                 if (state.pending.isNotEmpty) ...[
-                  CarryOverPanel(pending: state.pending, full: state.full),
+                  CarryOverPanel(
+                      pending: state.pending,
+                      atLimit: state.atLimit,
+                      backlogEnabled: state.backlogEnabled),
                   const SizedBox(height: 24),
                 ],
                 _TodayNote(state: state),
+                if (state.backlogEnabled && state.backlog.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  BacklogPanel(backlog: state.backlog),
+                ],
               ],
             ),
           ),
         ),
       );
     });
+  }
+}
+
+/// The time committed to on the note, and roughly when it will all be done. The finish is rounded
+/// up to the quarter hour, so it reads as an estimate rather than another ticking clock. Breaks are
+/// not counted.
+class _CommittedTime extends StatelessWidget {
+  final TasksState state;
+
+  const _CommittedTime({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = NoteColors.of(context);
+    final over = state.overCommitted;
+    final finish = state.finishAt();
+    final committed = formatMinutes((state.committedSeconds / 60).round());
+    final finishTime = finish == null
+        ? null
+        : TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(finish * 1000))
+            .format(context);
+    return Text.rich(
+      key: const Key('committedTime'),
+      TextSpan(children: [
+        TextSpan(
+          text: 'Committed $committed',
+          style: over
+              ? TextStyle(color: theme.colorScheme.error, fontWeight: FontWeight.w600)
+              : null,
+        ),
+        if (over) TextSpan(text: ' of ${formatMinutes(state.noteMinutes)}'),
+        if (finishTime != null) TextSpan(text: ' · done by ~$finishTime'),
+      ]),
+      style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
+    );
   }
 }
 
@@ -75,7 +119,7 @@ class _TodayNoteState extends State<_TodayNote> {
     final tasks = state.tasks;
     final current = state.currentIndex;
     final done = tasks.where((t) => t.done).length;
-    final left = state.noteLines - tasks.length;
+    final open = state.openCount;
     final filtered = _filter != TaskFilter.all;
     // Positions on the note of the tasks shown, so every action still reaches the right task.
     final shown = [
@@ -99,11 +143,16 @@ class _TodayNoteState extends State<_TodayNote> {
                 Text(
                   [
                     if (tasks.isNotEmpty) '$done of ${tasks.length} done',
-                    if (left <= 3) left <= 0 ? 'note full' : '$left ${left == 1 ? 'line' : 'lines'} left',
+                    if (open > state.taskLimit)
+                      '$open open, over your limit of ${state.taskLimit}'
+                    else if (state.atLimit)
+                      'at your limit of ${state.taskLimit} open',
                     if (filtered) 'showing ${_filter.label.toLowerCase()}',
                   ].join(' · '),
-                  style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                      color: open > state.taskLimit ? theme.colorScheme.error : colors.faded),
                 ),
+                if (tasks.isNotEmpty) _CommittedTime(state: state),
               ],
             ),
           ),
@@ -148,7 +197,7 @@ class _TodayNoteState extends State<_TodayNote> {
                 task: tasks[index],
                 index: index,
                 current: index == current,
-                canInsert: !state.full && _filter == TaskFilter.open,
+                canInsert: _filter == TaskFilter.open,
                 reorderable: false,
               ),
           ])
@@ -169,7 +218,6 @@ class _TodayNoteState extends State<_TodayNote> {
           task: task,
           index: index,
           current: index == current,
-          canInsert: !state.full,
         );
       },
       onReorderItem: (oldIndex, newIndex) => context
@@ -191,15 +239,6 @@ class _TodayNoteState extends State<_TodayNote> {
     // The next empty line on the paper, to write on. Not while showing only what is done.
     final nextLine = _filter == TaskFilter.done
         ? null
-        : state.full
-        ? Padding(
-            padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
-            child: Text(
-              'The note is full. Finish what is on it, or start a fresh note.',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: colors.faded, fontStyle: FontStyle.italic),
-            ),
-          )
         : InkWell(
             onTap: () => writeTask(context, index: tasks.length),
             child: Container(
@@ -221,6 +260,13 @@ class _TodayNoteState extends State<_TodayNote> {
                     style: theme.textTheme.titleMedium?.copyWith(color: colors.faded),
                   ),
                 ),
+                if (state.atLimit) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'At your limit: a new task asks first',
+                    child: Icon(Icons.info_outline, size: 18, color: colors.faded),
+                  ),
+                ],
               ]),
             ),
           );
@@ -242,6 +288,7 @@ class _TodayNoteState extends State<_TodayNote> {
                     style: theme.textTheme.bodyLarge?.copyWith(color: colors.faded),
                   ),
                 ),
+              if (state.onBreak) BreakLine(state: state),
               list,
               if (emptyFilter != null) emptyFilter,
               if (nextLine != null) nextLine,
@@ -319,9 +366,30 @@ class _DoneStamp extends StatelessWidget {
 /// they will be done, or let go.
 class CarryOverPanel extends StatelessWidget {
   final List<TaskState> pending;
-  final bool full;
+  final bool atLimit;
+  final bool backlogEnabled;
 
-  const CarryOverPanel({super.key, required this.pending, required this.full});
+  const CarryOverPanel(
+      {super.key, required this.pending, required this.atLimit, this.backlogEnabled = false});
+
+  Future<void> _writeAgain(BuildContext context, TaskState task) async {
+    final bloc = context.read<TasksBloc>();
+    if (atLimit) {
+      final choice = await askOverLimit(context, name: task.name);
+      if (choice == null) return;
+      switch (choice) {
+        case OverLimitChoice.backlog:
+          bloc.add(MoveToBacklogEvent(id: task.id.value));
+          if (context.mounted) showSavedToBacklog(context, task.name);
+          return;
+        case OverLimitChoice.letGo:
+          bloc.add(LetGoEvent(id: task.id.value));
+          return;
+        case OverLimitChoice.note:
+      }
+    }
+    bloc.add(CarryTaskEvent(id: task.id.value));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -340,10 +408,8 @@ class CarryOverPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Text(
-                full
-                    ? 'Today\'s note is full. Let go of these, or make room first.'
-                    : 'Write again what still matters, in the order you will do it. '
-                        'Let go of the rest.',
+                'Write again what still matters, in the order you will do it. '
+                'Let go of the rest.',
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
@@ -364,10 +430,14 @@ class CarryOverPanel extends StatelessWidget {
                       onPressed: () => bloc.add(LetGoEvent(id: task.id.value)),
                       icon: const Icon(Icons.close),
                     ),
+                    if (backlogEnabled)
+                      IconButton(
+                        tooltip: 'Move to backlog',
+                        onPressed: () => bloc.add(MoveToBacklogEvent(id: task.id.value)),
+                        icon: const Icon(Icons.inventory_2_outlined),
+                      ),
                     FilledButton.tonalIcon(
-                      onPressed: full
-                          ? null
-                          : () => bloc.add(CarryTaskEvent(id: task.id.value)),
+                      onPressed: () => _writeAgain(context, task),
                       icon: const Icon(Icons.edit_note),
                       label: const Text('Write again'),
                     ),
@@ -384,6 +454,72 @@ class CarryOverPanel extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Tasks kept for later, off the note: written on it when there is room, or removed.
+class BacklogPanel extends StatelessWidget {
+  final List<TaskState> backlog;
+
+  const BacklogPanel({super.key, required this.backlog});
+
+  Future<void> _write(BuildContext context, TaskState task) async {
+    final bloc = context.read<TasksBloc>();
+    if (bloc.state.atLimit) {
+      final choice = await askOverLimit(context, name: task.name, fromBacklog: true);
+      if (choice == OverLimitChoice.letGo) {
+        bloc.add(RemoveFromBacklogEvent(id: task.id.value));
+        return;
+      }
+      if (choice != OverLimitChoice.note) return;
+    }
+    bloc.add(WriteFromBacklogEvent(id: task.id.value));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bloc = context.read<TasksBloc>();
+    return Card(
+      margin: EdgeInsets.zero,
+      color: theme.colorScheme.surfaceContainerHigh,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        key: const PageStorageKey('backlog'),
+        leading: const Icon(Icons.inventory_2_outlined),
+        title: Text('Backlog · ${backlog.length}', style: theme.textTheme.titleMedium),
+        subtitle: Text('Kept for later, off the note',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        shape: const Border(),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+        children: [
+          for (final task in backlog)
+            Padding(
+              key: task.id,
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(task.name.isEmpty ? 'Untitled task' : task.name,
+                        style: theme.textTheme.bodyLarge),
+                  ),
+                  IconButton(
+                    tooltip: 'Let it go',
+                    onPressed: () => bloc.add(RemoveFromBacklogEvent(id: task.id.value)),
+                    icon: const Icon(Icons.close),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _write(context, task),
+                    icon: const Icon(Icons.edit_note),
+                    label: const Text('Write on note'),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -573,6 +709,7 @@ IconData statusIcon(TaskStatus status) => switch (status) {
       TaskStatus.pending => Icons.hourglass_empty,
       TaskStatus.carried => Icons.redo,
       TaskStatus.letGo => Icons.close,
+      TaskStatus.backlog => Icons.inventory_2_outlined,
       TaskStatus.deleted => Icons.delete_outline,
     };
 

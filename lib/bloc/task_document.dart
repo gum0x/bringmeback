@@ -24,6 +24,14 @@ import 'tasks_bloc.dart';
 /// `<newId>/carriedFrom` and `<oldId>/carriedTo`) or let go (`<oldId>/letGoAt`).
 /// `current/startedAt` is when the note in the order was started.
 ///
+/// The backlog holds tasks kept for later, off the note: a task with `<taskId>/backlogAt` set and
+/// not in the order. Writing one on the note puts its id in the order and clears `backlogAt`; an
+/// unfinished task of a torn-off note moved to the backlog is written as a new task instead, as
+/// when it is carried.
+///
+/// `<taskId>/pomodoro` is where the task's Pomodoro is, as a `PomodoroRecord` in JSON, so a focus
+/// picks up where it was on any device.
+///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
 class TaskDocument {
@@ -79,6 +87,7 @@ class TaskDocument {
       totalResetAt: field<int>('totalResetAt', 0),
       entries: entries,
       inFocus: inFocus,
+      pomodoro: field<String?>('pomodoro', null),
     );
   }
 
@@ -184,6 +193,70 @@ class TaskDocument {
   /// Lets go of the unfinished task [id] of an earlier note: it is not written again.
   void letGo(String id) => _fields.set('$id/letGoAt', nowSeconds());
 
+  /// Keeps a new task [id] in the backlog, off the note.
+  void addToBacklog(String id,
+      {String name = '', String notes = '', int timerLengthSeconds = 20 * 60}) {
+    doc.runInTransaction(() {
+      _fields
+        ..set('$id/name', name)
+        ..set('$id/timerLength', timerLengthSeconds)
+        ..set('$id/timerStartAt', nowSeconds())
+        ..set('$id/totalResetAt', 0)
+        ..set('$id/backlogAt', nowSeconds());
+      if (notes.isNotEmpty) _fields.set('$id/notes', notes);
+    });
+  }
+
+  /// Lets go of a new task [id] on purpose, without writing it on the note: History keeps it as let
+  /// go on the day it was dropped.
+  void letGoNew(String id, {String name = '', String notes = ''}) {
+    doc.runInTransaction(() {
+      _fields
+        ..set('$id/name', name)
+        ..set('$id/timerLength', 20 * 60)
+        ..set('$id/timerStartAt', nowSeconds())
+        ..set('$id/totalResetAt', 0)
+        ..set('$id/letGoAt', nowSeconds());
+      if (notes.isNotEmpty) _fields.set('$id/notes', notes);
+    });
+  }
+
+  /// Moves the unfinished task [id] of an earlier note to the backlog.
+  void moveToBacklog(String id) => _fields.set('$id/backlogAt', nowSeconds());
+
+  /// Writes the backlog task [id] on the note at [index]. A task from a torn-off note is written as
+  /// the new task [newId], carried from it, so the old note keeps its line.
+  void writeFromBacklog(String id, String newId, int index) => doc.runInTransaction(() {
+        _fields.set('$id/backlogAt', null);
+        if (_onNotes().contains(id)) {
+          carry(id, newId, index);
+        } else {
+          _order.insert(index, id);
+        }
+      });
+
+  /// Takes the task [id] out of the backlog without writing it: it is let go, on purpose.
+  void removeFromBacklog(String id) => doc.runInTransaction(() {
+        _fields.set('$id/backlogAt', null);
+        letGo(id);
+      });
+
+  /// Tasks in the backlog, oldest first.
+  List<String> get backlogIds {
+    final fields = _values;
+    final order = ids.toSet();
+    final onNotes = _onNotes();
+    final found = [
+      for (final MapEntry(:key, :value) in fields.entries)
+        if (key.endsWith('/backlogAt') && value is int)
+          if (key.substring(0, key.length - '/backlogAt'.length) case final id
+              when _status(id, fields, order, onNotes) == TaskStatus.backlog)
+            id
+    ];
+    int at(String id) => fields['$id/backlogAt'] as int;
+    return found..sort((a, b) => at(a) != at(b) ? at(a).compareTo(at(b)) : a.compareTo(b));
+  }
+
   /// What became of task [id].
   TaskStatus status(String id) => _status(id, _values, ids.toSet(), _onNotes());
 
@@ -196,6 +269,7 @@ class TaskDocument {
     if (fields['$id/carriedTo'] is String) return TaskStatus.carried;
     if (fields['$id/letGoAt'] is int) return TaskStatus.letGo;
     if (order.contains(id)) return TaskStatus.open;
+    if (fields['$id/backlogAt'] is int) return TaskStatus.backlog;
     // Not on the note and never torn off with one: deleted before deletions were recorded.
     if (!onNotes.contains(id)) return TaskStatus.deleted;
     return TaskStatus.pending;
@@ -253,6 +327,18 @@ class TaskDocument {
           ..set('$id/e/${nowSeconds()}', null);
       });
 
+  /// When the pause under way started, or null when no pause is running. Should a merge leave
+  /// more than one open, the earliest counts.
+  int? get pauseStartedAt {
+    int? start;
+    for (final id in pauseIds) {
+      for (final e in task(id).entries) {
+        if (e.end == null && (start == null || e.start < start)) start = e.start;
+      }
+    }
+    return start;
+  }
+
   /// Ends every pause still running.
   void endPauses() {
     for (final id in pauseIds) {
@@ -273,6 +359,9 @@ class TaskDocument {
           ..set('$id/timerStartAt', startAt);
       });
 
+  /// Keeps where the task's Pomodoro is, or forgets it with null.
+  void setPomodoro(String id, String? record) => _fields.set('$id/pomodoro', record);
+
   void setTotalResetAt(String id, int at) => _fields.set('$id/totalResetAt', at);
 
   /// Starts the timer by opening a time entry, or stops it by closing every open one.
@@ -286,6 +375,42 @@ class TaskDocument {
         _fields.set('$id/e/${e.start}', now);
       }
     }
+  }
+
+  /// Repairs the timers after changes from a device that worked apart from this one merged in. Each
+  /// device starts and stops timers as if it were the only one, so after the merge:
+  /// - the current task can have two open time entries, when both devices checked off the task above
+  ///   it (each started it). Both would count, so its time would run twice as fast. The earliest
+  ///   stays open; each later one is closed where it starts, so it counts nothing.
+  /// - a task that is no longer the current one can still have a running timer, when one device
+  ///   started it (by checking off the task above) while the other wrote a new task on top of it.
+  ///   When the current task runs, the other task's entry is closed when the current one started:
+  ///   work moved on then.
+  ///
+  /// Every device that has both sides' changes makes the same repair, so their writes agree.
+  void mergeTimers() {
+    String? current;
+    for (final id in ids) {
+      if (doneAt(id) == null) {
+        current = id;
+        break;
+      }
+    }
+    List<TimeEntry> open(String id) => task(id).entries.where((e) => e.end == null).toList();
+    final currentOpen = current == null ? const <TimeEntry>[] : open(current);
+    final since = currentOpen.isEmpty ? null : currentOpen.first.start;
+    doc.runInTransaction(() {
+      for (final e in currentOpen.skip(1)) {
+        _fields.set('$current/e/${e.start}', e.start);
+      }
+      if (since == null) return;
+      for (final id in ids) {
+        if (id == current) continue;
+        for (final e in open(id)) {
+          _fields.set('$id/e/${e.start}', e.start > since ? e.start : since);
+        }
+      }
+    });
   }
 
   /// Every change in the document, encoded for storage.
@@ -314,6 +439,9 @@ enum TaskStatus {
 
   /// Torn off unfinished and not written again.
   letGo,
+
+  /// Kept for later, off the note.
+  backlog,
   deleted,
 }
 

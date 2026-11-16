@@ -13,8 +13,33 @@ class FakeNetwork {
   /// Applied to every message on its way, for tests that play an attacker on the path.
   Uint8List Function(Uint8List message)? onTheWay;
 
-  Future<PeerTransport> create() async {
-    final t = FakeTransport(this);
+  /// While true, messages wait until [release].
+  bool hold = false;
+  final _held = <void Function()>[];
+
+  /// Delivers the messages held so far, in order, and stops holding.
+  void release() {
+    hold = false;
+    for (final deliver in _held) {
+      scheduleMicrotask(deliver);
+    }
+    _held.clear();
+  }
+
+  /// Throws away the messages held so far, as a channel that loses them would, and stops holding.
+  void dropHeld() {
+    hold = false;
+    _held.clear();
+  }
+
+  /// Pairs of devices, by the name given to [createFor], that can't reach each other directly.
+  final blocked = <(String, String)>{};
+
+  Future<PeerTransport> create() => createFor('');
+
+  /// A transport factory for the device called `name`, see [blocked].
+  Future<PeerTransport> createFor(String name) async {
+    final t = FakeTransport(this, name);
     transports.add(t);
     return t;
   }
@@ -22,13 +47,14 @@ class FakeNetwork {
 
 class FakeTransport implements PeerTransport {
   final FakeNetwork network;
+  final String name;
   final _messages = StreamController<Uint8List>();
   final _open = Completer<void>();
   FakeTransport? _peer;
   String? _offer;
   bool closed = false;
 
-  FakeTransport(this.network) {
+  FakeTransport(this.network, [this.name = '']) {
     _open.future.ignore();
   }
 
@@ -44,6 +70,10 @@ class FakeTransport implements PeerTransport {
   Future<String> answer(String offer) async {
     final remote = network._offers.remove(offer);
     if (remote == null) throw StateError('Unknown offer');
+    if (network.blocked.contains((remote.name, name)) ||
+        network.blocked.contains((name, remote.name))) {
+      throw StateError('No route');
+    }
     _peer = remote;
     remote._peer = this;
     return 'answer-$offer';
@@ -67,9 +97,15 @@ class FakeTransport implements PeerTransport {
     final peer = _peer;
     if (closed || peer == null) throw StateError('Closed');
     final delivered = network.onTheWay?.call(message) ?? message;
-    scheduleMicrotask(() {
+    void deliver() {
       if (!peer._messages.isClosed) peer._messages.add(Uint8List.fromList(delivered));
-    });
+    }
+
+    if (network.hold) {
+      network._held.add(deliver);
+    } else {
+      scheduleMicrotask(deliver);
+    }
   }
 
   @override

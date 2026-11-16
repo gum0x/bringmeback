@@ -39,6 +39,8 @@ Future<void> settle(WidgetTester tester) async {
 /// Writes a task through the dialog the button at [button] opens.
 Future<void> writeThrough(WidgetTester tester, Finder button, String name,
     {String? minutes}) async {
+  await tester.ensureVisible(button);
+  await tester.pumpAndSettle();
   await tester.tap(button);
   await tester.pumpAndSettle();
   await tester.enterText(find.widgetWithText(TextField, 'Task'), name);
@@ -188,40 +190,216 @@ void main() {
     expect(find.text('Step one\nStep two'), findsOneWidget);
   });
 
-  noteTest('the note holds a limited number of tasks', (tester, bloc) async {
-    for (var i = 0; i < defaultNoteLines + 2; i++) {
+  /// Writes [count] tasks straight through the bloc.
+  Future<void> fill(WidgetTester tester, TasksBloc bloc, int count) async {
+    for (var i = 0; i < count; i++) {
       bloc.add(InsertTaskEvent(index: i, name: 'Task $i', id: ValueKey('t$i')));
     }
     await settle(tester);
-    expect(bloc.state.tasks, hasLength(defaultNoteLines));
-    expect(find.text('Add a task'), findsNothing);
-    expect(find.textContaining('The note is full'), findsOneWidget);
+  }
+
+  noteTest('there is no hard cap on the note', (tester, bloc) async {
+    await fill(tester, bloc, defaultTaskLimit + 5);
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit + 5));
+    expect(find.text('Add a task'), findsOneWidget);
+    expect(find.textContaining('over your limit of $defaultTaskLimit'), findsOneWidget);
   });
 
-  noteTest('the size of the note is set in Settings and kept', (tester, bloc) async {
-    for (var i = 0; i < 4; i++) {
-      bloc.add(InsertTaskEvent(index: i, name: 'Task $i', id: ValueKey('t$i')));
-    }
+  noteTest('past the limit, a new task asks first: write anyway or let it go', (tester, bloc) async {
+    await fill(tester, bloc, defaultTaskLimit);
+    await writeThrough(tester, find.text('Add a task'), 'Maybe never');
+    expect(find.text('Your note is at its limit'), findsOneWidget);
+    // The backlog is experimental and off unless turned on.
+    expect(find.text('Save to backlog'), findsNothing);
+    await tester.tap(find.text('Let it go'));
     await settle(tester);
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit));
+    expect(bloc.state.backlog, isEmpty);
+    expect(find.textContaining('Backlog'), findsNothing);
+    final history = buildHistory(bloc.taskDocument!);
+    final dropped = history.tasks.singleWhere((t) => t.name == 'Maybe never');
+    expect(dropped.status, TaskStatus.letGo);
+    expect(dropped.day, dayOf(nowSeconds()));
+
+    await writeThrough(tester, find.text('Add a task'), 'Urgent');
+    await tester.tap(find.text('Write on note anyway'));
+    await settle(tester);
+    expect(names(bloc), contains('Urgent'));
+    expect(find.textContaining('over your limit of $defaultTaskLimit'), findsOneWidget);
+  });
+
+  noteTest('with the backlog on, a new task past the limit can go there', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
+    await fill(tester, bloc, defaultTaskLimit);
+    expect(bloc.state.atLimit, isTrue);
+    expect(find.textContaining('at your limit of $defaultTaskLimit'), findsOneWidget);
+
+    await writeThrough(tester, find.text('Add a task'), 'Later thing');
+    expect(find.text('Your note is at its limit'), findsOneWidget);
+    await tester.tap(find.text('Save to backlog'));
+    await settle(tester);
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit));
+    expect([for (final t in bloc.state.backlog) t.name], ['Later thing']);
+    expect(find.text('Backlog · 1'), findsOneWidget);
+
+    // Cancelling writes nothing.
+    await writeThrough(tester, find.text('Add a task'), 'Never mind');
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit));
+    expect(bloc.state.backlog, hasLength(1));
+
+    // Or it goes on the note anyway.
+    await writeThrough(tester, find.text('Add a task'), 'Urgent');
+    await tester.tap(find.text('Write on note anyway'));
+    await settle(tester);
+    expect(names(bloc), contains('Urgent'));
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit + 1));
+  });
+
+  noteTest('done tasks don\'t count towards the limit', (tester, bloc) async {
+    await fill(tester, bloc, defaultTaskLimit);
+    bloc.add(SetDoneEvent(index: 0, done: true));
+    await settle(tester);
+    expect(bloc.state.atLimit, isFalse);
+    await writeThrough(tester, find.text('Add a task'), 'One more');
+    expect(find.text('Your note is at its limit'), findsNothing);
+    expect(names(bloc), contains('One more'));
+  });
+
+  noteTest('a backlog task is written on the note, or removed', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
+    bloc.add(AddToBacklogEvent(name: 'Read the paper', id: const ValueKey('b1')));
+    bloc.add(AddToBacklogEvent(name: 'Fix the bike', id: const ValueKey('b2')));
+    await settle(tester);
+    await tester.tap(find.text('Backlog · 2'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Write on note').first);
+    await settle(tester);
+    expect(names(bloc), ['Read the paper']);
+    expect([for (final t in bloc.state.backlog) t.name], ['Fix the bike']);
+
+    await tester.tap(find.byTooltip('Let it go'));
+    await settle(tester);
+    expect(bloc.state.backlog, isEmpty);
+    expect(find.textContaining('Backlog'), findsNothing);
+    expect(bloc.taskDocument!.status('b2'), TaskStatus.letGo);
+  });
+
+  noteTest('writing from the backlog past the limit asks first', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
+    await fill(tester, bloc, defaultTaskLimit);
+    bloc.add(AddToBacklogEvent(name: 'Someday', id: const ValueKey('b1')));
+    await settle(tester);
+    await tester.ensureVisible(find.text('Backlog · 1'));
+    await tester.tap(find.text('Backlog · 1'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Write on note'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Write on note'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save to backlog'), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+    expect(bloc.state.backlog, hasLength(1));
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Write on note'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Write on note anyway'));
+    await settle(tester);
+    expect(bloc.state.backlog, isEmpty);
+    expect(names(bloc).last, 'Someday');
+  });
+
+  noteTest('an unfinished task of the last note can go to the backlog', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
+    bloc.add(InsertTaskEvent(index: 0, name: 'Carry me', id: const ValueKey('c1')));
+    await settle(tester);
+    bloc.add(TearOffNoteEvent());
+    await settle(tester);
+    await tester.tap(find.byTooltip('Move to backlog'));
+    await settle(tester);
+    expect(bloc.state.pending, isEmpty);
+    expect([for (final t in bloc.state.backlog) t.name], ['Carry me']);
+
+    // Written from the backlog, it is a new task carried from the old one, which keeps its note.
+    bloc.add(WriteFromBacklogEvent(id: 'c1'));
+    await settle(tester);
+    expect(names(bloc), ['Carry me']);
+    expect(bloc.state.tasks.single.id.value, isNot('c1'));
+    expect(bloc.taskDocument!.status('c1'), TaskStatus.carried);
+  });
+
+  noteTest('the backlog is an experimental switch in Settings, off by default', (tester, bloc) async {
+    bloc.add(AddToBacklogEvent(name: 'Hidden', id: const ValueKey('b1')));
+    await settle(tester);
+    expect(find.textContaining('Backlog'), findsNothing);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('$defaultNoteLines'), findsOneWidget);
-    for (var i = 0; i < defaultNoteLines - minNoteLines + 1; i++) {
-      await tester.tap(find.byTooltip('Fewer tasks per note'));
+    await tester.ensureVisible(find.text('Experimental'));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Backlog'));
+    await settle(tester);
+    expect(bloc.state.backlogEnabled, isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('experimentalBacklog'), isTrue);
+    await tester.pageBack();
+    await settle(tester);
+    expect(find.text('Backlog · 1'), findsOneWidget);
+  });
+
+  noteTest('the limit is set in Settings and kept', (tester, bloc) async {
+    await fill(tester, bloc, 4);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('$defaultTaskLimit'), findsOneWidget);
+    for (var i = 0; i < defaultTaskLimit - minTaskLimit + 1; i++) {
+      await tester.tap(find.byTooltip('Lower task limit'));
       await settle(tester);
     }
-    expect(bloc.state.noteLines, minNoteLines);
-    expect(find.text('$minNoteLines'), findsOneWidget);
+    expect(bloc.state.taskLimit, minTaskLimit);
+    expect(find.text('$minTaskLimit'), findsOneWidget);
 
-    // A smaller note keeps what is written, and takes no more.
+    // A lower limit moves nothing already written.
     expect(bloc.state.tasks, hasLength(4));
-    expect(bloc.state.full, isTrue);
-    bloc.add(InsertTaskEvent(index: 0, name: 'One more', id: const ValueKey('x')));
-    await settle(tester);
-    expect(bloc.state.tasks, hasLength(4));
+    expect(bloc.state.atLimit, isTrue);
 
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getInt('noteLines'), minNoteLines);
+    expect(prefs.getInt('taskLimit'), minTaskLimit);
+  });
+
+  noteTest('the note shows the time committed, in red past the time per note',
+      (tester, bloc) async {
+    for (var i = 0; i < 3; i++) {
+      bloc.add(InsertTaskEvent(
+          index: i, name: 'Task $i', id: ValueKey('t$i'), timerLengthSeconds: 2 * 3600));
+    }
+    await settle(tester);
+    final committed = find.byKey(const Key('committedTime'));
+    String header() => tester.widget<Text>(committed).textSpan!.toPlainText();
+    expect(header(), startsWith('Committed 6 h · done by ~'));
+    // The finish is a quarter hour, not a ticking clock.
+    expect(header(), matches(RegExp(r'~\d+:(00|15|30|45)')));
+    expect(bloc.state.overCommitted, isFalse);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('8 h'), findsOneWidget);
+    for (var i = 0; i < 5; i++) {
+      await tester.tap(find.byTooltip('Less time per note'));
+      await settle(tester);
+    }
+    expect(find.text('5 h 30 min'), findsOneWidget);
+    expect(bloc.state.noteMinutes, 5 * 60 + 30);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('noteMinutes'), 5 * 60 + 30);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(bloc.state.overCommitted, isTrue);
+    expect(header(), startsWith('Committed 6 h of 5 h 30 min · done by ~'));
+    final span = tester.widget<Text>(committed).textSpan! as TextSpan;
+    expect((span.children!.first as TextSpan).style?.color,
+        Theme.of(tester.element(committed)).colorScheme.error);
   });
 
   noteTest('the Pomodoro lengths are set in Settings and kept', (tester, bloc) async {
@@ -301,5 +479,65 @@ void main() {
     await tester.tap(find.textContaining('A fairly long'));
     await tester.pump(kDoubleTapTimeout);
     await settle(tester);
+  });
+
+  noteTest('pausing shows a break on top, and resuming clears it', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+        'Write report');
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.any((t) => t.running), isFalse);
+    expect(find.byKey(const ValueKey('break-line')), findsOneWidget);
+    expect(find.textContaining('On a break'), findsOneWidget);
+    expect(find.text('No task clock is running'), findsOneWidget);
+    expect(find.textContaining('Paused, not counting', findRichText: true), findsOneWidget);
+
+    // Pressing the pause button again ends the break.
+    await tester.tap(find.byTooltip('Resume work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+    expect(find.textContaining('Paused, not counting', findRichText: true), findsNothing);
+
+    // So does Back to work on the break itself.
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    await tester.tap(find.text('Back to work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+  });
+
+  noteTest('putting another task first ends the break and starts its clock', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'First');
+    await writeThrough(tester, find.text('Add a task'), 'Second');
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+
+    // Writing a task lower down is not prioritising: the break goes on.
+    await writeThrough(tester, find.text('Add a task'), 'Third');
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.any((t) => t.running), isFalse);
+
+    // Moving a task above the current one is.
+    bloc.add(MoveTaskEvent(fromIndex: 1, toIndex: 0));
+    await settle(tester);
+    expect(names(bloc).first, 'Second');
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.running, isTrue);
+    expect(find.byKey(const ValueKey('break-line')), findsNothing);
+
+    // And so is a new task on top.
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'Phone');
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.first.name, 'Phone');
+    expect(bloc.state.tasks.first.running, isTrue);
   });
 }

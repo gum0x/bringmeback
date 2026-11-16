@@ -4,22 +4,39 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
 import '../focus/focus_page.dart';
+import '../sync/sync_status.dart';
 import '../timer.dart';
 import 'paper.dart';
 import 'task_dialog.dart';
 
 /// Asks for a new task in the dialog and writes it at [index]; on top as an interruption when
-/// [onTop].
+/// [onTop]. When the note already holds as many unfinished tasks as the limit, it asks first and
+/// suggests the backlog.
 Future<void> writeTask(BuildContext context,
     {int index = 0, bool onTop = false}) async {
   final tasksBloc = context.read<TasksBloc>();
-  if (tasksBloc.state.full) {
-    showNoteFull(context);
-    return;
-  }
   final details = await showTaskDialog(context);
-  if (details == null) return;
+  if (details == null || !context.mounted) return;
   final id = ValueKey<String>(newId());
+  if (tasksBloc.state.atLimit) {
+    final choice = await askOverLimit(context, name: details.name);
+    if (choice == null || !context.mounted) return;
+    switch (choice) {
+      case OverLimitChoice.backlog:
+        tasksBloc.add(AddToBacklogEvent(
+            name: details.name,
+            notes: details.notes,
+            id: id,
+            timerLengthSeconds: details.timerLengthSeconds));
+        showSavedToBacklog(context, details.name);
+        return;
+      case OverLimitChoice.letGo:
+        tasksBloc.add(LetGoNewTaskEvent(name: details.name, notes: details.notes, id: id));
+        showLetGo(context, details.name);
+        return;
+      case OverLimitChoice.note:
+    }
+  }
   tasksBloc.add(onTop
       ? AddTaskOnTopEvent(
           name: details.name,
@@ -53,12 +70,82 @@ Future<void> editTask(BuildContext context, int index) async {
       timerLengthSeconds: details.timerLengthSeconds));
 }
 
-void showNoteFull(BuildContext context) {
+/// What to do with a task that would take the note over its limit.
+enum OverLimitChoice {
+  /// Keep it for later, off the note (experimental).
+  backlog,
+
+  /// Write it on the note anyway.
+  note,
+
+  /// Don't do it: drop it on purpose. Not everything can be done, and choosing what not to do is
+  /// part of keeping the day focused. History keeps it as let go.
+  letGo,
+}
+
+/// Asks whether a task goes on the note even though it already holds as many unfinished tasks as
+/// the limit, is let go on purpose, or, with the experimental backlog on, kept there for later.
+/// Null when cancelled. [fromBacklog] is for a task already in the backlog, which then stays
+/// there unless let go.
+Future<OverLimitChoice?> askOverLimit(BuildContext context,
+    {required String name, bool fromBacklog = false}) {
+  final state = context.read<TasksBloc>().state;
+  final open = state.openCount;
+  final title = name.trim().isEmpty ? 'This task' : '"${name.trim()}"';
+  final offerBacklog = state.backlogEnabled && !fromBacklog;
+  final question = fromBacklog
+      ? '$title can stay in the backlog until you have room. Or write it on the note anyway, '
+          'or let it go: not everything has to be done.'
+      : offerBacklog
+          ? 'Save $title to the backlog for later, write it on the note anyway, or let it go? '
+              'Not everything has to be done.'
+          : 'Write $title on the note anyway, or let it go? Not everything has to be done.';
+  return showDialog<OverLimitChoice>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: const Icon(Icons.playlist_add_check),
+      title: Text(open > state.taskLimit
+          ? 'Your note is over its limit'
+          : 'Your note is at its limit'),
+      content: Text(
+          'You have $open ${open == 1 ? 'task' : 'tasks'} not done yet, and your limit is '
+          '${state.taskLimit}. A short list keeps the day focused.\n\n$question'),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        TextButton.icon(
+            onPressed: () => Navigator.pop(context, OverLimitChoice.letGo),
+            icon: const Icon(Icons.do_not_disturb_on_outlined),
+            label: const Text('Let it go')),
+        TextButton(
+            onPressed: () => Navigator.pop(context, OverLimitChoice.note),
+            child: const Text('Write on note anyway')),
+        if (offerBacklog)
+          FilledButton.icon(
+              onPressed: () => Navigator.pop(context, OverLimitChoice.backlog),
+              icon: const Icon(Icons.inventory_2_outlined),
+              label: const Text('Save to backlog')),
+      ],
+    ),
+  );
+}
+
+void showLetGo(BuildContext context, String name) {
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(const SnackBar(
-    content: Text(
-        'This note is full. Finish or delete a task, or start a fresh note.'),
+  messenger.showSnackBar(SnackBar(
+    content: Text(name.trim().isEmpty
+        ? 'Let go. Not everything has to be done.'
+        : 'Let go: ${name.trim()}. Not everything has to be done.'),
+  ));
+}
+
+void showSavedToBacklog(BuildContext context, String name) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(SnackBar(
+    content: Text(name.trim().isEmpty ? 'Saved to backlog' : 'Saved to backlog: ${name.trim()}'),
   ));
 }
 
@@ -167,6 +254,7 @@ class NoteToolbar extends StatelessWidget {
                 ),
               ],
             ),
+            const SyncNowButton(),
           ],
         ),
       );
@@ -185,7 +273,7 @@ class TaskLine extends StatefulWidget {
   final int index;
   final bool current;
 
-  /// Whether new tasks can still be written on the note.
+  /// Whether the (+) buttons to write a task above or below it show.
   final bool canInsert;
 
   /// Whether the line sits in a reorderable list and shows a drag handle.
@@ -196,7 +284,7 @@ class TaskLine extends StatefulWidget {
     required this.task,
     required this.index,
     required this.current,
-    required this.canInsert,
+    this.canInsert = true,
     this.reorderable = true,
   });
 
@@ -495,10 +583,96 @@ class TaskClock extends StatelessWidget {
           ),
         ),
         Text(
-          'Total ${formatClock(totalSeconds)}${paused ? ' · Paused' : ''}',
+          'Total ${formatClock(totalSeconds)}',
           style: small,
         ),
+        if (paused)
+          Text.rich(
+            TextSpan(children: [
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Icon(Icons.pause,
+                    size: 16, color: theme.colorScheme.tertiary),
+              ),
+              const TextSpan(text: 'Paused, not counting'),
+            ]),
+            style: small?.copyWith(
+                color: theme.colorScheme.tertiary, fontWeight: FontWeight.w600),
+          ),
       ],
+    );
+  }
+}
+
+/// Shown on top of the note while on a break: how long the break has lasted, and that no task's
+/// clock is running. It goes away when work resumes, from here or the pause button, or when another
+/// task is put first.
+class BreakLine extends StatelessWidget {
+  final TasksState state;
+
+  const BreakLine({super.key, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = NoteColors.of(context);
+    final current = state.currentIndex;
+    final seconds = state.breakSecondsAt(nowSeconds());
+    final small = theme.textTheme.bodyMedium?.copyWith(
+      color: colors.faded,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'On a break. No task clock is running.',
+      child: Container(
+        key: const ValueKey('break-line'),
+        constraints: const BoxConstraints(minHeight: 64),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.55),
+          border: Border(bottom: BorderSide(color: colors.rule)),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 30,
+              child: Icon(Icons.coffee_outlined,
+                  size: 20, color: theme.colorScheme.onTertiaryContainer),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'On a break · ${formatClock(seconds)}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: colors.ink,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  Text('No task clock is running', style: small),
+                ],
+              ),
+            ),
+            if (current >= 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: TextButton.icon(
+                  onPressed: () => context
+                      .read<TasksBloc>()
+                      .add(ResumeTimerEvent(index: current)),
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('Back to work'),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

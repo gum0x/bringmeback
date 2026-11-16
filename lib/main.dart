@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'focus/focus_page.dart';
+import 'focus/pomodoro.dart';
 import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
-import 'sync/sync_page.dart';
+import 'sync/sync_status.dart';
 import 'version/build_info.dart';
 import 'version/platform.dart' as platform;
 import 'version/update_cubit.dart';
@@ -149,6 +151,22 @@ class _TasksStackState extends State<TasksStack> {
         showCloseIcon: true,
       ));
     });
+    _reopenFocus();
+  }
+
+  /// Opens the focus view again when the app stopped while one was open, here or on another
+  /// device: a crash, a closed tab or the system ending the app. A clock still running carries on;
+  /// a paused one waits for Resume.
+  Future<void> _reopenFocus() async {
+    final tasks = context.read<TasksBloc>();
+    await tasks.document;
+    if (!mounted) return;
+    final now = DateTime.now();
+    final open = tasks.state.tasks
+        .where((t) =>
+            !t.done && (PomodoroRecord.decode(t.pomodoro, now: now)?.open ?? false))
+        .firstOrNull;
+    if (open != null) await openFocus(context, open.id.value, autoStart: false);
   }
 
   @override
@@ -227,12 +245,7 @@ class _TasksStackState extends State<TasksStack> {
                   onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const HistoryPage())),
                 ),
-                IconButton(
-                  tooltip: 'Devices',
-                  icon: const Icon(Icons.devices),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SyncPage())),
-                ),
+                const SyncStatusButton(),
                 IconButton(
                   tooltip: 'Keyboard shortcuts',
                   icon: const Icon(Icons.keyboard_outlined),

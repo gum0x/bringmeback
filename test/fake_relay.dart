@@ -10,6 +10,9 @@ class FakeRelay {
   final published = <String>[];
   bool reachable = true;
 
+  /// While true, events are published but reach no one, as when a relay drops them.
+  bool deaf = false;
+
   RelayConnection connect(Uri _) {
     final c = FakeConnection(this);
     connections.add(c);
@@ -22,6 +25,7 @@ class FakeRelay {
       from.subscription = parsed[1] as String;
     } else if (parsed[0] == 'EVENT') {
       published.add(message);
+      if (deaf) return;
       for (final c in connections) {
         if (c != from && c.subscription != null && !c.incoming.isClosed) {
           c.incoming.add(jsonEncode(['EVENT', c.subscription, parsed[1]]));

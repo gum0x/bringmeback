@@ -34,3 +34,10 @@ String formatClock(int seconds) {
   if (hours == 0) return '${minutes.toString().padLeft(2, '0')}:$secs';
   return '$hours:${minutes.toString().padLeft(2, '0')}:$secs';
 }
+
+/// Minutes as "45 min", "2 h" or "2 h 10 min".
+String formatMinutes(int minutes) {
+  final h = minutes ~/ 60, m = minutes % 60;
+  if (h == 0) return '$m min';
+  return m == 0 ? '$h h' : '$h h $m min';
+}
