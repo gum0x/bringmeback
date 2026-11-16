@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../bloc/breaks.dart';
 import '../bloc/tasks_bloc.dart';
 import '../focus/pomodoro.dart';
 import '../sync/peer.dart' show syncProtocol;
@@ -28,6 +29,8 @@ class SettingsPage extends StatelessWidget {
               _NoteMinutesTile(),
               _Section('Experimental'),
               _BacklogSwitch(),
+              _Section('Breaks'),
+              _BreakCategoriesTiles(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
               _Section('About'),
@@ -72,6 +75,7 @@ class _StepperTile extends StatelessWidget {
   final String lessTooltip;
   final String moreTooltip;
   final ValueChanged<int> onChanged;
+  final Widget? leading;
 
   const _StepperTile({
     super.key,
@@ -86,11 +90,13 @@ class _StepperTile extends StatelessWidget {
     required this.lessTooltip,
     required this.moreTooltip,
     required this.onChanged,
+    this.leading,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      leading: leading,
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle!),
       trailing: Row(
@@ -186,6 +192,177 @@ class _NoteMinutesTile extends StatelessWidget {
         moreTooltip: 'More time per note',
         onChanged: (minutes) => bloc.add(SetNoteMinutesEvent(minutes)),
       ),
+    );
+  }
+}
+
+/// The break types holding the pause button offers, each with how long it should last.
+class _BreakCategoriesTiles extends StatelessWidget {
+  const _BreakCategoriesTiles();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => !listEquals(a.breakCategories, b.breakCategories),
+      builder: (context, state) {
+        final categories = state.breakCategories;
+        void update(List<BreakCategory> next) => bloc.add(SetBreakCategoriesEvent(next));
+        return Column(
+          children: [
+            const ListTile(
+              dense: true,
+              subtitle: Text('Hold the pause button to take one of these breaks. When its time '
+                  'is up, the app calls you back to your task. Double tap a break to change it.'),
+            ),
+            for (final (i, c) in categories.indexed)
+              _StepperTile(
+                key: ValueKey('break-setting-${c.name}'),
+                title: c.name,
+                value: c.minutes,
+                min: minBreakMinutes,
+                max: maxBreakMinutes,
+                step: c.minutes < 10 ? 1 : 5,
+                format: formatMinutes,
+                lessTooltip: 'Shorter ${c.name}',
+                moreTooltip: 'Longer ${c.name}',
+                leading: IconButton(
+                  tooltip: 'Edit ${c.name}',
+                  icon: Icon(breakIcon(c.icon)),
+                  onPressed: () async {
+                    final edited = await _editCategory(context, c);
+                    if (edited == null) return;
+                    final next = [...categories];
+                    if (edited.name.isEmpty) {
+                      next.removeAt(i);
+                    } else {
+                      next[i] = edited;
+                    }
+                    update(next);
+                  },
+                ),
+                onChanged: (v) {
+                  final next = [...categories];
+                  next[i] = c.copyWith(minutes: v);
+                  update(next);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.add),
+              title: const Text('Add a break type'),
+              onTap: () async {
+                final added = await _editCategory(
+                    context, const BreakCategory(name: '', minutes: 15, icon: 'rest'),
+                    adding: true);
+                if (added == null || added.name.isEmpty) return;
+                update([...categories, added]);
+              },
+            ),
+            if (!listEquals(categories, defaultBreakCategories))
+              ListTile(
+                leading: const Icon(Icons.settings_backup_restore),
+                title: const Text('Reset break types'),
+                onTap: () => update(defaultBreakCategories),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Asks for a break type's name, length and icon. Returns one with an empty name to remove it,
+/// or null when cancelled.
+Future<BreakCategory?> _editCategory(BuildContext context, BreakCategory category,
+        {bool adding = false}) =>
+    showDialog<BreakCategory>(
+      context: context,
+      builder: (context) => _BreakCategoryDialog(category: category, adding: adding),
+    );
+
+class _BreakCategoryDialog extends StatefulWidget {
+  final BreakCategory category;
+  final bool adding;
+
+  const _BreakCategoryDialog({required this.category, required this.adding});
+
+  @override
+  State<_BreakCategoryDialog> createState() => _BreakCategoryDialogState();
+}
+
+class _BreakCategoryDialogState extends State<_BreakCategoryDialog> {
+  late final _name = TextEditingController(text: widget.category.name);
+  late final _minutes = TextEditingController(text: '${widget.category.minutes}');
+  late var _icon = widget.category.icon;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _minutes.dispose();
+    super.dispose();
+  }
+
+  BreakCategory _read() => BreakCategory(
+      name: _name.text.trim(),
+      minutes: (int.tryParse(_minutes.text.trim()) ?? widget.category.minutes)
+          .clamp(minBreakMinutes, maxBreakMinutes),
+      icon: _icon);
+
+  @override
+  Widget build(BuildContext context) {
+    final adding = widget.adding;
+    final short =
+        (int.tryParse(_minutes.text.trim()) ?? recommendedBreakMinutes) < recommendedBreakMinutes;
+    return AlertDialog(
+      title: Text(adding ? 'Add a break type' : 'Edit break type'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: adding,
+              decoration: const InputDecoration(labelText: 'Name'),
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(() {}),
+            ),
+            TextField(
+              controller: _minutes,
+              decoration: InputDecoration(
+                  labelText: 'Minutes',
+                  helperText:
+                      short ? 'Breaks under $recommendedBreakMinutes min rarely rest you' : null),
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 4,
+              children: [
+                for (final MapEntry(:key, :value) in breakIcons.entries)
+                  IconButton(
+                    tooltip: key,
+                    isSelected: key == _icon,
+                    icon: Icon(value),
+                    onPressed: () => setState(() => _icon = key),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (!adding)
+          TextButton(
+            onPressed: () => Navigator.pop(context, widget.category.copyWith(name: '')),
+            child: const Text('Remove'),
+          ),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: _name.text.trim().isEmpty ? null : () => Navigator.pop(context, _read()),
+          child: Text(adding ? 'Add' : 'Save'),
+        ),
+      ],
     );
   }
 }

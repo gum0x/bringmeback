@@ -41,7 +41,8 @@ step or a decision here, it needs a strong reason.
 3. Add the next few tasks below it, in priority order: what you will do next comes next.
 4. Interrupted? Press **New task** again. The interruption goes on top and is timed; the task you were
    on pauses just below it.
-5. Step away: press **Pause**. The break is logged. Press **Resume** when back.
+5. Step away: press **Pause**. The break is logged. Press **Resume** when back. Hold **Pause** to
+   choose a kind of break with a planned length; when it runs out, the app calls you back to the task.
 6. Finish: tick the task's checkbox. It is struck through and stays on the note, and the next one,
    often the task the interruption paused, starts timing.
 7. Made a mistake? **Undo** in the message at the bottom.
