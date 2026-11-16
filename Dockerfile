@@ -36,9 +36,10 @@ COPY . .
 ARG APP_VERSION=""
 ARG BUILD_COMMIT=""
 ARG BUILD_TIME=""
-RUN sed -i 's/\r$//' tool/build_symbolon.sh tool/build_info.sh tool/symbolon-web.sha256 \
+RUN sed -i 's/\r$//' tool/build_symbolon.sh tool/build_info.sh tool/build_llm_web.sh tool/symbolon-web.sha256 \
  && git config --global --add safe.directory /app \
  && bash tool/build_symbolon.sh web \
+ && bash tool/build_llm_web.sh \
  && flutter build web --release --no-web-resources-cdn $(bash tool/build_info.sh defines) \
  && bash tool/build_info.sh json build/web
 

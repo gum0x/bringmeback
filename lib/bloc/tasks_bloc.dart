@@ -446,14 +446,17 @@ class RemoveCategoryEvent extends TasksEvent {
 /// Brings back the default categories that were deleted.
 class RestoreDefaultCategoriesEvent extends TasksEvent {}
 
-/// The categoriser is ready to file the tasks [ids]; null when it couldn't load, and only the
-/// categories' rules apply.
-class _CategoriseEvent extends TasksEvent {
-  final List<String> ids;
-  final Categoriser? categoriser;
+/// Categories picked for tasks, by task id, with the name each was picked from.
+class _CategorisedEvent extends TasksEvent {
+  final Map<String, ({String name, String? category})> picks;
 
-  _CategoriseEvent(this.ids, this.categoriser);
+  _CategorisedEvent(this.picks);
 }
+
+/// Picks a category for a task with a language model: the category's id, or null when unsure.
+/// Throws when the model isn't available, and the word vectors pick instead.
+typedef SmartCategoriser = Future<String?> Function(
+    String text, List<TaskCategory> categories, List<CategoryExample> examples);
 
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
@@ -496,6 +499,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Loads the categoriser, on first use; tests pass their own.
   final Future<Categoriser> Function() _categoriser;
 
+  /// The language model categoriser (LFM2.5), when the user turned it on. Tried before the word
+  /// vectors.
+  SmartCategoriser? smartCategoriser;
+
   TasksBloc({Future<Categoriser> Function()? categoriser})
       : _categoriser = categoriser ?? Categoriser.bundled,
         super(TasksState(tasks: [])) {
@@ -521,7 +528,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<RemoveCategoryEvent>((e, emit) => _editCategories(emit, (doc) => doc.removeCategory(e.id)));
     on<RestoreDefaultCategoriesEvent>(
         (e, emit) => _editCategories(emit, (doc) => doc.restoreDefaultCategories()));
-    on<_CategoriseEvent>(_onCategorise);
+    on<_CategorisedEvent>(_onCategorised);
     on<SetDoneEvent>((e, emit) => _setDone(emit, e.index, e.done));
     on<EditTaskEvent>(_onEditTask);
     on<TearOffNoteEvent>(_onTearOff);
@@ -647,34 +654,61 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   Future<void> _categorise(List<String> ids) async {
     final doc = _doc;
     if (ids.isEmpty || doc == null) return;
-    // With no categories there is nothing to choose from, and no need to load the vectors.
-    if (doc.categories().isEmpty && ids.every((id) => doc.task(id).category == null)) return;
-    Categoriser? categoriser;
-    try {
-      categoriser = await _categoriser();
-    } on Object catch (e) {
-      // Only the rules apply then; the user can still pick a category.
-      debugPrint('Categoriser unavailable: $e');
-    }
-    if (!isClosed) add(_CategoriseEvent(ids, categoriser));
-  }
-
-  void _onCategorise(_CategoriseEvent event, Emitter<TasksState> emit) {
-    final doc = _doc;
-    if (doc == null) return;
     final categories = doc.categories();
+    // With no categories there is nothing to choose from, and no need to load the vectors.
+    if (categories.isEmpty && ids.every((id) => doc.task(id).category == null)) return;
     final examples = [
       for (final e in doc.categoryExamples()) (text: e.name, category: e.category)
     ];
-    var changed = false;
-    for (final id in event.ids) {
+    Categoriser? words;
+    try {
+      words = await _categoriser();
+    } on Object catch (e) {
+      // Only the rules and the language model apply then; the user can still pick a category.
+      debugPrint('Categoriser unavailable: $e');
+    }
+    final picks = <String, ({String name, String? category})>{};
+    for (final id in ids) {
       final task = doc.task(id);
-      // Gone, or the user chose since: their choice stands.
-      if (task.categoryByHand || doc.fieldInt('$id/timerStartAt') == null) continue;
-      final pick = event.categoriser?.categorise(task.name, categories, examples: examples) ??
-          Categoriser.byRule(task.name, categories);
-      if (pick == task.category) continue;
-      doc.setTaskCategory(id, pick, byHand: false);
+      if (task.categoryByHand) continue;
+      picks[id] = (
+        name: task.name,
+        category: await _pick(task.name, categories, examples, words),
+      );
+    }
+    if (!isClosed && picks.isNotEmpty) add(_CategorisedEvent(picks));
+  }
+
+  /// A rule the task mentions decides first; then the language model, when it's on and sure; then
+  /// the word vectors.
+  Future<String?> _pick(String name, List<TaskCategory> categories,
+      List<CategoryExample> examples, Categoriser? words) async {
+    if (Categoriser.byRule(name, categories) case final id?) return id;
+    final smart = smartCategoriser;
+    if (smart != null) {
+      try {
+        if (await smart(name, categories, examples) case final id?) return id;
+      } on Object catch (e) {
+        debugPrint('Language model categoriser unavailable: $e');
+      }
+    }
+    return words?.categorise(name, categories, examples: examples);
+  }
+
+  void _onCategorised(_CategorisedEvent event, Emitter<TasksState> emit) {
+    final doc = _doc;
+    if (doc == null) return;
+    var changed = false;
+    for (final MapEntry(key: id, value: pick) in event.picks.entries) {
+      final task = doc.task(id);
+      // Gone, renamed or filed by the user since: the newer state stands.
+      if (task.categoryByHand ||
+          task.name != pick.name ||
+          doc.fieldInt('$id/timerStartAt') == null) {
+        continue;
+      }
+      if (pick.category == task.category) continue;
+      doc.setTaskCategory(id, pick.category, byHand: false);
       changed = true;
     }
     if (!changed) return;

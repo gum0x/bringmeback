@@ -77,3 +77,39 @@ jobs:
         path: ${{ matrix.artifact_path }}
         if-no-files-found: error
         retention-days: 14
+
+  # Categorises real tasks with the real LFM2.5 model, the one Settings offers to download.
+  lfm:
+    name: LFM2.5 categories
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version: '3.47.7'
+        channel: 'stable'
+        cache: true
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    # Fails when the file the app downloads isn't in the repository any more.
+    - name: Download the model
+      shell: bash
+      run: |
+        file=$(grep -o "defaultValue: '[^']*'" lib/category/lfm_categoriser.dart | head -1 | cut -d"'" -f2)
+        echo "Files in LiquidAI/LFM2.5-350M-GGUF:"
+        curl -fsSL https://huggingface.co/api/models/LiquidAI/LFM2.5-350M-GGUF | jq -r '.siblings[].rfilename'
+        curl -fSL --retry 3 -o "$RUNNER_TEMP/model.gguf" \
+          "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/$file"
+        ls -l "$RUNNER_TEMP/model.gguf"
+
+    - name: Categorise tasks
+      run: flutter test test/lfm_live_test.dart --reporter expanded
+      env:
+        LFM_MODEL_PATH: ${{ runner.temp }}/model.gguf

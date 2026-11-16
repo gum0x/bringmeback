@@ -70,6 +70,19 @@ To correct it, tap the tag and pick another category, or **No category**; or pic
 dialog. Your choice stays, even when you rename the task, until you pick **Choose automatically**.
 Tasks you filed by hand also teach the app: a new task much like one of them goes the same way.
 
+### Smarter categories with LFM2.5
+
+For better picks, in any language, turn on **Smarter categories with LFM2.5** in Settings. The app
+downloads Liquid AI's LFM2.5-350M (about 230 MB, once, on this device only) and runs it on the device:
+it reads each new task with your categories, their keywords and rules, and a few tasks you filed by
+hand, and picks the one that fits. Nothing leaves the device. Rules still win over the model, and
+while it downloads, or when it isn't sure, the word vectors decide as before. Turning it off deletes
+the download.
+
+It needs iOS 16.4 or macOS 14 or later. In a browser it needs WebGPU and a page served with
+cross-origin isolation (the Docker image does this; the GitHub Pages site can't, so there Settings
+says it can't run).
+
 ## A new day
 
 A note belongs to the day it was started (a day starts at 4:00). The next day the app asks you to

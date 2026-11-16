@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'category/lfm_cubit.dart';
 import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
@@ -36,6 +37,14 @@ class App extends StatelessWidget {
                   SyncCubit(document: context.read<TasksBloc>().document)
                     ..load()),
           BlocProvider(lazy: false, create: (_) => UpdateCubit()..load()),
+          // Not lazy: when the user turned LFM2.5 on, it loads with the app.
+          BlocProvider(
+              lazy: false,
+              create: (context) {
+                final lfm = LfmCubit()..restore();
+                context.read<TasksBloc>().smartCategoriser = lfm.categorise;
+                return lfm;
+              }),
         ],
         child: _AppLifecycle(
             child: MaterialApp(

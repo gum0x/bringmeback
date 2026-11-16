@@ -5,6 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
 import '../category/default_categories.dart';
+import '../category/lfm_categoriser.dart';
+import '../category/lfm_cubit.dart';
 import '../focus/pomodoro.dart';
 import '../sync/peer.dart' show syncProtocol;
 import '../version/build_info.dart';
@@ -250,6 +252,7 @@ class _Categories extends StatelessWidget {
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ),
+          const _LfmTile(),
           for (final c in state.categories)
             ListTile(
               key: ValueKey('category-${c.id}'),
@@ -488,5 +491,74 @@ class _VersionTiles extends StatelessWidget {
         ]);
       },
     );
+  }
+}
+
+/// Turns on categorising with LFM2.5 on this device, and shows the download.
+class _LfmTile extends StatelessWidget {
+  const _LfmTile();
+
+  static bool _available(BuildContext context) {
+    try {
+      context.read<LfmCubit>();
+      return true;
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Pages opened on their own, as in tests, may have no model above them.
+    if (!_available(context)) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return BlocBuilder<LfmCubit, LfmState>(builder: (context, state) {
+      final lfm = context.read<LfmCubit>();
+      final String status;
+      Widget? below;
+      switch (state.status) {
+        case LfmStatus.off:
+          status = 'Downloads Liquid AI\'s LFM2.5-350M (about $lfmModelMegabytes MB) to this device '
+              'once. It reads each task and your categories in plain words, in many languages. '
+              'It runs on this device only; tasks are never sent anywhere.';
+        case LfmStatus.downloading:
+          final mb = state.receivedBytes ~/ 1000000;
+          status = 'Downloading: $mb of about $lfmModelMegabytes MB. Categories come from the '
+              'words model until it\'s ready.';
+          below = LinearProgressIndicator(value: state.fraction);
+        case LfmStatus.loading:
+          status = 'Loading the model…';
+          below = const LinearProgressIndicator();
+        case LfmStatus.ready:
+          status = 'Categorising new and renamed tasks on this device'
+              '${state.backend == null ? '' : ' (${state.backend})'}. '
+              'Turn off to delete the download.';
+        case LfmStatus.failed:
+          status = state.error ?? 'The model couldn\'t load.';
+          below = Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: lfm.turnOn, child: const Text('Try again')),
+          );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            key: const Key('lfmSwitch'),
+            secondary: const Icon(Icons.auto_awesome),
+            title: const Text('Smarter categories with LFM2.5'),
+            subtitle: Text(status,
+                style: state.status == LfmStatus.failed
+                    ? TextStyle(color: theme.colorScheme.error)
+                    : null),
+            isThreeLine: true,
+            value: state.on,
+            onChanged: (on) => on ? lfm.turnOn() : lfm.turnOff(),
+          ),
+          if (below != null)
+            Padding(padding: const EdgeInsets.fromLTRB(72, 0, 16, 8), child: below),
+        ],
+      );
+    });
   }
 }

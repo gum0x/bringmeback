@@ -54,6 +54,11 @@ jobs:
       shell: bash
       run: ./tool/build_symbolon.sh web
 
+    # LFM2.5 categories in the browser need llamadart's WebGPU bridge, pinned by its version.
+    - name: Add the LFM2.5 web bridge
+      shell: bash
+      run: ./tool/build_llm_web.sh
+
     # The site lives under /<repo>/. CanvasKit is bundled instead of loaded from Google's CDN.
     # The app shows its commit and time, and compares them with build-info.json to offer a reload
     # when a newer build is deployed.
