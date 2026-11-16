@@ -11,6 +11,7 @@ import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_status.dart';
 import 'version/build_info.dart';
+import 'version/dev_band.dart';
 import 'version/platform.dart' as platform;
 import 'version/update_cubit.dart';
 import 'dart:async';
@@ -34,20 +35,21 @@ class App extends StatelessWidget {
           // Not lazy: sync starts with the app, not when the Devices page first opens.
           BlocProvider(
               lazy: false,
-              create: (context) =>
-                  SyncCubit(document: context.read<TasksBloc>().document)
-                    ..load()),
+              create: (context) => SyncCubit(document: context.read<TasksBloc>().document)..load()),
           BlocProvider(lazy: false, create: (_) => UpdateCubit()..load()),
         ],
         child: _AppLifecycle(
             child: MaterialApp(
           title: 'bringmeback',
+          // A development build says so in the strip on top (DevBand), not in Flutter's corner
+          // ribbon, which covers the settings button.
+          debugShowCheckedModeBanner: false,
           scaffoldMessengerKey: _messenger,
           theme: ThemeData(colorSchemeSeed: Colors.blue),
-          darkTheme: ThemeData(
-              colorSchemeSeed: Colors.blue, brightness: Brightness.dark),
+          darkTheme: ThemeData(colorSchemeSeed: Colors.blue, brightness: Brightness.dark),
           // The app is laid out for portrait: on a wide window it stays a column in the middle.
-          builder: (context, child) => _PortraitFrame(child: child!),
+          // A development build gets a strip across the top that says so.
+          builder: (context, child) => DevBand(child: _PortraitFrame(child: child!)),
           home: const TasksStack(),
         )));
   }
@@ -106,9 +108,7 @@ class _AppLifecycleState extends State<_AppLifecycle> {
               'This one is ${BuildInfo.current.label}.'
           : 'bringmeback ${latest.label} is out. This is ${BuildInfo.current.label}.'),
       actions: [
-        TextButton(
-            onPressed: messenger.hideCurrentMaterialBanner,
-            child: const Text('Later')),
+        TextButton(onPressed: messenger.hideCurrentMaterialBanner, child: const Text('Later')),
         if (platform.canReload)
           TextButton(onPressed: platform.reloadApp, child: const Text('Reload')),
       ],
@@ -163,8 +163,7 @@ class _TasksStackState extends State<TasksStack> {
     if (!mounted) return;
     final now = DateTime.now();
     final open = tasks.state.tasks
-        .where((t) =>
-            !t.done && (PomodoroRecord.decode(t.pomodoro, now: now)?.open ?? false))
+        .where((t) => !t.done && (PomodoroRecord.decode(t.pomodoro, now: now)?.open ?? false))
         .firstOrNull;
     if (open != null) await openFocus(context, open.id.value, autoStart: false);
   }
@@ -181,34 +180,26 @@ class _TasksStackState extends State<TasksStack> {
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            AddNewTaskIntent(),
+        SingleActivator(LogicalKeyboardKey.keyN, control: true): AddNewTaskIntent(),
         SingleActivator(LogicalKeyboardKey.keyN, alt: true): AddNewTaskIntent(),
-        SingleActivator(LogicalKeyboardKey.keyD, control: true):
-            RemoveCurrentTaskIntent(),
-        SingleActivator(LogicalKeyboardKey.keyD, alt: true):
-            RemoveCurrentTaskIntent(),
+        SingleActivator(LogicalKeyboardKey.keyD, control: true): RemoveCurrentTaskIntent(),
+        SingleActivator(LogicalKeyboardKey.keyD, alt: true): RemoveCurrentTaskIntent(),
         SingleActivator(LogicalKeyboardKey.keyN, control: true, shift: true):
             AddNewTaskNextIntent(),
-        SingleActivator(LogicalKeyboardKey.keyN, alt: true, shift: true):
-            AddNewTaskNextIntent(),
-        SingleActivator(LogicalKeyboardKey.enter, control: true):
-            ToggleDoneIntent(),
-        SingleActivator(LogicalKeyboardKey.enter, alt: true):
-            ToggleDoneIntent(),
+        SingleActivator(LogicalKeyboardKey.keyN, alt: true, shift: true): AddNewTaskNextIntent(),
+        SingleActivator(LogicalKeyboardKey.enter, control: true): ToggleDoneIntent(),
+        SingleActivator(LogicalKeyboardKey.enter, alt: true): ToggleDoneIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
           AddNewTaskIntent: CallbackAction<AddNewTaskIntent>(
-            onInvoke: (AddNewTaskIntent intent) =>
-                writeTask(context, onTop: true),
+            onInvoke: (AddNewTaskIntent intent) => writeTask(context, onTop: true),
           ),
           ToggleDoneIntent: CallbackAction<ToggleDoneIntent>(
             onInvoke: (ToggleDoneIntent intent) {
               final index = _focusedIndex(tasksBloc);
               if (index == null) return null;
-              tasksBloc.add(SetDoneEvent(
-                  index: index, done: !tasksBloc.state.tasks[index].done));
+              tasksBloc.add(SetDoneEvent(index: index, done: !tasksBloc.state.tasks[index].done));
               return null;
             },
           ),
@@ -220,8 +211,8 @@ class _TasksStackState extends State<TasksStack> {
             },
           ),
           AddNewTaskNextIntent: CallbackAction<AddNewTaskNextIntent>(
-            onInvoke: (AddNewTaskNextIntent intent) => writeTask(context,
-                index: (_focusedIndex(tasksBloc) ?? -1) + 1),
+            onInvoke: (AddNewTaskNextIntent intent) =>
+                writeTask(context, index: (_focusedIndex(tasksBloc) ?? -1) + 1),
           )
         },
         child: Focus(
@@ -234,16 +225,15 @@ class _TasksStackState extends State<TasksStack> {
                   buildWhen: (a, b) => a.muted != b.muted,
                   builder: (context, state) => IconButton(
                     tooltip: state.muted ? 'Turn sounds on' : 'Mute sounds',
-                    icon:
-                        Icon(state.muted ? Icons.volume_off : Icons.volume_up),
+                    icon: Icon(state.muted ? Icons.volume_off : Icons.volume_up),
                     onPressed: () => tasksBloc.add(ToggleMuteEvent()),
                   ),
                 ),
                 IconButton(
                   tooltip: 'History',
                   icon: const Icon(Icons.history),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const HistoryPage())),
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(builder: (_) => const HistoryPage())),
                 ),
                 const SyncStatusButton(),
                 IconButton(
@@ -254,8 +244,8 @@ class _TasksStackState extends State<TasksStack> {
                 IconButton(
                   tooltip: 'Settings',
                   icon: const Icon(Icons.settings_outlined),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SettingsPage())),
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
                 ),
               ],
             ),
@@ -271,11 +261,9 @@ class _TasksStackState extends State<TasksStack> {
                     ),
             ),
             // New task sits at the end of the bottom bar, with the task actions.
-            floatingActionButtonLocation:
-                FloatingActionButtonLocation.endContained,
+            floatingActionButtonLocation: FloatingActionButtonLocation.endContained,
             bottomNavigationBar: BlocBuilder<TasksBloc, TasksState>(
-              buildWhen: (a, b) =>
-                  a.needsTearOff() != b.needsTearOff() || a.loaded != b.loaded,
+              buildWhen: (a, b) => a.needsTearOff() != b.needsTearOff() || a.loaded != b.loaded,
               builder: (context, state) => !state.loaded || state.needsTearOff()
                   ? const SizedBox.shrink()
                   : const NoteToolbar(),
@@ -308,18 +296,14 @@ class _TasksStackState extends State<TasksStack> {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text.rich(TextSpan(children: [
-                  TextSpan(
-                      text: '$keys  ',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  TextSpan(text: '$keys  ', style: const TextStyle(fontWeight: FontWeight.bold)),
                   TextSpan(text: action),
                 ])),
               ),
           ],
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
         ],
       ),
     );
@@ -362,8 +346,7 @@ class _PortraitFrame extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               boxShadow: [
-                BoxShadow(
-                    color: scheme.shadow.withValues(alpha: 0.12), blurRadius: 16),
+                BoxShadow(color: scheme.shadow.withValues(alpha: 0.12), blurRadius: 16),
               ],
             ),
             child: child,
