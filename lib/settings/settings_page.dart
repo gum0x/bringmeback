@@ -26,6 +26,7 @@ class SettingsPage extends StatelessWidget {
               _Section('Today\'s note'),
               _TaskLimitTile(),
               _NoteMinutesTile(),
+              _RequireCountdownSwitch(),
               _Section('Experimental'),
               _BacklogSwitch(),
               _Section('Pomodoro'),
@@ -116,6 +117,26 @@ class _StepperTile extends StatelessWidget {
             icon: const Icon(Icons.add),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Asks for a countdown on every new task, so none is added without a time.
+class _RequireCountdownSwitch extends StatelessWidget {
+  const _RequireCountdownSwitch();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => a.requireCountdown != b.requireCountdown,
+      builder: (context, state) => SwitchListTile(
+        title: const Text('Ask for a countdown'),
+        subtitle: const Text('Every task takes time: a new task can\'t be added until you pick '
+            'how long it will take. Off, it starts at 20 min.'),
+        value: state.requireCountdown,
+        onChanged: (on) => bloc.add(SetRequireCountdownEvent(on)),
       ),
     );
   }

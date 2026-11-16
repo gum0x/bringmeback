@@ -15,7 +15,8 @@ import 'task_dialog.dart';
 Future<void> writeTask(BuildContext context,
     {int index = 0, bool onTop = false}) async {
   final tasksBloc = context.read<TasksBloc>();
-  final details = await showTaskDialog(context);
+  final details = await showTaskDialog(context,
+      timerLengthSeconds: tasksBloc.state.requireCountdown ? null : defaultTimerLengthSeconds);
   if (details == null || !context.mounted) return;
   final id = ValueKey<String>(newId());
   if (tasksBloc.state.atLimit) {

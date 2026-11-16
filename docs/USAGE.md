@@ -9,8 +9,10 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
 
 - **Write a task** with **Add a task** on the next empty line of the note, or with the small **(+)**
   tabs on the top and bottom edges of a task. They show when you point at a task, or after you tap it
-  to select it. A dialog asks for the name, optional **Details** (longer text over several lines) and
-  the countdown length; Enter in the name saves.
+  to select it. A dialog asks for the name, **How long?** (the countdown length) right under it, and
+  optional **Details** (longer text over several lines); Enter in the name saves. Every task takes
+  time, so a new task needs a countdown picked before it is added: Add or Enter without one points to
+  it. Settings > **Ask for a countdown** turns this off, and new tasks then start at 20 minutes.
 - **New task** (at the end of the bottom bar, or Alt+N) writes a task on top, as an interruption: it
   takes the timer, and the task you were on waits one line below.
 - **Every task shows its time**: the one waiting shows how long it is expected to take, or the time
@@ -81,7 +83,7 @@ The break ends, and the line goes away, when you:
 
 Writing or moving tasks lower down the note doesn't end the break.
 
-Set the countdown length in the task dialog (default 20 minutes). The bottom bar has **Restart
+Set the countdown length in the task dialog (required on a new task, unless turned off in Settings). The bottom bar has **Restart
 countdown**, and its ⋮ menu **Reset total time**.
 
 While a task runs, a short reminder sound plays every 30 minutes. The speaker icon in the top bar mutes
