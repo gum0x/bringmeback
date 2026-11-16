@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ViewportOffset;
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/task_document.dart';
@@ -81,6 +82,47 @@ class _CommittedTime extends StatelessWidget {
   }
 }
 
+/// Said loudly when the note holds more tasks than the limit: every task written today counts,
+/// done ones too, because a list longer than planned is a sign of over-committing, not of a
+/// productive day.
+class _OverLimitWarning extends StatelessWidget {
+  final TasksState state;
+
+  const _OverLimitWarning({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final error = theme.colorScheme.error;
+    final count = state.tasks.length;
+    return Padding(
+      key: const Key('overLimit'),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1, right: 6),
+            child: Icon(Icons.warning_amber_rounded, size: 18, color: error),
+          ),
+          Flexible(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                  text: 'Over-committed: $count tasks, over your limit of ${state.taskLimit}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const TextSpan(text: '. Plan fewer: let go of what can wait.'),
+              ]),
+              style: theme.textTheme.bodyMedium?.copyWith(color: error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Which tasks of today's note are shown.
 enum TaskFilter {
   all('All tasks'),
@@ -111,6 +153,15 @@ class _TodayNoteState extends State<_TodayNote> {
   /// Only changes what this screen shows: the note itself, and other devices, are untouched.
   TaskFilter _filter = TaskFilter.all;
 
+  /// The task list never scrolls by itself; the page around it does.
+  final _listOffset = ViewportOffset.zero();
+
+  @override
+  void dispose() {
+    _listOffset.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
@@ -119,7 +170,6 @@ class _TodayNoteState extends State<_TodayNote> {
     final tasks = state.tasks;
     final current = state.currentIndex;
     final done = tasks.where((t) => t.done).length;
-    final open = state.openCount;
     final filtered = _filter != TaskFilter.all;
     // Positions on the note of the tasks shown, so every action still reaches the right task.
     final shown = [
@@ -143,15 +193,13 @@ class _TodayNoteState extends State<_TodayNote> {
                 Text(
                   [
                     if (tasks.isNotEmpty) '$done of ${tasks.length} done',
-                    if (open > state.taskLimit)
-                      '$open open, over your limit of ${state.taskLimit}'
-                    else if (state.atLimit)
-                      'at your limit of ${state.taskLimit} open',
+                    if (state.atLimit && !state.overLimit)
+                      'at your limit of ${state.taskLimit} tasks',
                     if (filtered) 'showing ${_filter.label.toLowerCase()}',
                   ].join(' · '),
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                      color: open > state.taskLimit ? theme.colorScheme.error : colors.faded),
+                  style: theme.textTheme.bodyMedium?.copyWith(color: colors.faded),
                 ),
+                if (state.overLimit) _OverLimitWarning(state: state),
                 if (tasks.isNotEmpty) _CommittedTime(state: state),
               ],
             ),
@@ -201,29 +249,35 @@ class _TodayNoteState extends State<_TodayNote> {
                 reorderable: false,
               ),
           ])
-        : ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      buildDefaultDragHandles: false,
-      itemCount: tasks.length,
-      proxyDecorator: (child, index, animation) => Material(
-        color: colors.paper,
-        elevation: 6,
-        child: child,
-      ),
-      itemBuilder: (context, index) {
-        final task = tasks[index];
-        return TaskLine(
-          key: task.id,
-          task: task,
-          index: index,
-          current: index == current,
-        );
-      },
-      onReorderItem: (oldIndex, newIndex) => context
-          .read<TasksBloc>()
-          .add(MoveTaskEvent(fromIndex: oldIndex, toIndex: newIndex)),
-    );
+        // A sliver in a viewport that doesn't scroll itself, so the nearest scrollable is the
+        // page's: dragging a task near the top or bottom edge scrolls the page, and a task can be
+        // moved anywhere on a long note in one drag.
+        : ShrinkWrappingViewport(
+            key: const Key('taskList'),
+            offset: _listOffset,
+            slivers: [
+              SliverReorderableList(
+                itemCount: tasks.length,
+                proxyDecorator: (child, index, animation) => Material(
+                  color: colors.paper,
+                  elevation: 6,
+                  child: child,
+                ),
+                itemBuilder: (context, index) {
+                  final task = tasks[index];
+                  return TaskLine(
+                    key: task.id,
+                    task: task,
+                    index: index,
+                    current: index == current,
+                  );
+                },
+                onReorderItem: (oldIndex, newIndex) => context
+                    .read<TasksBloc>()
+                    .add(MoveTaskEvent(fromIndex: oldIndex, toIndex: newIndex)),
+              ),
+            ],
+          );
 
     final emptyFilter = filtered && shown.isEmpty && tasks.isNotEmpty
         ? Padding(
