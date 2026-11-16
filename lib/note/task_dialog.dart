@@ -136,7 +136,9 @@ class _TaskDialogState extends State<_TaskDialog> {
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                        _askedForTime ? 'Pick a countdown to add the task' : 'Required',
+                        _askedForTime
+                            ? 'Pick a countdown to ${widget.editing ? 'save' : 'add'} the task'
+                            : 'Required',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: _askedForTime
                                 ? Theme.of(context).colorScheme.error

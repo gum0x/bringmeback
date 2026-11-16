@@ -251,12 +251,12 @@ void main() {
     expect(seconds(countdown(tester, 0)), inInclusiveRange(5 * 60 - 3, 5 * 60));
 
     await doubleTapTask(tester, 0);
-    // A length that isn't a number of minutes can't be saved.
+    // A length that isn't a number of minutes can't be saved: Save points to the countdown.
     await tester.enterText(find.widgetWithText(TextField, 'Minutes'), '0');
     await tester.pump();
-    expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed,
-        isNull);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pick a countdown to save the task'), findsOneWidget);
     await tester.tap(find.text('45 min'));
     await tester.enterText(
         find.widgetWithText(TextField, 'Details'), 'First line\nSecond line');
