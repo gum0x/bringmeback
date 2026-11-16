@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
 import '../focus/focus_page.dart';
+import '../sync/sync_status.dart';
 import '../timer.dart';
 import 'paper.dart';
 import 'task_dialog.dart';
@@ -167,6 +168,7 @@ class NoteToolbar extends StatelessWidget {
                 ),
               ],
             ),
+            const SyncNowButton(),
           ],
         ),
       );
