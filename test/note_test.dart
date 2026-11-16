@@ -51,6 +51,9 @@ Future<void> writeThrough(WidgetTester tester, Finder button, String name,
   await settle(tester);
 }
 
+final addTaskButton = find.byKey(const Key('addTaskButton'));
+final interruptionButton = find.byKey(const Key('interruptionButton'));
+
 List<String> names(TasksBloc bloc) => [for (final t in bloc.state.tasks) t.name];
 
 void main() {
@@ -62,20 +65,75 @@ void main() {
     await writeThrough(tester, find.text('Write your first task'), 'Write report',
         minutes: '25');
     await writeThrough(tester, find.text('Add a task'), 'Call the bank');
-    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+    await writeThrough(tester, interruptionButton,
         'Answer the phone');
 
     expect(names(bloc), ['Answer the phone', 'Write report', 'Call the bank']);
     expect(find.text('1.'), findsOneWidget);
     expect(find.text('3.'), findsOneWidget);
     expect(bloc.state.tasks[1].timerLengthSeconds, 25 * 60);
-    // A task on top is an interruption: it is timed.
+    // An interruption goes on top and is timed.
     expect(bloc.state.tasks.first.running, isTrue);
+    expect(bloc.state.tasks.first.interruption, isTrue);
     expect(find.byType(TaskClock), findsOneWidget);
     // Every task waiting its turn shows how long it is expected to take.
     expect(find.text('Expected 25:00'), findsOneWidget);
     expect(find.text('Expected 20:00'), findsOneWidget);
     expect(find.textContaining(RegExp(r'^Left \d+:\d+ of 20:00$')), findsOneWidget);
+  });
+
+  noteTest('the add button writes at the end; the red interruption button on top, flagged',
+      (tester, bloc) async {
+    await writeThrough(tester, addTaskButton, 'Write report');
+    await writeThrough(tester, addTaskButton, 'Call the bank');
+    expect(names(bloc), ['Write report', 'Call the bank']);
+    expect(bloc.state.tasks.any((t) => t.interruption), isFalse);
+    expect(find.byKey(const Key('interruptionMark')), findsNothing);
+    // On a note with nothing open, the task added starts timing.
+    expect(bloc.state.tasks[0].running, isTrue);
+
+    // The interruption button is red, and its dialog says what it is for.
+    final fab = tester.widget<FloatingActionButton>(interruptionButton);
+    final context = tester.element(interruptionButton);
+    expect(fab.backgroundColor, Theme.of(context).colorScheme.error);
+    await tester.tap(interruptionButton);
+    await tester.pumpAndSettle();
+    expect(find.text('Interruption'), findsWidgets);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    await writeThrough(tester, interruptionButton, 'Answer the phone');
+    expect(names(bloc), ['Answer the phone', 'Write report', 'Call the bank']);
+    final top = bloc.state.tasks.first;
+    expect(top.interruption, isTrue);
+    expect(top.running, isTrue, reason: 'an interruption takes the timer');
+    expect(bloc.state.tasks[1].running, isFalse);
+    expect(find.byKey(const Key('interruptionMark')), findsOneWidget);
+
+    // A planned task added while interrupted goes at the end, and the interruption keeps the timer.
+    await writeThrough(tester, addTaskButton, 'Buy milk');
+    expect(names(bloc).last, 'Buy milk');
+    expect(bloc.state.tasks.first.running, isTrue);
+
+    // History keeps the interruption flagged.
+    final history = buildHistory(bloc.taskDocument!);
+    expect([for (final t in history.tasks) if (t.interruption) t.name], ['Answer the phone']);
+    expect(history.notes.single.interruptionCount, 1);
+    await tester.tap(find.byTooltip('History'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('1 interruption'), findsOneWidget);
+    await tester.tap(find.text('Tasks'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Interruption · '), findsOneWidget);
+  });
+
+  noteTest('the interruption button fits a phone, with its icon only',
+      size: const Size(360, 740), (tester, bloc) async {
+    expect(interruptionButton, findsOneWidget);
+    expect(find.descendant(of: interruptionButton, matching: find.text('Interruption')),
+        findsNothing);
+    await writeThrough(tester, interruptionButton, 'Door bell');
+    expect(bloc.state.tasks.single.interruption, isTrue);
   });
 
   noteTest('checking a task off strikes it through and hands the timer on', (tester, bloc) async {
@@ -170,6 +228,29 @@ void main() {
     await settle(tester);
     expect(names(bloc), contains('Urgent'));
     expect(find.textContaining('over your limit of $defaultTaskLimit'), findsOneWidget);
+  });
+
+  noteTest('an interruption never asks about the limit', (tester, bloc) async {
+    bloc.add(SetBacklogEnabledEvent(true));
+    await fill(tester, bloc, defaultTaskLimit);
+    expect(bloc.state.atLimit, isTrue);
+    await writeThrough(tester, interruptionButton, 'Fire alarm');
+    expect(find.text('Your note is at its limit'), findsNothing);
+    expect(names(bloc).first, 'Fire alarm');
+    expect(bloc.state.tasks.first.interruption, isTrue);
+    expect(bloc.state.tasks, hasLength(defaultTaskLimit + 1));
+    expect(bloc.state.backlog, isEmpty);
+
+    // Over the limit, it still goes straight on top.
+    await writeThrough(tester, interruptionButton, 'Boss calls');
+    expect(find.text('Your note is over its limit'), findsNothing);
+    expect(names(bloc).take(2), ['Boss calls', 'Fire alarm']);
+
+    // A planned task still asks.
+    await writeThrough(tester, addTaskButton, 'Maybe later');
+    expect(find.text('Your note is over its limit'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
   });
 
   noteTest('with the backlog on, a new task past the limit can go there', (tester, bloc) async {
@@ -426,7 +507,7 @@ void main() {
   });
 
   noteTest('pausing shows a break on top, and resuming clears it', (tester, bloc) async {
-    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+    await writeThrough(tester, interruptionButton,
         'Write report');
     expect(find.byKey(const ValueKey('break-line')), findsNothing);
 
@@ -457,7 +538,7 @@ void main() {
   });
 
   noteTest('putting another task first ends the break and starts its clock', (tester, bloc) async {
-    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'First');
+    await writeThrough(tester, interruptionButton, 'First');
     await writeThrough(tester, find.text('Add a task'), 'Second');
     await tester.tap(find.byTooltip('Pause (logs a break)'));
     await settle(tester);
@@ -479,7 +560,7 @@ void main() {
     // And so is a new task on top.
     await tester.tap(find.byTooltip('Pause (logs a break)'));
     await settle(tester);
-    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'), 'Phone');
+    await writeThrough(tester, interruptionButton, 'Phone');
     expect(bloc.state.onBreak, isFalse);
     expect(bloc.state.tasks.first.name, 'Phone');
     expect(bloc.state.tasks.first.running, isTrue);

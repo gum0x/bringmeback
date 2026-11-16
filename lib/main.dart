@@ -123,7 +123,8 @@ class _AppLifecycleState extends State<_AppLifecycle> {
 /// Keyboard shortcuts, with the Alt variants for browsers, which keep Ctrl+N and Ctrl+D to
 /// themselves.
 const _shortcutHelp = [
-  ('Ctrl+N or Alt+N', 'New task on top, with its timer running'),
+  ('Ctrl+N or Alt+N', 'New task at the end of the note'),
+  ('Ctrl+I or Alt+I', 'Interruption on top, with its timer running'),
   ('Ctrl+Shift+N or Alt+Shift+N', 'New task after the selected one'),
   ('Ctrl+Enter or Alt+Enter', 'Check off the selected task, or uncheck it'),
   ('Ctrl+D or Alt+D', 'Delete the selected task'),
@@ -184,6 +185,10 @@ class _TasksStackState extends State<TasksStack> {
         SingleActivator(LogicalKeyboardKey.keyN, control: true):
             AddNewTaskIntent(),
         SingleActivator(LogicalKeyboardKey.keyN, alt: true): AddNewTaskIntent(),
+        SingleActivator(LogicalKeyboardKey.keyI, control: true):
+            AddInterruptionIntent(),
+        SingleActivator(LogicalKeyboardKey.keyI, alt: true):
+            AddInterruptionIntent(),
         SingleActivator(LogicalKeyboardKey.keyD, control: true):
             RemoveCurrentTaskIntent(),
         SingleActivator(LogicalKeyboardKey.keyD, alt: true):
@@ -201,7 +206,11 @@ class _TasksStackState extends State<TasksStack> {
         actions: <Type, Action<Intent>>{
           AddNewTaskIntent: CallbackAction<AddNewTaskIntent>(
             onInvoke: (AddNewTaskIntent intent) =>
-                writeTask(context, onTop: true),
+                writeTask(context, atEnd: true),
+          ),
+          AddInterruptionIntent: CallbackAction<AddInterruptionIntent>(
+            onInvoke: (AddInterruptionIntent intent) =>
+                writeTask(context, interruption: true),
           ),
           ToggleDoneIntent: CallbackAction<ToggleDoneIntent>(
             onInvoke: (ToggleDoneIntent intent) {
@@ -260,17 +269,13 @@ class _TasksStackState extends State<TasksStack> {
               ],
             ),
             floatingActionButton: BlocBuilder<TasksBloc, TasksState>(
+              buildWhen: (a, b) =>
+                  a.needsTearOff() != b.needsTearOff() || a.loaded != b.loaded,
               builder: (context, state) => !state.loaded || state.needsTearOff()
                   ? const SizedBox.shrink()
-                  : FloatingActionButton.extended(
-                      tooltip: 'New task on top (Ctrl+N)',
-                      elevation: 0,
-                      onPressed: () => writeTask(context, onTop: true),
-                      icon: const Icon(Icons.add),
-                      label: const Text('New task'),
-                    ),
+                  : const NewTaskButtons(),
             ),
-            // New task sits at the end of the bottom bar, with the task actions.
+            // The new task buttons sit at the end of the bottom bar, with the task actions.
             floatingActionButtonLocation:
                 FloatingActionButtonLocation.endContained,
             bottomNavigationBar: BlocBuilder<TasksBloc, TasksState>(
@@ -328,6 +333,10 @@ class _TasksStackState extends State<TasksStack> {
 
 class AddNewTaskIntent extends Intent {
   const AddNewTaskIntent();
+}
+
+class AddInterruptionIntent extends Intent {
+  const AddInterruptionIntent();
 }
 
 class RemoveCurrentTaskIntent extends Intent {

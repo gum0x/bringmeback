@@ -482,7 +482,9 @@ class _TearOffViewState extends State<TearOffView> {
       lines: [
         for (final t in state.tasks)
           NoteSheetLine(
-              name: t.name, status: t.done ? TaskStatus.done : TaskStatus.open)
+              name: t.name,
+              status: t.done ? TaskStatus.done : TaskStatus.open,
+              interruption: t.interruption)
       ],
     );
 
@@ -548,7 +550,11 @@ class NoteSheetLine {
   final TaskStatus status;
   final String? trailing;
 
-  const NoteSheetLine({required this.name, required this.status, this.trailing});
+  /// Whether the task was an interruption, marked in red.
+  final bool interruption;
+
+  const NoteSheetLine(
+      {required this.name, required this.status, this.trailing, this.interruption = false});
 }
 
 /// A note as it was written, read-only: for tearing off and for History.
@@ -600,6 +606,14 @@ class NoteSheet extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 1),
                     child: Icon(statusIcon(line.status), size: 18),
                   ),
+                  if (line.interruption)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 1),
+                      child: Icon(Icons.bolt,
+                          size: 18,
+                          color: theme.colorScheme.error,
+                          semanticLabel: 'Interruption'),
+                    ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: StrikeText(

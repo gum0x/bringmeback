@@ -101,12 +101,18 @@ class _NotesHistory extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 520),
             child: NoteSheet(
               title: note.closedAt == null ? '$day · in use' : day,
-              subtitle: '${note.doneCount} of ${note.tasks.length} done',
+              subtitle: [
+                '${note.doneCount} of ${note.tasks.length} done',
+                if (note.interruptionCount > 0)
+                  '${note.interruptionCount} '
+                      '${note.interruptionCount == 1 ? 'interruption' : 'interruptions'}',
+              ].join(' · '),
               lines: [
                 for (final t in note.tasks)
                   NoteSheetLine(
                     name: t.name,
                     status: t.status,
+                    interruption: t.interruption,
                     trailing: switch (t.status) {
                       TaskStatus.done when t.doneAt != null => _time(context, t.doneAt!),
                       TaskStatus.carried => 'written again',
@@ -163,7 +169,14 @@ class _TaskHistory extends StatelessWidget {
           animate: false,
           style: theme.textTheme.bodyLarge,
         ),
+        trailing: task.interruption
+            ? Tooltip(
+                message: 'Interruption',
+                child: Icon(Icons.bolt, color: theme.colorScheme.error),
+              )
+            : null,
         subtitle: Text([
+          if (task.interruption) 'Interruption',
           status,
           if (task.workedSeconds > 0) 'worked ${formatClock(task.workedSeconds)}',
         ].join(' · ')),

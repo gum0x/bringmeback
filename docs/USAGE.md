@@ -11,8 +11,11 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
   tabs on the top and bottom edges of a task. They show when you point at a task, or after you tap it
   to select it. A dialog asks for the name, optional **Details** (longer text over several lines) and
   the countdown length; Enter in the name saves.
-- **New task** (at the end of the bottom bar, or Alt+N) writes a task on top, as an interruption: it
-  takes the timer, and the task you were on waits one line below.
+- **Two buttons at the end of the bottom bar** write new tasks:
+  - the small **+** (Alt+N) adds a planned task at the end of the note. On a note with nothing open,
+    it starts timing right away;
+  - the red **Interruption** (Alt+I) writes a task on top: it takes the timer, and the task you were on
+    waits one line below. See [Interruptions](#interruptions).
 - **Every task shows its time**: the one waiting shows how long it is expected to take, or the time
   left if you already worked on it; the current one counts down, then shows how far over it is.
 - **Check a task off** with its checkbox. It stays on the note, struck through, with the time it was
@@ -76,7 +79,7 @@ the break has lasted and "No task clock is running", so it is clear that nothing
 The break ends, and the line goes away, when you:
 
 - press play on the bottom bar, or **Back to work** on the break line;
-- put another task first: a **New task** on top, a task written above the current one, or a task
+- put another task first: an **Interruption** on top, a task written above the current one, or a task
   dragged above it. That task's clock starts.
 
 Writing or moving tasks lower down the note doesn't end the break.
@@ -89,9 +92,13 @@ all sounds.
 
 ## Interruptions
 
-An interruption is a new task. Press **New task** (Alt+N): it goes on top and is timed, and the task you
-were on pauses one line below. When the interruption is done, check it off and the task it interrupted
-takes over again.
+An interruption is a new task. Press the red **Interruption** button (Alt+I): it goes on top and is
+timed, and the task you were on pauses one line below. When the interruption is done, check it off and
+the task it interrupted takes over again.
+
+Interruptions are marked with a red ⚡ on the note and in **History**, which also counts them per note,
+so you can see how much of a day went to things you didn't plan. They happen whether or not there is
+room, so an interruption never asks about the task limit and never offers the backlog.
 
 ## Focus with Pomodoro
 
@@ -150,7 +157,8 @@ off instead. A message at the bottom offers **Undo**, which puts the task back w
 
 | Keys | Action |
 | --- | --- |
-| Ctrl+N or Alt+N | New task on top, with its timer running |
+| Ctrl+N or Alt+N | New task at the end of the note |
+| Ctrl+I or Alt+I | Interruption on top, with its timer running |
 | Ctrl+Shift+N or Alt+Shift+N | New task after the selected one |
 | Ctrl+Enter or Alt+Enter | Check off the selected task, or uncheck it |
 | Ctrl+D or Alt+D | Delete the selected task |

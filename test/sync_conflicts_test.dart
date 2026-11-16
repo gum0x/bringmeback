@@ -333,9 +333,16 @@ void main() {
         expect(byId(bloc, 't1').done, isTrue);
         expect(byId(bloc, 't1').running, isFalse);
         expect(byId(bloc, 't2').running, isFalse, reason: 'Only the current task runs');
-        // "Second" ran on A from when "First" was checked off until "Urgent" started on B.
-        expect([for (final e in byId(bloc, 't2').entries) (e.start, e.end)],
-            [(secondStarted, urgentStarted)]);
+        // "Second" ran on A from when "First" was checked off until "Urgent" started on B. Entries
+        // before that come from the setup, where "Second" ran until "First" went on top over it:
+        // one entry or none, depending on whether that crossed into the next second.
+        expect([
+          for (final e in byId(bloc, 't2').entries)
+            if (e.start >= secondStarted) (e.start, e.end)
+        ], [
+          (secondStarted, urgentStarted)
+        ]);
+        expect(byId(bloc, 't2').entries.where((e) => e.end == null), isEmpty);
       }
       await syncA.close();
       await syncB.close();

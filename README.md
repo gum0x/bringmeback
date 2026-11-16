@@ -16,7 +16,8 @@ break, so the time between tasks is kept too. Deleted tasks can be brought back 
 
 | Keys | Action |
 | --- | --- |
-| Ctrl+N or Alt+N | New task on top, with its timer running |
+| Ctrl+N or Alt+N | New task at the end of the note |
+| Ctrl+I or Alt+I | Interruption on top, with its timer running |
 | Ctrl+Shift+N or Alt+Shift+N | New task after the selected one |
 | Ctrl+Enter or Alt+Enter | Check off the selected task, or uncheck it |
 | Ctrl+D or Alt+D | Delete the selected task |

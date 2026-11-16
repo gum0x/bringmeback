@@ -15,6 +15,9 @@ class HistoryTask {
   /// Whether this task was written again from an earlier note.
   final bool carriedFrom;
 
+  /// Whether this task was written on top as an interruption.
+  final bool interruption;
+
   const HistoryTask(
       {required this.id,
       required this.name,
@@ -22,7 +25,8 @@ class HistoryTask {
       required this.day,
       this.doneAt,
       this.workedSeconds = 0,
-      this.carriedFrom = false});
+      this.carriedFrom = false,
+      this.interruption = false});
 }
 
 /// One note as it was written, the current one included.
@@ -38,6 +42,8 @@ class HistoryNote {
       {required this.day, required this.startedAt, this.closedAt, required this.tasks});
 
   int get doneCount => tasks.where((t) => t.status == TaskStatus.done).length;
+
+  int get interruptionCount => tasks.where((t) => t.interruption).length;
 }
 
 class History {
@@ -71,6 +77,7 @@ History buildHistory(TaskDocument doc, {int? now}) {
       doneAt: task.doneAt,
       workedSeconds: task.totalSecondsAt(now!),
       carriedFrom: task.carriedFrom != null,
+      interruption: task.interruption,
     );
   }
 

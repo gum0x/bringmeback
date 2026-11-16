@@ -9,15 +9,27 @@ import '../timer.dart';
 import 'paper.dart';
 import 'task_dialog.dart';
 
-/// Asks for a new task in the dialog and writes it at [index]; on top as an interruption when
-/// [onTop]. When the note already holds as many unfinished tasks as the limit, it asks first and
+/// Asks for a new task in the dialog and writes it at [index]; at the end of the note when
+/// [atEnd], where it starts timing if nothing else on the note is open. When the note already holds as many unfinished tasks as the limit, it asks first and
 /// suggests the backlog.
+///
+/// With [interruption], the task goes on top, takes the timer and is flagged as an interruption.
+/// Interruptions happen whether or not there is room, so they never ask about the limit.
 Future<void> writeTask(BuildContext context,
-    {int index = 0, bool onTop = false}) async {
+    {int index = 0, bool atEnd = false, bool interruption = false}) async {
   final tasksBloc = context.read<TasksBloc>();
-  final details = await showTaskDialog(context);
+  final details = await showTaskDialog(context, interruption: interruption);
   if (details == null || !context.mounted) return;
   final id = ValueKey<String>(newId());
+  if (interruption) {
+    tasksBloc.add(AddTaskOnTopEvent(
+        name: details.name,
+        notes: details.notes,
+        id: id,
+        timerLengthSeconds: details.timerLengthSeconds,
+        interruption: true));
+    return;
+  }
   if (tasksBloc.state.atLimit) {
     final choice = await askOverLimit(context, name: details.name);
     if (choice == null || !context.mounted) return;
@@ -37,19 +49,21 @@ Future<void> writeTask(BuildContext context,
       case OverLimitChoice.note:
     }
   }
-  tasksBloc.add(onTop
-      ? AddTaskOnTopEvent(
-          name: details.name,
-          notes: details.notes,
-          id: id,
-          timerLengthSeconds: details.timerLengthSeconds)
-      : InsertTaskEvent(
-          index: index,
-          name: details.name,
-          notes: details.notes,
-          id: id,
-          timerLengthSeconds: details.timerLengthSeconds));
+  final state = tasksBloc.state;
+  // With nothing open on the note, the task added at the end is the one to do now, so it starts.
+  final idle = atEnd && state.currentIndex < 0 && !state.onBreak;
+  tasksBloc.add(InsertTaskEvent(
+      // Read the length now: the note may have changed while the dialog was open.
+      index: atEnd ? state.tasks.length : index,
+      name: details.name,
+      notes: details.notes,
+      id: id,
+      timerLengthSeconds: details.timerLengthSeconds));
+  if (idle) tasksBloc.add(StartTimerEvent(index: 0));
 }
+
+/// The colour of interruptions: the Interruption button and the mark on interrupting tasks.
+Color interruptionColor(BuildContext context) => Theme.of(context).colorScheme.error;
 
 /// Edits the name, details and countdown of the task at [index] in the dialog.
 Future<void> editTask(BuildContext context, int index) async {
@@ -179,9 +193,62 @@ int targetIndex(TasksState state) {
 
 enum _BarAction { edit, resetTotal, delete }
 
+/// The buttons that write a new task, at the end of the bottom bar: a small one that adds a planned
+/// task at the end of the note, and a red one for an interruption, which goes on top and takes the
+/// timer. On a narrow screen the interruption button shows only its icon.
+class NewTaskButtons extends StatelessWidget {
+  const NewTaskButtons({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final red = interruptionColor(context);
+    final onRed = theme.colorScheme.onError;
+    final wide = MediaQuery.sizeOf(context).width >= 600;
+    void interrupt() => writeTask(context, interruption: true);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FloatingActionButton.small(
+          key: const Key('addTaskButton'),
+          heroTag: 'addTask',
+          tooltip: 'Add a task at the end (Ctrl+N)',
+          elevation: 0,
+          onPressed: () => writeTask(context, atEnd: true),
+          child: const Icon(Icons.add),
+        ),
+        const SizedBox(width: 8),
+        if (wide)
+          FloatingActionButton.extended(
+            key: const Key('interruptionButton'),
+            heroTag: 'interruption',
+            tooltip: 'Interruption on top (Ctrl+I)',
+            elevation: 0,
+            backgroundColor: red,
+            foregroundColor: onRed,
+            onPressed: interrupt,
+            icon: const Icon(Icons.bolt),
+            label: const Text('Interruption'),
+          )
+        else
+          FloatingActionButton(
+            key: const Key('interruptionButton'),
+            heroTag: 'interruption',
+            tooltip: 'Interruption on top (Ctrl+I)',
+            elevation: 0,
+            backgroundColor: red,
+            foregroundColor: onRed,
+            onPressed: interrupt,
+            child: const Icon(Icons.bolt),
+          ),
+      ],
+    );
+  }
+}
+
 /// The bar at the bottom of today's note: play/pause for the current task; focus, restart and more
-/// actions for the selected task (or the current one when none is selected). New task sits at its
-/// end.
+/// actions for the selected task (or the current one when none is selected). The new task buttons
+/// sit at its end.
 class NoteToolbar extends StatelessWidget {
   const NoteToolbar({super.key});
 
@@ -331,16 +398,33 @@ class _TaskLineState extends State<TaskLine> {
       ),
     );
 
-    final details = <Widget>[
-      StrikeText(
-        task.name.isEmpty ? 'Untitled task' : task.name,
-        struck: task.done,
-        style: theme.textTheme.titleMedium?.copyWith(
-          color: colors.ink,
-          fontWeight: widget.current ? FontWeight.w600 : FontWeight.w400,
-          fontStyle: task.name.isEmpty ? FontStyle.italic : null,
-        ),
+    final name = StrikeText(
+      task.name.isEmpty ? 'Untitled task' : task.name,
+      struck: task.done,
+      style: theme.textTheme.titleMedium?.copyWith(
+        color: colors.ink,
+        fontWeight: widget.current ? FontWeight.w600 : FontWeight.w400,
+        fontStyle: task.name.isEmpty ? FontStyle.italic : null,
       ),
+    );
+    final details = <Widget>[
+      if (task.interruption)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2, right: 4),
+              child: Icon(Icons.bolt,
+                  key: const Key('interruptionMark'),
+                  size: 18,
+                  color: interruptionColor(context),
+                  semanticLabel: 'Interruption'),
+            ),
+            Flexible(child: name),
+          ],
+        )
+      else
+        name,
       if (task.notes.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 2),
