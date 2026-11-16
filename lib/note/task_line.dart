@@ -273,12 +273,19 @@ class TaskLine extends StatefulWidget {
   final int index;
   final bool current;
 
-  /// Whether new tasks can still be written on the note.
+  /// Whether the (+) buttons to write a task above or below it show.
+  final bool canInsert;
+
+  /// Whether the line sits in a reorderable list and shows a drag handle.
+  final bool reorderable;
+
   const TaskLine({
     super.key,
     required this.task,
     required this.index,
     required this.current,
+    this.canInsert = true,
+    this.reorderable = true,
   });
 
   @override
@@ -307,7 +314,7 @@ class _TaskLineState extends State<TaskLine> {
     final colors = NoteColors.of(context);
     final theme = Theme.of(context);
     final active = _hovered || task.inFocus;
-    final showInsert = active;
+    final showInsert = active && widget.canInsert;
 
     final number = SizedBox(
       width: 30,
@@ -430,7 +437,7 @@ class _TaskLineState extends State<TaskLine> {
               ),
             ),
           ),
-          dragHandle,
+          if (widget.reorderable) dragHandle else const SizedBox(width: 36),
         ],
       ),
     );
