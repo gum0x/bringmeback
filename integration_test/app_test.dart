@@ -71,6 +71,8 @@ bool doneAt(WidgetTester tester, int index) =>
 Future<void> fillTaskDialog(WidgetTester tester, String name,
     {String? minutes, String save = 'Add'}) async {
   await tester.enterText(find.widgetWithText(TextField, 'Task'), name);
+  // A new task needs a countdown: 20 min unless the test picks another.
+  minutes ??= save == 'Add' ? '20' : null;
   if (minutes != null) {
     await tester.enterText(find.widgetWithText(TextField, 'Minutes'), minutes);
   }

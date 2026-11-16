@@ -159,6 +159,10 @@ class TasksState {
   /// over-limit prompt doesn't offer it.
   final bool backlogEnabled;
 
+  /// Whether a new task needs a countdown picked before it can be added, set in Settings. On by
+  /// default: every task takes some time.
+  final bool requireCountdown;
+
   /// How much time a note may hold, in minutes, set in Settings.
   final int noteMinutes;
 
@@ -171,6 +175,7 @@ class TasksState {
       this.muted = false,
       this.taskLimit = defaultTaskLimit,
       this.backlogEnabled = false,
+      this.requireCountdown = true,
       this.breakStartedAt,
       this.noteMinutes = defaultNoteMinutes,
       int? noteStartedAt,
@@ -189,6 +194,7 @@ class TasksState {
       loaded: loaded,
       taskLimit: taskLimit,
       backlogEnabled: backlogEnabled,
+      requireCountdown: requireCountdown,
       noteMinutes: noteMinutes,
       breakStartedAt: breakStartedAt,
     );
@@ -402,6 +408,13 @@ class SetBacklogEnabledEvent extends TasksEvent {
   SetBacklogEnabledEvent(this.enabled);
 }
 
+/// Turns on or off the need to pick a countdown before adding a task.
+class SetRequireCountdownEvent extends TasksEvent {
+  final bool required;
+
+  SetRequireCountdownEvent(this.required);
+}
+
 /// Lets go of a new task on purpose instead of writing it: it is kept in History as let go, and not
 /// written anywhere.
 class LetGoNewTaskEvent extends TasksEvent {
@@ -513,6 +526,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   bool _muted = false;
   int _taskLimit = defaultTaskLimit;
   bool _backlogEnabled = false;
+  bool _requireCountdown = true;
   int _noteMinutes = defaultNoteMinutes;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
@@ -553,6 +567,12 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       emit(_view());
       SharedPreferences.getInstance()
           .then((prefs) => prefs.setBool('experimentalBacklog', _backlogEnabled));
+    });
+    on<SetRequireCountdownEvent>((e, emit) {
+      _requireCountdown = e.required;
+      emit(_view());
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setBool('requireCountdown', _requireCountdown));
     });
     on<LetGoNewTaskEvent>((e, emit) =>
         _edit(emit, (doc) => doc.letGoNew(e.id.value, name: e.name, notes: e.notes)));
@@ -595,6 +615,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
           muted: _muted,
           taskLimit: _taskLimit,
           backlogEnabled: _backlogEnabled,
+          requireCountdown: _requireCountdown,
           noteMinutes: _noteMinutes);
     }
     final tasks = doc.tasks(focusId: _focusId);
@@ -603,6 +624,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       muted: _muted,
       taskLimit: _taskLimit,
       backlogEnabled: _backlogEnabled,
+      requireCountdown: _requireCountdown,
       breakStartedAt: tasks.any((t) => t.running) ? null : doc.pauseStartedAt,
       noteMinutes: _noteMinutes,
       noteStartedAt: doc.noteStartedAt,
@@ -977,6 +999,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _taskLimit = (prefs.getInt('taskLimit') ?? defaultTaskLimit)
         .clamp(minTaskLimit, maxTaskLimit);
     _backlogEnabled = prefs.getBool('experimentalBacklog') ?? false;
+    _requireCountdown = prefs.getBool('requireCountdown') ?? true;
     _noteMinutes = (prefs.getInt('noteMinutes') ?? defaultNoteMinutes)
         .clamp(minNoteMinutes, maxNoteMinutes);
 

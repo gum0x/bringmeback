@@ -35,9 +35,10 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// Writes a task through the dialog the button at [button] opens.
+/// Writes a task through the dialog the button at [button] opens, with a 20 min countdown unless
+/// [minutes] says otherwise: a new task needs one.
 Future<void> writeThrough(WidgetTester tester, Finder button, String name,
-    {String? minutes}) async {
+    {String? minutes = '20'}) async {
   await tester.ensureVisible(button);
   await tester.pumpAndSettle();
   await tester.tap(button);
@@ -483,5 +484,51 @@ void main() {
     expect(bloc.state.onBreak, isFalse);
     expect(bloc.state.tasks.first.name, 'Phone');
     expect(bloc.state.tasks.first.running, isTrue);
+  });
+
+  noteTest('a new task needs a countdown before it is added', (tester, bloc) async {
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'New task'));
+    await tester.pumpAndSettle();
+    // Nothing is picked: the countdown starts empty and says it is required.
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Minutes')).controller!.text,
+        isEmpty);
+    expect(find.text('Required'), findsOneWidget);
+    // The countdown sits right under the name, above the details, so a phone keyboard doesn't
+    // hide it.
+    expect(tester.getTopLeft(find.text('How long?')).dy,
+        lessThan(tester.getTopLeft(find.widgetWithText(TextField, 'Details')).dy));
+
+    await tester.enterText(find.widgetWithText(TextField, 'Task'), 'Write report');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await settle(tester);
+    // Not added: the dialog stays and points to the missing time.
+    expect(bloc.state.tasks, isEmpty);
+    expect(find.text('Pick a countdown to add the task'), findsOneWidget);
+
+    // Enter in the name field does the same.
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    expect(bloc.state.tasks, isEmpty);
+
+    await tester.tap(find.widgetWithText(ChoiceChip, '45 min'));
+    await tester.pump();
+    expect(find.text('Pick a countdown to add the task'), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await settle(tester);
+    expect(names(bloc), ['Write report']);
+    expect(bloc.state.tasks.single.timerLengthSeconds, 45 * 60);
+  });
+
+  noteTest('with the countdown not required, a new task starts at 20 min', (tester, bloc) async {
+    bloc.add(SetRequireCountdownEvent(false));
+    await settle(tester);
+    await writeThrough(
+        tester, find.widgetWithText(FloatingActionButton, 'New task'), 'Quick one',
+        minutes: null);
+    expect(names(bloc), ['Quick one']);
+    expect(bloc.state.tasks.single.timerLengthSeconds, 20 * 60);
+    final prefs = await tester.runAsync(SharedPreferences.getInstance);
+    expect(prefs!.getBool('requireCountdown'), isFalse);
   });
 }
