@@ -47,6 +47,8 @@ void main() {
       // ignore: avoid_print
       print('${got == expected ? 'ok  ' : 'MISS'} $task => $got (expected $expected; '
           '${ranked.take(3).map((e) => '${e.key} ${(e.value * 100).round()}%').join(', ')})');
+      // ignore: avoid_print
+      if (got != expected) print(await lfm.explain(task, categories));
     }
     // ignore: avoid_print
     print('$right of ${tasks.length} right, '

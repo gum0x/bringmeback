@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -130,6 +131,25 @@ class LfmCategoriser {
     }
     if (group.length == 1) scores[offered[group.single].id] = weight;
     return scores;
+  }
+
+  /// What the model sees and would say next for [text], to look into its picks.
+  @visibleForTesting
+  Future<String> explain(String text, List<TaskCategory> categories) async {
+    final prompt = (await _engine.chatTemplate(chat(text, categories), enableThinking: false)).prompt;
+    final names = [
+      for (final c in categories) await _engine.tokenize(c.name.trim(), addSpecial: false),
+    ];
+    final scored = await _engine.scoreNextToken(prompt,
+        candidates: {for (final n in names) n.first}.toList(), topK: 8);
+    String show(Iterable<LlamaTokenLogprob> l) =>
+        l.map((t) => '${t.token}:${jsonEncode(t.text)} ${(t.probability * 100).toStringAsFixed(1)}%').join(', ');
+    return [
+      'prompt ends: ${jsonEncode(prompt.substring(math.max(0, prompt.length - 120)))}',
+      'name tokens: ${[for (final (i, c) in categories.indexed) '${c.name}=${names[i]}'].join(' ')}',
+      'top: ${show(scored.top)}',
+      'candidates: ${show(scored.candidates)}',
+    ].join('\n');
   }
 
   Future<void> dispose() => _engine.dispose();
