@@ -8,6 +8,9 @@
 - Sync tests use `test/fake_relay.dart` (an in-memory Nostr relay that can be unreachable, deaf,
   refusing, filter by `since`, or have a connection die silently) and `test/fake_transport.dart`
   (a direct link that can hold or drop messages). Extend these fakes rather than skip a case.
+- Tests never talk to real Nostr relays or other public servers. `test/flutter_test_config.dart`
+  makes any real relay connection fail; don't turn that off. To check a real relay by hand, use a
+  self-hosted test relay, never the public defaults.
 
 ## User stories are the spec: keep them current
 

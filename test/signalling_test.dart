@@ -198,4 +198,8 @@ void main() {
     await a.stop();
     await late.stop();
   });
+
+  test('tests never connect to a real relay', () {
+    expect(() => webSocketRelay(Uri.parse('wss://relay.damus.io')), throwsStateError);
+  });
 }

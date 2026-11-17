@@ -236,7 +236,17 @@ abstract class RelayConnection {
 /// Opens a connection to a relay. Tests pass an in-memory relay instead.
 typedef RelayConnector = RelayConnection Function(Uri url);
 
-RelayConnection webSocketRelay(Uri url) => _WebSocketRelay(WebSocketChannel.connect(url));
+/// Set by `test/flutter_test_config.dart`: tests must never reach a real relay, so a test that
+/// forgets to pass a fake relay fails here instead of publishing to public servers.
+@visibleForTesting
+bool realRelaysBlocked = false;
+
+RelayConnection webSocketRelay(Uri url) {
+  if (realRelaysBlocked) {
+    throw StateError('A test tried to connect to the real relay $url: pass a FakeRelay instead.');
+  }
+  return _WebSocketRelay(WebSocketChannel.connect(url));
+}
 
 class _WebSocketRelay implements RelayConnection {
   final WebSocketChannel _channel;
