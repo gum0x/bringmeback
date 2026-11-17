@@ -136,4 +136,61 @@ void main() {
       expect(d.task('b').name, 'call bank');
     }
   });
+
+  test('a device that missed the tear-off keeps working on the old note, and nothing is lost', () {
+    final desktop = newDoc()..setNoteStartedAt(1000);
+    desktop
+      ..insert(0, 't1', name: 'one')
+      ..insert(1, 't2', name: 'two')
+      ..insert(2, 't3', name: 'three');
+    final phone = newDoc();
+    exchange(desktop, phone);
+
+    // Out of sync: the desktop tears off and writes "one" again; the phone still shows the old note,
+    // checks off "two" and writes a new task on it.
+    desktop.tearOff('nDesktop', 2000);
+    desktop.carry('t1', 'c1', 0);
+    phone.setDone('t2', true);
+    phone.insert(3, 't4', name: 'four');
+    exchange(desktop, phone);
+
+    for (final d in [desktop, phone]) {
+      // "two" was checked off on yesterday's note; "four" lands on today's; "three" waits.
+      expect(d.notes.single.taskIds, ['t1', 't2', 't3']);
+      expect(d.task('t2').doneAt, isNotNull);
+      expect(d.ids.toSet(), {'c1', 't4'});
+      expect(d.pendingIds, ['t3']);
+    }
+  });
+
+  test('a note torn off on both devices while apart is kept once, and its tasks written once', () {
+    final desktop = newDoc()..setNoteStartedAt(1000);
+    desktop
+      ..insert(0, 't1', name: 'one')
+      ..insert(1, 't2', name: 'two');
+    final phone = newDoc();
+    exchange(desktop, phone);
+
+    desktop.tearOff('nDesktop', 2000);
+    desktop.carry('t1', 'cDesktop', 0);
+    phone.tearOff('nPhone', 2100);
+    phone.carry('t1', 'cPhone', 0);
+    exchange(desktop, phone);
+    // What TasksBloc does when another device's changes arrive.
+    for (final d in [desktop, phone]) {
+      d.mergeCarried();
+    }
+    exchange(desktop, phone);
+
+    for (final d in [desktop, phone]) {
+      final note = d.notes.single;
+      expect(note.taskIds, ['t1', 't2']);
+      expect(note.startedAt, 1000);
+      expect(note.closedAt, 2000);
+      expect(d.ids, hasLength(1), reason: '"one" is written once on today\'s note');
+      expect(d.task(d.ids.single).name, 'one');
+      expect(d.pendingIds, ['t2']);
+    }
+    expect(desktop.ids, phone.ids);
+  });
 }

@@ -128,4 +128,74 @@ void main() {
     expect(relay.published, hasLength(2));
     await a.stop();
   });
+
+  test('a relay that went silent without closing is connected again, and announces again', () async {
+    final relay = FakeRelay();
+    final a = node(relay)..start();
+    await pumpEventQueue();
+    expect(a.relaysConnected, 1);
+    expect(relay.published, hasLength(1));
+
+    // A relay that answers keeps its connection: the probe gets EOSE back.
+    a.checkRelays();
+    await pumpEventQueue();
+    a.checkRelays();
+    await pumpEventQueue();
+    expect(relay.connections, hasLength(1));
+    expect(a.relaysConnected, 1);
+
+    // The socket dies without a close, as after the computer slept.
+    relay.connections.single.dead = true;
+    a.checkRelays(); // probe, unanswered
+    await pumpEventQueue();
+    expect(a.relaysConnected, 1);
+    a.checkRelays(); // still silent: dropped, and tried again
+    await pumpEventQueue();
+    expect(a.relaysConnected, 0);
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    await pumpEventQueue();
+    expect(relay.connections, hasLength(2));
+    expect(a.relaysConnected, 1);
+    // The new connection announced this device again.
+    expect(relay.published, hasLength(2));
+    await a.stop();
+  });
+
+  test('shows which relays pass messages on, and why one refuses them', () async {
+    final good = FakeRelay();
+    final refusing = FakeRelay()..refuse = 'blocked: ephemeral events not accepted';
+    final a = Signalling(
+        group: group('bringmeback/v1'),
+        device: device(),
+        relays: [Uri.parse('wss://good.test'), Uri.parse('wss://refusing.test')],
+        connect: (url) => url.host == 'good.test' ? good.connect(url) : refusing.connect(url))
+      ..start();
+    await pumpEventQueue();
+    final [g, r] = a.relayStatus;
+    expect((g.connected, g.delivers, g.problem), (true, true, null));
+    expect((r.connected, r.delivers, r.problem),
+        (true, false, 'blocked: ephemeral events not accepted'));
+    await a.stop();
+  });
+
+  test('hears a device whose clock is a minute behind', () async {
+    final relay = FakeRelay();
+    final clock = unixNow();
+    final a = Signalling(
+        group: group('bringmeback/v1'), device: device(), relays: relays, connect: relay.connect,
+        now: () => clock);
+    final late = Signalling(
+        group: group('bringmeback/v1'), device: device(), relays: relays, connect: relay.connect,
+        now: () => clock - 60);
+    final heard = <SymbolonSignal>[];
+    a.signals.listen(heard.add);
+    a.start();
+    await pumpEventQueue();
+    // The relay applies a's subscription's since, as real relays do.
+    late.start();
+    await pumpEventQueue();
+    expect(heard.single.kind, SignalKind.announce);
+    await a.stop();
+    await late.stop();
+  });
 }
