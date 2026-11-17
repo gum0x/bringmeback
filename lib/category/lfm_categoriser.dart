@@ -7,19 +7,24 @@ import 'package:llamadart/llamadart.dart';
 import '../bloc/task_document.dart';
 import 'categoriser.dart';
 
-/// Liquid AI's LFM2.5-350M, quantised to 4 bits: a small language model made for phones and
-/// browsers. Downloaded once, on the user's say-so, and kept on the device. Licensed under Liquid
+/// Liquid AI's LFM2.5-1.2B Instruct, quantised to 4 bits: a small language model made for phones
+/// and browsers. On real tasks the 350M size got too many wrong (4 of 10 in Spanish, against 8 of
+/// 10 for this one) to be worth a download. Downloaded once, on the user's say-so, and kept on the device. Licensed under Liquid
 /// AI's LFM Open License v1.0.
 final lfmModel = ModelSource.huggingFace(
-  repoId: 'LiquidAI/LFM2.5-350M-GGUF',
+  repoId: lfmModelRepo,
   filePath: lfmModelFile,
 );
 
-/// The model's file in [lfmModel]'s repository.
-const lfmModelFile = String.fromEnvironment('LFM_MODEL_FILE', defaultValue: 'LFM2.5-350M-Q4_K_M.gguf');
+/// [lfmModel]'s repository on Hugging Face.
+const lfmModelRepo = 'LiquidAI/LFM2.5-1.2B-Instruct-GGUF';
+
+/// The model's file in [lfmModelRepo].
+const lfmModelFile =
+    String.fromEnvironment('LFM_MODEL_FILE', defaultValue: 'LFM2.5-1.2B-Instruct-Q4_K_M.gguf');
 
 /// About how big [lfmModel] is, for Settings to say before downloading.
-const lfmModelMegabytes = 230;
+const lfmModelMegabytes = 700;
 
 /// Picks a category for a task with [lfmModel], on the device.
 ///
@@ -81,9 +86,9 @@ class LfmCategoriser {
       {List<CategoryExample> examples = const []}) async {
     final offered = categories.take(maxCategories).toList();
     if (text.trim().isEmpty || offered.isEmpty) return {};
-    final prompt = (await _engine.chatTemplate(chat(text, offered, examples: examples),
-            enableThinking: false))
-        .prompt;
+    final prompt =
+        (await _engine.chatTemplate(chat(text, offered, examples: examples), enableThinking: false))
+            .prompt;
     final names = [
       for (final c in offered) await _engine.tokenize(c.name.trim(), addSpecial: false),
     ];
@@ -92,10 +97,16 @@ class LfmCategoriser {
     // where others go on (say "Work" beside "Work planning") is scored by how unlikely it is that
     // the reply goes on with any of theirs.
     final scores = <String, double>{};
-    var group = [for (var i = 0; i < offered.length; i++) if (names[i].isNotEmpty) i];
+    var group = [
+      for (var i = 0; i < offered.length; i++)
+        if (names[i].isNotEmpty) i
+    ];
     var weight = 1.0;
     for (var depth = 0; group.length > 1; depth++) {
-      final ended = [for (final i in group) if (names[i].length == depth) i];
+      final ended = [
+        for (final i in group)
+          if (names[i].length == depth) i
+      ];
       final byToken = <int, List<int>>{};
       for (final i in group) {
         if (names[i].length > depth) (byToken[names[i][depth]] ??= []).add(i);
@@ -103,7 +114,8 @@ class LfmCategoriser {
       final tokens = byToken.keys.toList();
       var probabilities = [1.0];
       if (tokens.length > 1 || ended.isNotEmpty) {
-        final said = depth == 0 ? '' : await _engine.detokenize(names[group.first].sublist(0, depth));
+        final said =
+            depth == 0 ? '' : await _engine.detokenize(names[group.first].sublist(0, depth));
         final scored = await _engine.scoreNextToken('$prompt$said', candidates: tokens);
         final logprobs = [for (final c in scored.candidates) c.logprob];
         probabilities = softmax(logprobs);
@@ -136,17 +148,21 @@ class LfmCategoriser {
   /// What the model sees and would say next for [text], to look into its picks.
   @visibleForTesting
   Future<String> explain(String text, List<TaskCategory> categories) async {
-    final prompt = (await _engine.chatTemplate(chat(text, categories), enableThinking: false)).prompt;
+    final prompt =
+        (await _engine.chatTemplate(chat(text, categories), enableThinking: false)).prompt;
     final names = [
       for (final c in categories) await _engine.tokenize(c.name.trim(), addSpecial: false),
     ];
     final scored = await _engine.scoreNextToken(prompt,
         candidates: {for (final n in names) n.first}.toList(), topK: 8);
-    String show(Iterable<LlamaTokenLogprob> l) =>
-        l.map((t) => '${t.token}:${jsonEncode(t.text)} ${(t.probability * 100).toStringAsFixed(1)}%').join(', ');
+    String show(Iterable<LlamaTokenLogprob> l) => l
+        .map((t) => '${t.token}:${jsonEncode(t.text)} ${(t.probability * 100).toStringAsFixed(1)}%')
+        .join(', ');
     return [
       'prompt ends: ${jsonEncode(prompt.substring(math.max(0, prompt.length - 120)))}',
-      'name tokens: ${[for (final (i, c) in categories.indexed) '${c.name}=${names[i]}'].join(' ')}',
+      'name tokens: ${[
+        for (final (i, c) in categories.indexed) '${c.name}=${names[i]}'
+      ].join(' ')}',
       'top: ${show(scored.top)}',
       'candidates: ${show(scored.candidates)}',
     ].join('\n');
@@ -170,32 +186,15 @@ class LfmCategoriser {
     final sorted = [...starters, ...user];
     LlamaChatMessage say(LlamaChatRole role, String text) =>
         LlamaChatMessage.fromText(role: role, text: text);
-    return switch (style) {
-      PromptStyle.turns => [
-          say(LlamaChatRole.system, instructions(categories)),
-          for (final (task, name) in sorted) ...[
-            say(LlamaChatRole.user, task),
-            say(LlamaChatRole.assistant, name),
-          ],
-          say(LlamaChatRole.user, text.trim()),
-        ],
-      PromptStyle.single => [
-          say(LlamaChatRole.user, [
-            instructions(categories),
-            '',
-            'Examples:',
-            for (final (task, name) in sorted) 'Task: $task\nCategory: $name',
-            '',
-            'Task: ${text.trim()}',
-            'Which category is it? One of: ${nameOf.values.join(', ')}.',
-          ].join('\n')),
-        ],
-    };
+    return [
+      say(LlamaChatRole.system, instructions(categories)),
+      for (final (task, name) in sorted) ...[
+        say(LlamaChatRole.user, task),
+        say(LlamaChatRole.assistant, name),
+      ],
+      say(LlamaChatRole.user, text.trim()),
+    ];
   }
-
-  /// How [chat] puts the question, to compare them on the real model.
-  @visibleForTesting
-  static PromptStyle style = PromptStyle.turns;
 
   /// One task for each default category, so the model sees how sorting goes.
   @visibleForTesting
@@ -254,14 +253,4 @@ class LfmCategoriser {
       debugPrint('No LFM download to delete: $e');
     }
   }
-}
-
-/// Ways [LfmCategoriser.chat] can put the question.
-@visibleForTesting
-enum PromptStyle {
-  /// Sorted tasks as earlier turns, each just the task.
-  turns,
-
-  /// Everything in one message, with the sorted tasks as a list.
-  single,
 }

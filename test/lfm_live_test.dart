@@ -55,34 +55,26 @@ void main() {
         'Ver una película': 'leisure',
         'Arreglar el bug del login': 'focused-work',
       };
-      final right = <PromptStyle, int>{};
-      for (final style in PromptStyle.values) {
-        LfmCategoriser.style = style;
-        var n = 0;
-        final misses = <String>[];
-        final watch = Stopwatch()..start();
-        for (final MapEntry(key: task, value: expected) in tasks.entries) {
-          final scores = await lfm.scores(task, categories);
-          final ranked = scores.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-          final top = ranked.first;
-          final got = top.value >= LfmCategoriser.threshold ? top.key : null;
-          if (got == expected) {
-            n++;
-          } else {
-            misses.add('$task => $got (expected $expected; '
-                '${ranked.take(3).map((e) => '${e.key} ${(e.value * 100).round()}%').join(', ')})');
-          }
+      var right = 0;
+      final misses = <String>[];
+      final watch = Stopwatch()..start();
+      for (final MapEntry(key: task, value: expected) in tasks.entries) {
+        final scores = await lfm.scores(task, categories);
+        final ranked = scores.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+        final top = ranked.first;
+        final got = top.value >= LfmCategoriser.threshold ? top.key : null;
+        if (got == expected) {
+          right++;
+        } else {
+          misses.add('$task => $got (expected $expected; '
+              '${ranked.take(3).map((e) => '${e.key} ${(e.value * 100).round()}%').join(', ')})');
         }
-        right[style] = n;
-        // ignore: avoid_print
-        print('${style.name}: $n of ${tasks.length} right, '
-            '${watch.elapsedMilliseconds ~/ tasks.length} ms a task on ${await lfm.backendName}\n'
-            '${misses.map((m) => '  MISS $m').join('\n')}');
       }
-      LfmCategoriser.style = PromptStyle.turns;
       // ignore: avoid_print
-      print(await lfm.explain('Watch a movie', categories));
-      expect(right[LfmCategoriser.style], greaterThanOrEqualTo(tasks.length * 0.6));
+      print('$right of ${tasks.length} right, '
+          '${watch.elapsedMilliseconds ~/ tasks.length} ms a task on ${await lfm.backendName}\n'
+          '${misses.map((m) => '  MISS $m').join('\n')}');
+      expect(right, greaterThanOrEqualTo(tasks.length * 0.75));
     },
         skip: paths == null ? 'Set LFM_MODEL_PATHS to downloaded LFM2.5 GGUF files' : null,
         timeout: const Timeout(Duration(minutes: 20)));

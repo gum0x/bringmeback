@@ -561,8 +561,8 @@ class _ModelCredits extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const ListTile(
         title: Text('Models'),
-        subtitle: Text('Smarter categories use LFM2.5-350M by Liquid AI, under the LFM Open '
-            'License v1.0 (huggingface.co/LiquidAI/LFM2.5-350M-GGUF). Word vectors come from '
+        subtitle: Text('Smarter categories use LFM2.5-1.2B by Liquid AI, under the LFM Open '
+            'License v1.0 (huggingface.co/$lfmModelRepo). Word vectors come from '
             'spaCy\'s en_core_web_lg (CC0).'),
       );
 }
@@ -590,8 +590,9 @@ class _LfmTile extends StatelessWidget {
       Widget? below;
       switch (state.status) {
         case LfmStatus.off:
-          status = 'Downloads Liquid AI\'s LFM2.5-350M (about $lfmModelMegabytes MB) to this device '
-              'once. It reads each task and your categories in plain words, in many languages. '
+          status = 'Downloads Liquid AI\'s LFM2.5-1.2B (about $lfmModelMegabytes MB) to this device '
+              'once. It places the tasks the words model can\'t, such as tasks in other '
+              'languages, by reading them with your categories in plain words. '
               'It runs on this device only; tasks are never sent anywhere.';
         case LfmStatus.downloading:
           final mb = state.receivedBytes ~/ 1000000;

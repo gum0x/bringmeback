@@ -102,20 +102,10 @@ jobs:
     - name: Download the model
       shell: bash
       run: |
+        repo=$(grep -o "lfmModelRepo = '[^']*'" lib/category/lfm_categoriser.dart | cut -d"'" -f2)
         file=$(grep -o "defaultValue: '[^']*'" lib/category/lfm_categoriser.dart | head -1 | cut -d"'" -f2)
-        curl -fSL --retry 3 -o "$RUNNER_TEMP/model.gguf" \
-          "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/$file"
+        curl -fSL --retry 3 -o "$RUNNER_TEMP/model.gguf" "https://huggingface.co/$repo/resolve/main/$file"
         echo "LFM_MODEL_PATHS=$RUNNER_TEMP/model.gguf" >> "$GITHUB_ENV"
-
-    # For comparison only: the next size up, which Settings doesn't offer.
-    - name: Download the 1.2B model to compare
-      shell: bash
-      continue-on-error: true
-      run: |
-        repo=LiquidAI/LFM2.5-1.2B-Instruct-GGUF
-        file=$(curl -fsSL "https://huggingface.co/api/models/$repo" | jq -r '.siblings[].rfilename' | grep -i 'Q4_K_M.gguf$' | head -1)
-        curl -fSL --retry 3 -o "$RUNNER_TEMP/model-1.2b.gguf" "https://huggingface.co/$repo/resolve/main/$file"
-        echo "LFM_MODEL_PATHS=$LFM_MODEL_PATHS,$RUNNER_TEMP/model-1.2b.gguf" >> "$GITHUB_ENV"
 
     - name: Categorise tasks
       run: flutter test test/lfm_live_test.dart --reporter expanded

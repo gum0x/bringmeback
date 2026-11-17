@@ -84,12 +84,12 @@ Tasks you filed by hand also teach the app: a new task much like one of them goe
 
 ### Smarter categories with LFM2.5
 
-For better picks, in any language, turn on **Smarter categories with LFM2.5** in Settings. The app
-downloads Liquid AI's LFM2.5-350M (about 230 MB, once, on this device only) and runs it on the device:
-it reads each new task with your categories, their keywords and rules, and a few tasks you filed by
-hand, and picks the one that fits. Nothing leaves the device. Rules still win over the model, and
-while it downloads, or when it isn't sure, the word vectors decide as before. Turning it off deletes
-the download.
+The word vectors only know English. To place tasks in other languages, or worded in ways they
+don't know, turn on **Smarter categories with LFM2.5** in Settings. The app downloads Liquid AI's
+LFM2.5-1.2B (about 700 MB, once, on this device only) and runs it on the device: it reads a task the
+word vectors couldn't place with your categories, their keywords and rules, and a few tasks you
+filed by hand, and picks the one that fits. Nothing leaves the device. Rules still decide first, then
+the word vectors, then the model. Turning it off deletes the download.
 
 It needs iOS 16.4 or macOS 14 or later. In a browser it needs WebGPU and a page served with
 cross-origin isolation (the Docker image does this; the GitHub Pages site can't, so there Settings
