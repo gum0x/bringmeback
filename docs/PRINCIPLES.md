@@ -15,7 +15,7 @@ record of where the time went, without asking you to keep one.
 4. **Carry your tasks everywhere.** Tasks and ideas are not tied to work, home or one device. They move
    with you between your phone, laptop and desktop.
 5. **Stay private.** No service behind the app: your data lives only on your devices, synced directly
-   between them.
+   between them. Leaving sealed, expiring changes on relays is opt-in, per log.
 
 ## Usability rules
 

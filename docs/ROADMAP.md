@@ -36,6 +36,12 @@ described in [VIEWS.md](VIEWS.md).
    without conflicts the next time two devices are online together. A **sync status indicator** in the
    top bar shows whether this device is up to date with the others or has changes still to hand over.
 8. **Shared logs.** Share one log with another person's device, using the same pairing.
+9. **Sync without meeting (opt-in, per log).** For devices that are never online at the same time,
+   such as two laptops or a shared log. Comes after the relay keep-alive fix (#57) and the sync status
+   signal, and reuses the status signal's stored relay events. Each device leaves its changes on the
+   relays, sealed with the log key and signed by the device, with a 7-day expiry, and republishes them
+   until every other device's status shows it has them. Off by default; works on any relay list, with
+   your own relay recommended. Design: "Async task-log sync over Nostr" in the project notes.
 
 ## Later, not ordered
 
@@ -49,5 +55,5 @@ described in [VIEWS.md](VIEWS.md).
 - Accounts or a hosted backend.
 - Goals, streaks or scores.
 - Veilid and IPFS for sync (ruled out in the sync research).
-- A relay or server that stores changes for devices that are never online together. Devices merge when
-  they meet.
+- A hosted server that stores changes. Stored sync uses Nostr relays only, sealed, expiring, and
+  opt-in (step 9).
