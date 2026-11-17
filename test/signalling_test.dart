@@ -160,4 +160,42 @@ void main() {
     expect(relay.published, hasLength(2));
     await a.stop();
   });
+
+  test('shows which relays pass messages on, and why one refuses them', () async {
+    final good = FakeRelay();
+    final refusing = FakeRelay()..refuse = 'blocked: ephemeral events not accepted';
+    final a = Signalling(
+        group: group('bringmeback/v1'),
+        device: device(),
+        relays: [Uri.parse('wss://good.test'), Uri.parse('wss://refusing.test')],
+        connect: (url) => url.host == 'good.test' ? good.connect(url) : refusing.connect(url))
+      ..start();
+    await pumpEventQueue();
+    final [g, r] = a.relayStatus;
+    expect((g.connected, g.delivers, g.problem), (true, true, null));
+    expect((r.connected, r.delivers, r.problem),
+        (true, false, 'blocked: ephemeral events not accepted'));
+    await a.stop();
+  });
+
+  test('hears a device whose clock is a minute behind', () async {
+    final relay = FakeRelay();
+    final clock = unixNow();
+    final a = Signalling(
+        group: group('bringmeback/v1'), device: device(), relays: relays, connect: relay.connect,
+        now: () => clock);
+    final late = Signalling(
+        group: group('bringmeback/v1'), device: device(), relays: relays, connect: relay.connect,
+        now: () => clock - 60);
+    final heard = <SymbolonSignal>[];
+    a.signals.listen(heard.add);
+    a.start();
+    await pumpEventQueue();
+    // The relay applies a's subscription's since, as real relays do.
+    late.start();
+    await pumpEventQueue();
+    expect(heard.single.kind, SignalKind.announce);
+    await a.stop();
+    await late.stop();
+  });
 }

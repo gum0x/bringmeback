@@ -128,11 +128,33 @@ class SyncPage extends StatelessWidget {
             'None of the ${state.relayCount} relays answered, so this device can\'t find the '
                 'others. Check the internet connection, or whether a blocker stops connections '
                 'to the relays.')
-      else if (state.relayCount > 0)
+      else if (state.relayCount > 0) ...[
         ListTile(
           dense: true,
           title: Text('Connected to ${state.relaysUp} of ${state.relayCount} relays'),
         ),
+        for (final relay in state.relays)
+          ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            leading: Icon(
+                !relay.connected
+                    ? Icons.cloud_off
+                    : relay.delivers
+                        ? Icons.cloud_done
+                        : Icons.cloud_queue,
+                size: 20),
+            title: Text(relay.url.host),
+            subtitle: Text([
+              !relay.connected
+                  ? 'Not connected'
+                  : relay.delivers
+                      ? 'Connected, passes on messages'
+                      : 'Connected, but hasn\'t passed on this device\'s messages yet',
+              if (relay.problem case final problem?) 'Relay says: $problem',
+            ].join('\n')),
+          ),
+      ],
       for (final MapEntry(key: id, value: p) in state.problems.entries)
         problem('Device ${_shortId(id)} isn\'t syncing', p.message),
       for (final id in state.online)

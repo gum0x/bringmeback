@@ -95,6 +95,9 @@ class SyncState {
   final int relaysUp;
   final int relayCount;
 
+  /// Each relay's state, while this device looks for devices.
+  final List<RelayStatus> relays;
+
   /// True when no relay could be reached for a while: then no device can be found.
   final bool relaysUnreachable;
 
@@ -117,6 +120,7 @@ class SyncState {
       this.builds = const {},
       this.relaysUp = 0,
       this.relayCount = 0,
+      this.relays = const [],
       this.relaysUnreachable = false,
       this.inSync = const {},
       this.lastSynced});
@@ -131,6 +135,7 @@ class SyncState {
           Map<String, BuildInfo>? builds,
           int? relaysUp,
           int? relayCount,
+          List<RelayStatus>? relays,
           bool? relaysUnreachable,
           Set<String>? inSync,
           DateTime? lastSynced}) =>
@@ -147,6 +152,7 @@ class SyncState {
           builds: builds ?? this.builds,
           relaysUp: relaysUp ?? this.relaysUp,
           relayCount: relayCount ?? this.relayCount,
+          relays: relays ?? this.relays,
           relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable,
           inSync: inSync ?? this.inSync,
           lastSynced: lastSynced ?? this.lastSynced);
@@ -330,7 +336,12 @@ class SyncCubit extends Cubit<SyncState> {
     _heardAt.clear();
     await _closeLinks();
     _emit(state.copyWith(
-        problems: const {}, builds: const {}, relaysUp: 0, relayCount: 0, relaysUnreachable: false));
+        problems: const {},
+        builds: const {},
+        relaysUp: 0,
+        relayCount: 0,
+        relays: const [],
+        relaysUnreachable: false));
   }
 
   Future<void> _restartSignalling() async {
@@ -345,14 +356,17 @@ class SyncCubit extends Cubit<SyncState> {
     _signals = signalling.signals.listen(_heard);
     _relayChanges = signalling.relayChanges.listen((up) {
       if (up > 0) _relayCheck?.cancel();
-      _emit(state.copyWith(relaysUp: up, relaysUnreachable: up == 0 && _relayCheck?.isActive != true));
+      _emit(state.copyWith(
+          relaysUp: up,
+          relays: signalling.relayStatus,
+          relaysUnreachable: up == 0 && _relayCheck?.isActive != true));
     });
     _relayCheck = Timer(relayGrace, () {
       if (_signalling == signalling && signalling.relaysConnected == 0) {
         _emit(state.copyWith(relaysUnreachable: true));
       }
     });
-    _emit(state.copyWith(relayCount: signalling.relayCount));
+    _emit(state.copyWith(relayCount: signalling.relayCount, relays: signalling.relayStatus));
     _autoSync = Timer.periodic(_autoSyncEvery, (_) {
       if (_signalling == signalling) _autoSyncTick();
     });

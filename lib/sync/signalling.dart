@@ -6,6 +6,21 @@ import 'package:flutter/foundation.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+/// How one relay is doing, for the Devices page.
+class RelayStatus {
+  final Uri url;
+  final bool connected;
+
+  /// Whether the relay passed on one of this device's own messages, so it carries the group's
+  /// messages. A connected relay that never does drops them, and no device is found through it.
+  final bool delivers;
+
+  /// The last reason the relay gave for refusing a message or a subscription, if any.
+  final String? problem;
+
+  const RelayStatus(this.url, {this.connected = false, this.delivers = false, this.problem});
+}
+
 /// Finds this group's other devices through Nostr relays, so they can set up a direct connection.
 ///
 /// Only signalling goes through relays, never data, and every message is sealed by Symbolon with the
@@ -33,6 +48,9 @@ class Signalling {
   final _relaysUp = StreamController<int>.broadcast();
   final _seen = <String>{};
 
+  /// The ids of this device's latest events, to tell its own messages coming back from a relay.
+  final _mine = <String>{};
+
   /// This app run's session id; other devices address their replies to it.
   final Uint8List session = symbolon.newSession();
 
@@ -57,6 +75,12 @@ class Signalling {
   /// How many relays this device is connected to now, out of [relayCount].
   int get relaysConnected => _relays.where((r) => r._open).length;
   int get relayCount => _relays.length;
+
+  /// Each relay's state, in the order they were given.
+  List<RelayStatus> get relayStatus => [
+        for (final r in _relays)
+          RelayStatus(r.url, connected: r._open, delivers: r._delivers, problem: r._problem)
+      ];
 
   /// [relaysConnected], each time it changes.
   Stream<int> get relayChanges => _relaysUp.stream;
@@ -91,7 +115,17 @@ class Signalling {
     final now = _now();
     final content = _box.seal(SymbolonSignal(
         kind: kind, createdAt: now, from: session, to: to, device: _device, body: body));
-    return '["EVENT",${_signer.signalEvent(now, _box.topic, content)}]';
+    final event = _signer.signalEvent(now, _box.topic, content);
+    try {
+      final id = (jsonDecode(event) as Map)['id'];
+      if (id is String) {
+        _mine.add(id);
+        if (_mine.length > 64) _mine.remove(_mine.first);
+      }
+    } on Object {
+      // Only the delivery check needs the id.
+    }
+    return '["EVENT",$event]';
   }
 
   /// Checks that every relay still answers, and reconnects the ones that don't. Call it every so
@@ -117,10 +151,16 @@ class Signalling {
     await _relaysUp.close();
   }
 
-  String _subscription(String id) =>
-      '["REQ","$id",${symbolon.signalFilter(_box.topic, _now() - 10)}]';
+  /// How far back the subscription reaches. As wide as the age Symbolon accepts, so a device whose
+  /// clock is behind this one's by up to two minutes is still heard; with 10 s, a clock 10 s behind
+  /// was enough for the relay to filter out its answers.
+  static const _window = 120;
 
-  void _receive(String id, Object? message) {
+  String _subscription(String id) =>
+      '["REQ","$id",${symbolon.signalFilter(_box.topic, _now() - _window)}]';
+
+  void _receive(_Relay relay, Object? message) {
+    final id = relay._subscriptionId;
     if (message is! String || message.length > _maxMessage) return;
     final Object? parsed;
     try {
@@ -128,13 +168,37 @@ class Signalling {
     } on FormatException {
       return;
     }
-    // ["EVENT", <subscription id>, <event>]. Notices, EOSE and OK need nothing from us.
-    if (parsed is! List || parsed.length != 3 || parsed[0] != 'EVENT' || parsed[1] != id) return;
+    if (parsed is! List || parsed.isEmpty) return;
+    // Refusals: ["OK", <event id>, false, <reason>], ["CLOSED", <subscription id>, <reason>] and
+    // ["NOTICE", <message>]. Kept to show on the Devices page, never acted on.
+    final problem = switch (parsed) {
+      ['OK', final String eventId, false, final String reason] when _mine.contains(eventId) =>
+        reason,
+      ['CLOSED', final String sub, final String reason] when sub == id => reason,
+      ['NOTICE', final String notice] => notice,
+      _ => null,
+    };
+    if (problem != null) {
+      relay._problem = problem.length > 200 ? problem.substring(0, 200) : problem;
+      _relayChanged();
+      return;
+    }
+    // ["EVENT", <subscription id>, <event>].
+    if (parsed.length != 3 || parsed[0] != 'EVENT' || parsed[1] != id) return;
     final event = parsed[2];
     if (event is! Map || event['kind'] != _kind) return;
     final eventId = event['id'];
     final content = event['content'];
     if (eventId is! String || content is! String) return;
+    if (_mine.contains(eventId)) {
+      // The relay passed on this device's own message: it carries the group's messages.
+      if (!relay._delivers) {
+        relay._delivers = true;
+        relay._problem = null;
+        _relayChanged();
+      }
+      return;
+    }
     // The same event arrives once from every relay.
     if (!_seen.add(eventId)) return;
     if (_seen.length > _seenLimit) _seen.remove(_seen.first);
@@ -205,6 +269,8 @@ class _Relay {
   bool _closed = false;
   bool _open = false;
   String? _subscriptionId;
+  bool _delivers = false;
+  String? _problem;
 
   /// True from a liveness probe until the relay sends anything.
   bool _awaitingReply = false;
@@ -234,7 +300,7 @@ class _Relay {
     _backoff = const Duration(seconds: 1);
     _listening = channel.messages.listen((m) {
       _awaitingReply = false;
-      owner._receive(id, m);
+      owner._receive(this, m);
     }, onDone: _dropped, onError: (Object _) => _dropped(), cancelOnError: true);
     channel.add(owner._subscription(id));
     // Announce on every (re)connect, so devices that came online meanwhile find this one.
@@ -264,6 +330,7 @@ class _Relay {
   void _dropped() {
     if (!_open && _retry?.isActive == true) return;
     _open = false;
+    _delivers = false;
     _subscriptionId = null;
     owner._relayChanged();
     _listening?.cancel();
