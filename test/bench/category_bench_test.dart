@@ -12,11 +12,11 @@ import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/category/categoriser.dart';
 import 'package:bringmeback/category/default_categories.dart';
 import 'package:bringmeback/category/embedding_categoriser.dart';
-import 'package:bringmeback/category/lfm_categoriser.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:llamadart/llamadart.dart';
 
 import 'bench_tasks.dart';
+import 'llm_categoriser.dart';
 
 typedef Scorer = Future<Map<String, double>> Function(String text, List<TaskCategory> categories);
 
@@ -106,10 +106,10 @@ void main() {
       }
       try {
         if (kind == 'llm') {
-          final llm = await LfmCategoriser.load(model: ModelSource.path(path));
+          final llm = await LlmCategoriser.load(model: ModelSource.path(path));
           try {
             await bench(name, (text, categories) => llm.scores(text, categories),
-                (ranked) => ranked.first >= LfmCategoriser.threshold,
+                (ranked) => ranked.first >= LlmCategoriser.threshold,
                 size: sizeOf(path));
             for (final task in ['Fix the login bug', 'Standup with the team']) {
               report('\n<details><summary>What $name sees for "$task"</summary>\n\n```\n'

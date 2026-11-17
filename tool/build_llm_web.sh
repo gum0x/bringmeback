@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Adds what LFM2.5 needs to run in the browser to web/: the llama.cpp WebGPU bridge assets the
+# Adds what the multilingual category model needs to run in the browser to web/: the llama.cpp WebGPU bridge assets the
 # installed llamadart pins, checked against that release's manifest, and the script that loads them
 # in web/index.html. Run it before `flutter build web`. The model itself is downloaded by the app,
 # only when the user turns it on.

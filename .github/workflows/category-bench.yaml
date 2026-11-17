@@ -43,6 +43,20 @@ jobs:
     - name: Install dependencies
       run: flutter pub get
 
+    # The app downloads this file from a third party's repository and checks its SHA-256; this
+    # checks the pinned SHA-256 still matches what's there.
+    - name: Check the multilingual model the app downloads
+      shell: bash
+      run: |
+        src=lib/category/embedding_categoriser.dart
+        repo=$(grep -o "repoId: '[^']*'" $src | cut -d"'" -f2)
+        file=$(grep -o "multilingualModelFile = '[^']*'" $src | cut -d"'" -f2)
+        want=$(grep -o "multilingualModelSha256 = '[^']*'" $src | cut -d"'" -f2)
+        curl -fSL --retry 3 -o "$RUNNER_TEMP/app-model.gguf" "https://huggingface.co/$repo/resolve/main/$file"
+        got=$(sha256sum "$RUNNER_TEMP/app-model.gguf" | cut -d' ' -f1)
+        echo "$repo/$file: $got, $(stat -c %s "$RUNNER_TEMP/app-model.gguf") bytes"
+        [ "$got" = "$want" ] || { echo "::error::SHA-256 is $got, the app expects '$want'"; exit 1; }
+
     - name: Download the models
       shell: bash
       env:

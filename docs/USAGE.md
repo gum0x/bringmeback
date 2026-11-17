@@ -72,24 +72,28 @@ use (**Restore default categories** brings them back), and add your own. Each ca
 
 Changes to the list sync with your other devices, like the tasks.
 
-When you write or rename a task, the app picks its category (✨ on the tag): a rule it mentions, or
-else the category that fits its name best. That runs entirely on the device, with no service behind
+While you write a task, the dialog suggests up to three categories for its name: tap one to file it
+there yourself. If you leave it on **Automatic**, the app picks the category (✨ on the tag, meaning
+you didn't choose it): a rule it mentions, or else the category that fits its name best. That runs entirely on the device, with no service behind
 it: it compares the task's words with each category's name and keywords using word vectors bundled
 with the app (English). When nothing fits well enough, the task gets no category rather than a wrong
 one.
 
-To correct it, tap the tag and pick another category, or **No category**; or pick one in the task
-dialog. Your choice stays, even when you rename the task, until you pick **Choose automatically**.
+To confirm an automatic pick, tap the tag and choose **Keep**; to correct it, pick another category,
+or **No category**; or pick one in the task dialog. Your choice stays, even when you rename the task, until you pick **Choose automatically**.
 Tasks you filed by hand also teach the app: a new task much like one of them goes the same way.
 
-### Smarter categories with LFM2.5
+### Categories in any language
 
-The word vectors only know English. To place tasks in other languages, or worded in ways they
-don't know, turn on **Smarter categories with LFM2.5** in Settings. The app downloads Liquid AI's
-LFM2.5-1.2B (about 700 MB, once, on this device only) and runs it on the device: it reads a task the
-word vectors couldn't place with your categories, their keywords and rules, and a few tasks you
-filed by hand, and picks the one that fits. Nothing leaves the device. Rules still decide first, then
-the word vectors, then the model. Turning it off deletes the download.
+The word vectors only know English. For tasks in other languages, turn on **Categories in any
+language** in Settings. The app downloads a small multilingual model,
+paraphrase-multilingual-MiniLM-L12-v2 (about 130 MB, once, on this device only; Apache 2.0), and runs
+it on the device. It knows over 50 languages, Spanish, Portuguese, Chinese, Hindi and Arabic among
+them. It doesn't write anything: it turns a task into a point in space where tasks that mean alike
+sit close, whatever their language, and files it under the category whose sample tasks, keywords
+and hand-filed tasks are closest. That takes about 10 ms a task. Nothing leaves the device. Rules
+still decide first, then the English word vectors, then the model. Turning it off deletes the
+download.
 
 It needs iOS 16.4 or macOS 14 or later. In a browser it needs WebGPU and a page served with
 cross-origin isolation (the Docker image does this; the GitHub Pages site can't, so there Settings

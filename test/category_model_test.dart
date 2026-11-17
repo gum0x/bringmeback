@@ -1,8 +1,7 @@
 import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
 import 'package:bringmeback/category/categoriser.dart';
-import 'package:bringmeback/category/lfm_categoriser.dart';
-import 'package:bringmeback/category/lfm_cubit.dart';
+import 'package:bringmeback/category/category_model_cubit.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,33 +10,6 @@ Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 20));
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
-
-  test('the chat lists each category, then sorted tasks as turns, then the task', () {
-    final chat = LfmCategoriser.chat('Ship BMB', const [
-      TaskCategory(id: 'work-planning', name: 'Work planning', keywords: 'email plan'),
-      TaskCategory(id: 'p', name: 'Personal projects', rules: 'bringmeback, BMB'),
-    ], examples: [
-      (text: 'backlog grooming', category: 'work-planning'),
-      (text: 'gone', category: 'deleted'),
-    ]);
-    final text = [for (final m in chat) '${m.role.name}: ${m.content}'];
-    expect(text.first, contains('- Work planning (email, plan)'));
-    expect(text.first, contains('- Personal projects. Always for tasks that mention: bringmeback, bmb'));
-    expect(text.sublist(1), [
-      'user: Answer work emails',
-      'assistant: Work planning',
-      'user: backlog grooming',
-      'assistant: Work planning',
-      'user: Ship BMB',
-    ]);
-  });
-
-  test('softmax turns log-probabilities into probabilities', () {
-    final p = LfmCategoriser.softmax([-1, -1, -3]);
-    expect(p.reduce((a, b) => a + b), closeTo(1, 1e-9));
-    expect(p[0], closeTo(p[1], 1e-9));
-    expect(p[2], lessThan(p[0]));
-  });
 
   group('the task list', () {
     Future<TasksBloc> newBloc(SmartCategoriser smart, {Categoriser? words}) async {
@@ -48,7 +20,7 @@ void main() {
       return bloc;
     }
 
-    test('files a task where the language model says', () async {
+    test('files a task where the multilingual model says', () async {
       final asked = <String>[];
       final bloc = await newBloc((text, categories, examples) async {
         asked.add(text);
@@ -62,7 +34,7 @@ void main() {
       await bloc.close();
     });
 
-    test('a rule decides before the language model', () async {
+    test('a rule decides before the multilingual model', () async {
       var asked = 0;
       final bloc = await newBloc((text, categories, examples) async {
         asked++;
@@ -111,41 +83,41 @@ void main() {
     });
   });
 
-  group('turning LFM2.5 on and off', () {
+  group('turning the multilingual model on and off', () {
     test('downloads, loads, and comes back on at the next start', () async {
       var loads = 0;
-      final cubit = LfmCubit(load: ({onProgress}) async {
+      final cubit = CategoryModelCubit(load: ({onProgress}) async {
         loads++;
         throw StateError('no model in tests');
       });
-      final seen = <LfmStatus>[];
+      final seen = <CategoryModelStatus>[];
       final sub = cubit.stream.listen((s) => seen.add(s.status));
       await cubit.restore();
       expect(loads, 0, reason: 'off until the user turns it on');
       await cubit.turnOn();
       await settle();
-      expect(seen, [LfmStatus.downloading, LfmStatus.failed]);
+      expect(seen, [CategoryModelStatus.downloading, CategoryModelStatus.failed]);
       expect(cubit.state.error, contains('no model in tests'));
       expect(() => cubit.categorise('x', const [], const []), throwsStateError);
 
-      final again = LfmCubit(load: ({onProgress}) async {
+      final again = CategoryModelCubit(load: ({onProgress}) async {
         loads++;
         throw StateError('still none');
       });
       await again.restore();
       expect(loads, 2, reason: 'turned on last time, so it loads at start');
       await again.turnOff();
-      expect(again.state.status, LfmStatus.off);
+      expect(again.state.status, CategoryModelStatus.off);
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getBool('lfmCategories'), isFalse);
+      expect(prefs.getBool('multilingualCategories'), isFalse);
       await sub.cancel();
       await cubit.close();
       await again.close();
     });
 
     test('errors read as something to act on', () {
-      expect(LfmCubit.describeError(Exception('needs COOP/COEP headers')), contains('isolation'));
-      expect(LfmCubit.describeError(Exception('SocketException: no route')),
+      expect(CategoryModelCubit.describeError(Exception('needs COOP/COEP headers')), contains('isolation'));
+      expect(CategoryModelCubit.describeError(Exception('SocketException: no route')),
           contains('download failed'));
     });
   });

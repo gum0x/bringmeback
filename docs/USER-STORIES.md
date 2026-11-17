@@ -114,6 +114,30 @@ Not covered yet:
 - No warning on the device that is out of sync before it shows "A new day". A gap: needs the
   stored version signal (see the Signal CRDT version over Nostr design).
 
+## K · Categories
+
+A person files tasks under categories (Settings › Categories) for statistics: one per task, picked
+by them or by the app on the device.
+
+| Case | Expected | Status |
+| --- | --- | --- |
+| K1 I write a task and leave the category on Automatic | Filed by the app, marked ✨ (not chosen by me), saved with the task | covered: `categorise_tasks_test › a task written gets a category from the default list, saved with the task` |
+| K2 I write a task | Up to three suggested categories for its name, a rule first; tapping one files it as my choice | covered: `categorise_tasks_test › suggests up to three categories while a task is written, a rule first`, `› a suggested category picked in the dialog is the user's choice` |
+| K3 I keep or change an automatic pick | Becomes my choice, stays when I rename the task, and teaches the app | covered: `categorise_tasks_test › a category chosen by hand stays, and the categoriser learns from it` |
+| K4 A rule matches the task | The rule decides, before any model | covered: `categorise_tasks_test › a rule set in Settings files a project's tasks`, `category_model_test › a rule decides before the multilingual model` |
+| K5 A task in another language, multilingual model on | Words first; the model files what they can't | covered: `category_model_test › the word vectors decide first; the model only places what they can't`, `› files a task where the multilingual model says` |
+| K6 The model is downloading, failed, or turned off | The task waits without a category; nothing else changes | covered: `category_model_test › when the model fails, the task waits without a category`, `› downloads, loads, and comes back on at the next start` |
+| K7 I rename a task while the model is still working on its old name | The stale pick is dropped | covered: `category_model_test › a pick for a name the task no longer has is dropped` |
+| K8 Category list edited on two devices while apart | Both edits kept, per field | covered: `task_document_test › categories sync between devices, and edits to different fields both survive` |
+| K9 The word vectors can't load | Tasks are still written; only rules file them | covered: `categorise_tasks_test › without the word vectors, tasks are still written, and only rules file them` |
+
+Not covered yet:
+- How well each model files tasks is measured, not tested: `.github/workflows/category-bench.yaml`
+  runs 22 tasks in six languages through each model (MiniLM: 103 of 132 at the last run). A known
+  limit: some tasks go to the wrong category.
+- The multilingual model on real phones and in a browser with WebGPU: only run on a CI CPU. A gap.
+- The model is turned on per device, not synced: a known limit, since each device downloads it.
+
 ## S · Security and privacy
 
 | Case | Expected | Status |
@@ -122,3 +146,5 @@ Not covered yet:
 | S2 Sealed payloads | Open only with the same key and context | covered: `pairing_test › sealed payloads open only with the same key and context` |
 | S3 Replays older than 2 minutes | Dropped | covered: `signalling_test › ignores other groups, junk, duplicates and old messages` |
 | S4 Oversized relay messages | Dropped before parsing | covered: same test (64 KiB limit in `Signalling`) |
+| S5 Task names and categories | Never leave the device to be categorised: rules, word vectors and the model all run on it | known limit by design; no network code in `lib/category/` |
+| S6 The multilingual model is a third party's GGUF conversion | Downloaded only on the user's say-so and checked against a pinned SHA-256 (not in browsers, which load it themselves) | gap until the SHA-256 is pinned; `category-bench.yaml` checks the pin |

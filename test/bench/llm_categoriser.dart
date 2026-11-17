@@ -4,30 +4,12 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:llamadart/llamadart.dart';
 
-import '../bloc/task_document.dart';
-import 'categoriser.dart';
-import 'default_categories.dart';
+import 'package:bringmeback/bloc/task_document.dart';
+import 'package:bringmeback/category/categoriser.dart';
+import 'package:bringmeback/category/default_categories.dart';
 
-/// Liquid AI's LFM2.5-1.2B Instruct, quantised to 4 bits: a small language model made for phones
-/// and browsers. On real tasks the 350M size got too many wrong (4 of 10 in Spanish, against 8 of
-/// 10 for this one) to be worth a download. Downloaded once, on the user's say-so, and kept on the device. Licensed under Liquid
-/// AI's LFM Open License v1.0.
-final lfmModel = ModelSource.huggingFace(
-  repoId: lfmModelRepo,
-  filePath: lfmModelFile,
-);
-
-/// [lfmModel]'s repository on Hugging Face.
-const lfmModelRepo = 'LiquidAI/LFM2.5-1.2B-Instruct-GGUF';
-
-/// The model's file in [lfmModelRepo].
-const lfmModelFile =
-    String.fromEnvironment('LFM_MODEL_FILE', defaultValue: 'LFM2.5-1.2B-Instruct-Q4_K_M.gguf');
-
-/// About how big [lfmModel] is, for Settings to say before downloading.
-const lfmModelMegabytes = 700;
-
-/// Picks a category for a task with [lfmModel], on the device.
+/// Picks a category for a task with a chat model (LFM2.5, Qwen3, Gemma 3 and the like), on the
+/// device. Only the benchmark uses it: an embedding model did better, smaller and quicker.
 ///
 /// The model reads the list of categories, with their keywords and rules, then a few tasks already
 /// sorted (the user's own, and one example for each default category), as earlier turns of the
@@ -37,7 +19,7 @@ const lfmModelMegabytes = 700;
 /// Reading the prompt is what takes time (around a second on a laptop's CPU), and this model can't
 /// reuse a prompt it read before, so names are told apart by their first token in one pass. Only
 /// when names start alike does it read again, with the shared start, to tell those apart.
-class LfmCategoriser {
+class LlmCategoriser {
   /// How likely the best category has to be, from 0 to 1, for the task to be filed under it.
   static const threshold = 0.4;
 
@@ -49,16 +31,16 @@ class LfmCategoriser {
 
   final LlamaEngine _engine;
 
-  LfmCategoriser._(this._engine);
+  LlmCategoriser._(this._engine);
 
   /// The backend the model runs on, such as Metal, Vulkan, CPU or WebGPU.
   Future<String> get backendName => _engine.getBackendName();
 
   /// Loads [model], downloading it first when it isn't on the device yet.
-  static Future<LfmCategoriser> load(
-      {ModelSource? model, ModelDownloadProgressCallback? onProgress}) async {
+  static Future<LlmCategoriser> load(
+      {required ModelSource model, ModelDownloadProgressCallback? onProgress}) async {
     final engine = await LlamaEngine.load(
-      LlamaModel(model ?? lfmModel),
+      LlamaModel(model),
       // Prompts are several hundred tokens: a category list, examples and one task.
       params: const ModelParams(contextSize: 4096),
       onProgress: onProgress,
@@ -68,7 +50,7 @@ class LfmCategoriser {
       throw LlamaUnsupportedException(
           'This device\'s model runtime can\'t score answers, which categorising needs.');
     }
-    return LfmCategoriser._(engine);
+    return LlmCategoriser._(engine);
   }
 
   /// The id of the category [text] belongs to, or null when the model isn't sure enough. Only the
@@ -224,20 +206,5 @@ class LfmCategoriser {
     final exps = [for (final l in logprobs) math.exp(l - top)];
     final sum = exps.reduce((a, b) => a + b);
     return [for (final e in exps) e / sum];
-  }
-
-  /// Removes the downloaded model from this device. Browsers keep it in their own cache, which the
-  /// app can't clear.
-  static Future<void> deleteDownload() async {
-    if (kIsWeb) return;
-    final manager = DefaultModelDownloadManager();
-    try {
-      final entry = await manager.ensureModel(lfmModel,
-          options: ModelLoadOptions(cachePolicy: ModelCachePolicy.cacheOnly));
-      await manager.remove(entry.cacheKey);
-    } on Object catch (e) {
-      // Nothing downloaded, or already gone.
-      debugPrint('No LFM download to delete: $e');
-    }
   }
 }

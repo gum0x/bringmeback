@@ -1,10 +1,30 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:llamadart/llamadart.dart';
 
 import '../bloc/task_document.dart';
 import 'categoriser.dart';
 import 'default_categories.dart';
+
+/// The multilingual model Settings offers to download: sentence-transformers'
+/// paraphrase-multilingual-MiniLM-L12-v2 (Apache 2.0), converted to GGUF and quantised to 8 bits.
+/// It knows 50+ languages, Spanish, Portuguese, Chinese, Hindi and Arabic among them. Of the small
+/// models compared in .github/workflows/category-bench.yaml it filed the most tasks right, and it
+/// takes about 10 ms a task.
+final multilingualModel = ModelSource.huggingFace(
+  repoId: 'mykor/paraphrase-multilingual-MiniLM-L12-v2.gguf',
+  filePath: multilingualModelFile,
+);
+
+const multilingualModelFile = 'paraphrase-multilingual-MiniLM-L12-118M-v2-Q8_0.gguf';
+
+/// [multilingualModelFile]'s SHA-256, checked after downloading, since the conversion is a third
+/// party's. Checked by the category-bench workflow too.
+const multilingualModelSha256 = '';
+
+/// About how big [multilingualModel] is, for Settings to say before downloading.
+const multilingualModelMegabytes = 132;
 
 /// Picks a category for a task with a sentence embedding model, on the device.
 ///
@@ -29,10 +49,20 @@ class EmbeddingCategoriser {
 
   EmbeddingCategoriser._(this._engine, this.queryPrefix, this.documentPrefix, this.describe);
 
-  static Future<EmbeddingCategoriser> load(ModelSource model,
-      {String queryPrefix = '', String documentPrefix = '', bool describe = true}) async {
-    final engine = await LlamaEngine.load(LlamaModel(model),
-        params: const ModelParams(contextSize: 512));
+  /// Loads [model], [multilingualModel] by default, downloading it first when it isn't on the device
+  /// yet.
+  static Future<EmbeddingCategoriser> load(ModelSource? model,
+      {String queryPrefix = '',
+      String documentPrefix = '',
+      bool describe = true,
+      ModelDownloadProgressCallback? onProgress}) async {
+    final engine = await LlamaEngine.load(LlamaModel(model ?? multilingualModel),
+        params: const ModelParams(contextSize: 512),
+        // Browsers load the file themselves and can't check it.
+        download: model == null && !kIsWeb && multilingualModelSha256.isNotEmpty
+            ? ModelLoadOptions(sha256: multilingualModelSha256)
+            : ModelLoadOptions.defaults,
+        onProgress: onProgress);
     if (!engine.supportsEmbeddings) {
       await engine.dispose();
       throw LlamaUnsupportedException('This model can\'t embed text.');
@@ -92,4 +122,19 @@ class EmbeddingCategoriser {
   }
 
   Future<void> dispose() => _engine.dispose();
+
+  /// Removes the downloaded [multilingualModel] from this device. Browsers keep it in their own
+  /// cache, which the app can't clear.
+  static Future<void> deleteDownload() async {
+    if (kIsWeb) return;
+    final manager = DefaultModelDownloadManager();
+    try {
+      final entry = await manager.ensureModel(multilingualModel,
+          options: ModelLoadOptions(cachePolicy: ModelCachePolicy.cacheOnly));
+      await manager.remove(entry.cacheKey);
+    } on Object catch (e) {
+      // Nothing downloaded, or already gone.
+      debugPrint('No model download to delete: $e');
+    }
+  }
 }

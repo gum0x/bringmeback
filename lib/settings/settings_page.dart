@@ -5,8 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
 import '../category/default_categories.dart';
-import '../category/lfm_categoriser.dart';
-import '../category/lfm_cubit.dart';
+import '../category/embedding_categoriser.dart';
+import '../category/category_model_cubit.dart';
 import '../focus/pomodoro.dart';
 import '../sync/peer.dart' show syncProtocol;
 import '../timer.dart';
@@ -311,7 +311,7 @@ class _Categories extends StatelessWidget {
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ),
-          const _LfmTile(),
+          const _ModelTile(),
           for (final c in state.categories)
             ListTile(
               key: ValueKey('category-${c.id}'),
@@ -553,7 +553,6 @@ class _VersionTiles extends StatelessWidget {
   }
 }
 
-/// Turns on categorising with LFM2.5 on this device, and shows the download.
 /// Credit for the models the app uses, as their licences ask.
 class _ModelCredits extends StatelessWidget {
   const _ModelCredits();
@@ -561,18 +560,19 @@ class _ModelCredits extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const ListTile(
         title: Text('Models'),
-        subtitle: Text('Smarter categories use LFM2.5-1.2B by Liquid AI, under the LFM Open '
-            'License v1.0 (huggingface.co/$lfmModelRepo). Word vectors come from '
-            'spaCy\'s en_core_web_lg (CC0).'),
+        subtitle: Text('Categories in any language use paraphrase-multilingual-MiniLM-L12-v2 '
+            'by sentence-transformers (Apache 2.0). English word vectors come from spaCy\'s '
+            'en_core_web_lg (CC0).'),
       );
 }
 
-class _LfmTile extends StatelessWidget {
-  const _LfmTile();
+/// Turns on categorising with the multilingual model on this device, and shows the download.
+class _ModelTile extends StatelessWidget {
+  const _ModelTile();
 
   static bool _available(BuildContext context) {
     try {
-      context.read<LfmCubit>();
+      context.read<CategoryModelCubit>();
       return true;
     } on ProviderNotFoundException {
       return false;
@@ -584,49 +584,49 @@ class _LfmTile extends StatelessWidget {
     // Pages opened on their own, as in tests, may have no model above them.
     if (!_available(context)) return const SizedBox.shrink();
     final theme = Theme.of(context);
-    return BlocBuilder<LfmCubit, LfmState>(builder: (context, state) {
-      final lfm = context.read<LfmCubit>();
+    return BlocBuilder<CategoryModelCubit, CategoryModelState>(builder: (context, state) {
+      final model = context.read<CategoryModelCubit>();
       final String status;
       Widget? below;
       switch (state.status) {
-        case LfmStatus.off:
-          status = 'Downloads Liquid AI\'s LFM2.5-1.2B (about $lfmModelMegabytes MB) to this device '
-              'once. It places the tasks the words model can\'t, such as tasks in other '
-              'languages, by reading them with your categories in plain words. '
-              'It runs on this device only; tasks are never sent anywhere.';
-        case LfmStatus.downloading:
+        case CategoryModelStatus.off:
+          status = 'Downloads a small multilingual model (about $multilingualModelMegabytes MB) '
+              'to this device once, to categorise tasks in Spanish, Portuguese, Chinese, Hindi, '
+              'Arabic and 45 more languages. It runs on this device only; tasks are never sent '
+              'anywhere.';
+        case CategoryModelStatus.downloading:
           final mb = state.receivedBytes ~/ 1000000;
-          status = 'Downloading: $mb of about $lfmModelMegabytes MB. Categories come from the '
-              'words model until it\'s ready.';
+          status = 'Downloading: $mb of about $multilingualModelMegabytes MB. Categories come from the '
+              'English word vectors until it\'s ready.';
           below = LinearProgressIndicator(value: state.fraction);
-        case LfmStatus.loading:
+        case CategoryModelStatus.loading:
           status = 'Loading the model…';
           below = const LinearProgressIndicator();
-        case LfmStatus.ready:
+        case CategoryModelStatus.ready:
           status = 'Categorising new and renamed tasks on this device'
               '${state.backend == null ? '' : ' (${state.backend})'}. '
               'Turn off to delete the download.';
-        case LfmStatus.failed:
+        case CategoryModelStatus.failed:
           status = state.error ?? 'The model couldn\'t load.';
           below = Align(
             alignment: Alignment.centerLeft,
-            child: TextButton(onPressed: lfm.turnOn, child: const Text('Try again')),
+            child: TextButton(onPressed: model.turnOn, child: const Text('Try again')),
           );
       }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SwitchListTile(
-            key: const Key('lfmSwitch'),
+            key: const Key('categoryModelSwitch'),
             secondary: const Icon(Icons.auto_awesome),
-            title: const Text('Smarter categories with LFM2.5'),
+            title: const Text('Categories in any language'),
             subtitle: Text(status,
-                style: state.status == LfmStatus.failed
+                style: state.status == CategoryModelStatus.failed
                     ? TextStyle(color: theme.colorScheme.error)
                     : null),
             isThreeLine: true,
             value: state.on,
-            onChanged: (on) => on ? lfm.turnOn() : lfm.turnOff(),
+            onChanged: (on) => on ? model.turnOn() : model.turnOff(),
           ),
           if (below != null)
             Padding(padding: const EdgeInsets.fromLTRB(72, 0, 16, 8), child: below),

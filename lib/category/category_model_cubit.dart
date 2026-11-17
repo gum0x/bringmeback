@@ -9,13 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../bloc/task_document.dart';
 import 'categoriser.dart';
-import 'lfm_categoriser.dart';
+import 'embedding_categoriser.dart';
 
-enum LfmStatus {
+enum CategoryModelStatus {
   /// Not turned on, on this device.
   off,
 
-  /// Downloading the model; [LfmState.fraction] says how far.
+  /// Downloading the model; [CategoryModelState.fraction] says how far.
   downloading,
 
   /// Loading the downloaded model.
@@ -24,43 +24,43 @@ enum LfmStatus {
   /// Categorising tasks.
   ready,
 
-  /// Turned on, but the model couldn't be downloaded or loaded; [LfmState.error] says why.
+  /// Turned on, but the model couldn't be downloaded or loaded; [CategoryModelState.error] says why.
   failed,
 }
 
-class LfmState {
-  final LfmStatus status;
+class CategoryModelState {
+  final CategoryModelStatus status;
 
   /// How much of the model has downloaded, from 0 to 1, or null while the size isn't known.
   final double? fraction;
   final int receivedBytes;
 
-  /// What went wrong, when [status] is [LfmStatus.failed].
+  /// What went wrong, when [status] is [CategoryModelStatus.failed].
   final String? error;
 
   /// What the model runs on once ready, such as Metal, Vulkan, CPU or WebGPU.
   final String? backend;
 
-  const LfmState(this.status,
+  const CategoryModelState(this.status,
       {this.fraction, this.receivedBytes = 0, this.error, this.backend});
 
-  bool get on => status != LfmStatus.off;
+  bool get on => status != CategoryModelStatus.off;
 }
 
-/// Whether this device categorises tasks with LFM2.5, and the model when it does.
+/// Whether this device categorises tasks with the multilingual model, and the model when it does.
 ///
 /// The choice is per device and not synced: the model is a download each device makes for itself.
 /// Turned on, the model loads at start, from the download kept on the device.
-class LfmCubit extends Cubit<LfmState> {
-  static const _prefKey = 'lfmCategories';
+class CategoryModelCubit extends Cubit<CategoryModelState> {
+  static const _prefKey = 'multilingualCategories';
 
-  final Future<LfmCategoriser> Function({ModelDownloadProgressCallback? onProgress}) _load;
-  LfmCategoriser? _categoriser;
+  final Future<EmbeddingCategoriser> Function({ModelDownloadProgressCallback? onProgress}) _load;
+  EmbeddingCategoriser? _categoriser;
   AppLifecycleListener? _exit;
 
-  LfmCubit({Future<LfmCategoriser> Function({ModelDownloadProgressCallback? onProgress})? load})
-      : _load = load ?? (({onProgress}) => LfmCategoriser.load(onProgress: onProgress)),
-        super(const LfmState(LfmStatus.off));
+  CategoryModelCubit({Future<EmbeddingCategoriser> Function({ModelDownloadProgressCallback? onProgress})? load})
+      : _load = load ?? (({onProgress}) => EmbeddingCategoriser.load(null, onProgress: onProgress)),
+        super(const CategoryModelState(CategoryModelStatus.off));
 
   /// Turns the model on when it was on last time.
   Future<void> restore() async {
@@ -68,11 +68,11 @@ class LfmCubit extends Cubit<LfmState> {
     if (prefs.getBool(_prefKey) ?? false) await _start();
   }
 
-  /// Turns LFM2.5 on, downloading it if needed.
+  /// Turns the multilingual model on, downloading it if needed.
   Future<void> turnOn() async {
-    if (state.status == LfmStatus.downloading ||
-        state.status == LfmStatus.loading ||
-        state.status == LfmStatus.ready) {
+    if (state.status == CategoryModelStatus.downloading ||
+        state.status == CategoryModelStatus.loading ||
+        state.status == CategoryModelStatus.ready) {
       return;
     }
     final prefs = await SharedPreferences.getInstance();
@@ -80,27 +80,27 @@ class LfmCubit extends Cubit<LfmState> {
     await _start();
   }
 
-  /// Turns LFM2.5 off and deletes the download from this device.
+  /// Turns the multilingual model off and deletes the download from this device.
   Future<void> turnOff() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_prefKey, false);
     final categoriser = _categoriser;
     _categoriser = null;
-    emit(const LfmState(LfmStatus.off));
+    emit(const CategoryModelState(CategoryModelStatus.off));
     await categoriser?.dispose();
-    await LfmCategoriser.deleteDownload();
+    await EmbeddingCategoriser.deleteDownload();
   }
 
   Future<void> _start() async {
-    emit(const LfmState(LfmStatus.downloading));
+    emit(const CategoryModelState(CategoryModelStatus.downloading));
     try {
       final categoriser = await _load(onProgress: (p) {
-        if (isClosed || state.status == LfmStatus.off) return;
+        if (isClosed || state.status == CategoryModelStatus.off) return;
         emit(p.fraction == 1
-            ? const LfmState(LfmStatus.loading)
-            : LfmState(LfmStatus.downloading, fraction: p.fraction, receivedBytes: p.receivedBytes));
+            ? const CategoryModelState(CategoryModelStatus.loading)
+            : CategoryModelState(CategoryModelStatus.downloading, fraction: p.fraction, receivedBytes: p.receivedBytes));
       });
-      if (isClosed || state.status == LfmStatus.off) {
+      if (isClosed || state.status == CategoryModelStatus.off) {
         await categoriser.dispose();
         return;
       }
@@ -111,16 +111,16 @@ class LfmCubit extends Cubit<LfmState> {
         _categoriser = null;
         return AppExitResponse.exit;
       });
-      emit(LfmState(LfmStatus.ready, backend: await _backendName(categoriser)));
+      emit(CategoryModelState(CategoryModelStatus.ready, backend: await _backendName(categoriser)));
     } on Object catch (e) {
-      debugPrint('LFM2.5 unavailable: $e');
-      if (!isClosed && state.status != LfmStatus.off) {
-        emit(LfmState(LfmStatus.failed, error: describeError(e)));
+      debugPrint('Multilingual model unavailable: $e');
+      if (!isClosed && state.status != CategoryModelStatus.off) {
+        emit(CategoryModelState(CategoryModelStatus.failed, error: describeError(e)));
       }
     }
   }
 
-  static Future<String?> _backendName(LfmCategoriser categoriser) async {
+  static Future<String?> _backendName(EmbeddingCategoriser categoriser) async {
     try {
       return await categoriser.backendName;
     } on Object {
@@ -128,12 +128,13 @@ class LfmCubit extends Cubit<LfmState> {
     }
   }
 
-  /// The category LFM2.5 picks for [text], or null when it isn't sure. Throws [StateError] when
+  /// The category the multilingual model picks for [text], or null when it isn't sure. Throws
+  /// [StateError] when
   /// the model isn't ready, so the caller falls back to the word vectors.
   Future<String?> categorise(String text, List<TaskCategory> categories,
       List<CategoryExample> examples) {
     final categoriser = _categoriser;
-    if (categoriser == null) throw StateError('LFM2.5 is not ready');
+    if (categoriser == null) throw StateError('The multilingual model is not ready');
     return categoriser.categorise(text, categories, examples: examples);
   }
 

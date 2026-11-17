@@ -594,7 +594,7 @@ class _CategorisedEvent extends TasksEvent {
   _CategorisedEvent(this.picks);
 }
 
-/// Picks a category for a task with a language model: the category's id, or null when unsure.
+/// Picks a category for a task with the multilingual model: the category's id, or null when unsure.
 /// Throws when the model isn't available, and the word vectors pick instead.
 typedef SmartCategoriser = Future<String?> Function(
     String text, List<TaskCategory> categories, List<CategoryExample> examples);
@@ -642,7 +642,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Loads the categoriser, on first use; tests pass their own.
   final Future<Categoriser> Function() _categoriser;
 
-  /// The language model categoriser (LFM2.5), when the user turned it on. Tried before the word
+  /// The multilingual model, when the user turned it on: tried after rules and the English word
   /// vectors.
   SmartCategoriser? smartCategoriser;
 
@@ -838,7 +838,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     try {
       words = await _categoriser();
     } on Object catch (e) {
-      // Only the rules and the language model apply then; the user can still pick a category.
+      // Only the rules and the multilingual model apply then; the user can still pick a category.
       debugPrint('Categoriser unavailable: $e');
     }
     final picks = <String, ({String name, String? category})>{};
@@ -854,8 +854,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   }
 
   /// A rule the task mentions decides first; then the word vectors, which are quick and sure for
-  /// plain English; then the language model, when it's on, for what the word vectors can't place,
-  /// such as other languages.
+  /// plain English; then the multilingual model, when it's on, for what the word vectors can't
+  /// place, such as other languages.
   Future<String?> _pick(String name, List<TaskCategory> categories,
       List<CategoryExample> examples, Categoriser? words) async {
     if (Categoriser.byRule(name, categories) case final id?) return id;
@@ -865,14 +865,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     try {
       return await smart(name, categories, examples);
     } on Object catch (e) {
-      debugPrint('Language model categoriser unavailable: $e');
+      debugPrint('Multilingual model unavailable: $e');
       return null;
     }
   }
 
   /// Up to [max] categories that suit a task named [name], best first, for the user to pick from
   /// while writing it: a rule it mentions, the categoriser's pick, then the next closest by the word
-  /// vectors, and the language model's pick when it's on.
+  /// vectors, and the multilingual model's pick when it's on.
   Future<List<String>> suggestCategories(String name, {int max = 3}) async {
     final doc = _doc;
     final categories = state.categories;
@@ -897,7 +897,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       try {
         add(await smart(name, categories, examples));
       } on Object catch (e) {
-        debugPrint('Language model categoriser unavailable: $e');
+        debugPrint('Multilingual model unavailable: $e');
       }
     }
     if (words != null) {
