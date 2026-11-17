@@ -9,6 +9,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ticker.dart';
+import 'breaks.dart';
 import 'task_document.dart';
 
 final Random _random = Random.secure();
@@ -166,12 +167,24 @@ class TasksState {
   /// a break no task's clock runs.
   final int? breakStartedAt;
 
+  /// What the break under way is for, such as "Lunch", or null for a plain pause.
+  final String? breakReason;
+
+  /// How long the break under way should last from its start, or null for an open-ended pause.
+  final int? breakPlannedSeconds;
+
+  /// The break types holding the pause button offers, set in Settings.
+  final List<BreakCategory> breakCategories;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
       this.taskLimit = defaultTaskLimit,
       this.backlogEnabled = false,
       this.breakStartedAt,
+      this.breakReason,
+      this.breakPlannedSeconds,
+      this.breakCategories = defaultBreakCategories,
       this.noteMinutes = defaultNoteMinutes,
       int? noteStartedAt,
       this.pending = const [],
@@ -191,6 +204,9 @@ class TasksState {
       backlogEnabled: backlogEnabled,
       noteMinutes: noteMinutes,
       breakStartedAt: breakStartedAt,
+      breakReason: breakReason,
+      breakPlannedSeconds: breakPlannedSeconds,
+      breakCategories: breakCategories,
     );
   }
 
@@ -200,6 +216,12 @@ class TasksState {
   int breakSecondsAt(int now) {
     final start = breakStartedAt;
     return start == null || now < start ? 0 : now - start;
+  }
+
+  /// Time left of the planned break; negative once it has run over. Null without a planned length.
+  int? breakRemainingAt(int now) {
+    final planned = breakPlannedSeconds;
+    return planned == null || !onBreak ? null : planned - breakSecondsAt(now);
   }
 
   /// The index of the task being worked on: the first one not checked off, or -1.
@@ -467,6 +489,31 @@ class SetPomodoroEvent extends TasksEvent {
   SetPomodoroEvent({required this.taskId, this.record});
 }
 
+/// Takes a break of a chosen kind: pauses the work, as the pause button does, and logs what the
+/// break is for and how long it should last. On a break already, it changes that break instead.
+class TakeBreakEvent extends TasksEvent {
+  final String? reason;
+  final int? plannedSeconds;
+
+  TakeBreakEvent({this.reason, this.plannedSeconds});
+}
+
+/// Changes the reason and planned length of the break under way. A null [plannedSeconds] makes it
+/// open-ended.
+class EditBreakEvent extends TasksEvent {
+  final String? reason;
+  final int? plannedSeconds;
+
+  EditBreakEvent({this.reason, this.plannedSeconds});
+}
+
+/// Sets the break types holding the pause button offers.
+class SetBreakCategoriesEvent extends TasksEvent {
+  final List<BreakCategory> categories;
+
+  SetBreakCategoriesEvent(this.categories);
+}
+
 class UpdateTimerEvent extends TasksEvent {
   UpdateTimerEvent();
 }
@@ -514,6 +561,10 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   int _taskLimit = defaultTaskLimit;
   bool _backlogEnabled = false;
   int _noteMinutes = defaultNoteMinutes;
+  List<BreakCategory> _breakCategories = defaultBreakCategories;
+  // Planned break time left at the previous tick, to notice when the break runs out. Keyed by the
+  // pause, so a new break starts afresh.
+  (String, int)? _lastBreakRemaining;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -521,6 +572,11 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   /// The name of each task whose countdown runs out, as it happens.
   Stream<String> get timeUp => _timeUp.stream;
+
+  final StreamController<BreakOver> _breakOver = StreamController<BreakOver>.broadcast();
+
+  /// Each planned break as it runs out, so the app can call the person back to work.
+  Stream<BreakOver> get breakOver => _breakOver.stream;
 
   final _document = Completer<CRDTDocument>();
   bool _loading = false;
@@ -568,6 +624,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
           if (doc.backlogIds.contains(e.id)) doc.removeFromBacklog(e.id);
         }));
     on<SetNoteMinutesEvent>(_onSetNoteMinutes);
+    on<TakeBreakEvent>(_onTakeBreak);
+    on<EditBreakEvent>(_onEditBreak);
+    on<SetBreakCategoriesEvent>(_onSetBreakCategories);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
     on<SetPomodoroEvent>((e, emit) =>
         _edit(emit, (doc) => doc.setPomodoro(e.taskId, e.record)));
@@ -595,15 +654,20 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
           muted: _muted,
           taskLimit: _taskLimit,
           backlogEnabled: _backlogEnabled,
+          breakCategories: _breakCategories,
           noteMinutes: _noteMinutes);
     }
     final tasks = doc.tasks(focusId: _focusId);
+    final pause = tasks.any((t) => t.running) ? null : doc.currentPause;
     return TasksState(
       tasks: tasks,
       muted: _muted,
       taskLimit: _taskLimit,
       backlogEnabled: _backlogEnabled,
-      breakStartedAt: tasks.any((t) => t.running) ? null : doc.pauseStartedAt,
+      breakStartedAt: pause?.startedAt,
+      breakReason: pause?.reason,
+      breakPlannedSeconds: pause?.plannedSeconds,
+      breakCategories: _breakCategories,
       noteMinutes: _noteMinutes,
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
@@ -822,6 +886,44 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
   }
 
+  void _onTakeBreak(TakeBreakEvent event, Emitter<TasksState> emit) {
+    final planned = _plannedSeconds(event.plannedSeconds);
+    _edit(emit, (doc) {
+      final pause = _working(doc) ? null : doc.currentPause;
+      if (pause != null) {
+        doc.setPause(pause.id, reason: event.reason, plannedSeconds: planned);
+        return;
+      }
+      _runTop(doc, false);
+      doc.startPause(newId(), reason: event.reason, plannedSeconds: planned);
+    });
+  }
+
+  void _onEditBreak(EditBreakEvent event, Emitter<TasksState> emit) {
+    final planned = _plannedSeconds(event.plannedSeconds);
+    _edit(emit, (doc) {
+      final pause = _working(doc) ? null : doc.currentPause;
+      if (pause == null) return;
+      _lastBreakRemaining = null;
+      doc.setPause(pause.id,
+          reason: (event.reason?.trim().isEmpty ?? true) ? null : event.reason!.trim(),
+          plannedSeconds: planned);
+    });
+  }
+
+  /// A planned length kept within what a break may be, or null for none.
+  int? _plannedSeconds(int? seconds) => seconds == null || seconds <= 0
+      ? null
+      : seconds.clamp(minBreakMinutes * 60, maxBreakMinutes * 60);
+
+  void _onSetBreakCategories(SetBreakCategoriesEvent event, Emitter<TasksState> emit) {
+    _breakCategories = List.unmodifiable(event.categories);
+    emit(_view());
+    final encoded = encodeBreakCategories(_breakCategories);
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString('breakCategories', encoded));
+  }
+
   void _onResumeTimer(ResumeTimerEvent event, Emitter<TasksState> emit) {
     if (_doc == null || _currentId(_doc!) == null) return;
     _edit(emit, (doc) => _runTop(doc, true));
@@ -891,8 +993,29 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         _playAlertSound(alertType: 'REMINDER');
       }
     }
+    _checkBreakOver(view, now);
 
     emit(view);
+  }
+
+  /// Calls the person back once a planned break runs out, on the tick it crosses zero.
+  void _checkBreakOver(TasksState view, int now) {
+    final remaining = view.breakRemainingAt(now);
+    final pause = remaining == null ? null : _doc?.currentPause;
+    if (remaining == null || pause == null) {
+      _lastBreakRemaining = null;
+      return;
+    }
+    final previous = _lastBreakRemaining;
+    _lastBreakRemaining = (pause.id, remaining);
+    if (previous == null || previous.$1 != pause.id) return;
+    if (previous.$2 > 0 && remaining <= 0) {
+      final current = view.currentIndex;
+      _breakOver.add(BreakOver(
+          reason: view.breakReason,
+          nextTask: current >= 0 ? view.tasks[current].name : null));
+      _playAlertSound();
+    }
   }
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
@@ -979,6 +1102,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _backlogEnabled = prefs.getBool('experimentalBacklog') ?? false;
     _noteMinutes = (prefs.getInt('noteMinutes') ?? defaultNoteMinutes)
         .clamp(minNoteMinutes, maxNoteMinutes);
+    _breakCategories = decodeBreakCategories(prefs.getString('breakCategories'));
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');
@@ -1062,6 +1186,15 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     tick?.cancel();
     _remote?.cancel();
     _timeUp.close();
+    _breakOver.close();
     return super.close();
   }
+}
+
+/// A planned break that ran out: what it was for, and the task waiting.
+class BreakOver {
+  final String? reason;
+  final String? nextTask;
+
+  const BreakOver({this.reason, this.nextTask});
 }

@@ -139,6 +139,7 @@ class TasksStack extends StatefulWidget {
 
 class _TasksStackState extends State<TasksStack> {
   StreamSubscription<String>? _timeUp;
+  StreamSubscription<BreakOver>? _breakOver;
 
   @override
   void initState() {
@@ -149,6 +150,31 @@ class _TasksStackState extends State<TasksStack> {
         content: Text(name.isEmpty ? "Time's up" : "Time's up: $name"),
         duration: const Duration(seconds: 10),
         showCloseIcon: true,
+      ));
+    });
+    // A planned break that runs out calls the person back to the task waiting for them.
+    _breakOver = context.read<TasksBloc>().breakOver.listen((over) {
+      if (!mounted) return;
+      final next = over.nextTask;
+      final tasks = context.read<TasksBloc>();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        key: const ValueKey('break-over'),
+        content: Text(next == null || next.isEmpty
+            ? "${over.reason ?? 'Break'} is over"
+            : "${over.reason ?? 'Break'} is over. Back to $next"),
+        duration: const Duration(seconds: 30),
+        showCloseIcon: true,
+        action: next == null
+            ? null
+            : SnackBarAction(
+                label: 'Back to work',
+                onPressed: () {
+                  final current = tasks.state.currentIndex;
+                  if (current >= 0 && tasks.state.onBreak) {
+                    tasks.add(ResumeTimerEvent(index: current));
+                  }
+                },
+              ),
       ));
     });
     _reopenFocus();
@@ -172,6 +198,7 @@ class _TasksStackState extends State<TasksStack> {
   @override
   void dispose() {
     _timeUp?.cancel();
+    _breakOver?.cancel();
     super.dispose();
   }
 

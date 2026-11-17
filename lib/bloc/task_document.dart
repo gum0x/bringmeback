@@ -33,7 +33,8 @@ import 'tasks_bloc.dart';
 /// picks up where it was on any device.
 ///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
-/// never in the order.
+/// never in the order. A break chosen on purpose also has `<taskId>/reason`, its type, and
+/// `<taskId>/plannedSeconds`, how long it should last from its start; both sync like any field.
 class TaskDocument {
   final CRDTDocument doc;
   final CRDTFugueMovableListHandler<String> _order;
@@ -319,12 +320,44 @@ class TaskDocument {
             key.substring(0, key.length - '/kind'.length)
       ];
 
-  /// Logs a pause starting now, as a hidden task whose time entry runs until [endPauses].
-  void startPause(String id) => doc.runInTransaction(() {
+  /// Logs a pause starting now, as a hidden task whose time entry runs until [endPauses]. A
+  /// [reason] names the kind of break, and [plannedSeconds] how long it should last.
+  void startPause(String id, {String? reason, int? plannedSeconds, int? at}) =>
+      doc.runInTransaction(() {
         _fields
           ..set('$id/kind', 'pause')
           ..set('$id/name', 'Pause')
-          ..set('$id/e/${nowSeconds()}', null);
+          ..set('$id/e/${at ?? nowSeconds()}', null);
+        if (reason != null) _fields.set('$id/reason', reason);
+        if (plannedSeconds != null) _fields.set('$id/plannedSeconds', plannedSeconds);
+      });
+
+  /// The pause under way, or null when none runs. Should a merge leave more than one open, the one
+  /// started first counts, as for [pauseStartedAt].
+  BreakRecord? get currentPause {
+    final fields = _values;
+    BreakRecord? found;
+    for (final id in pauseIds) {
+      for (final e in task(id).entries) {
+        if (e.end != null || (found != null && e.start >= found.startedAt)) continue;
+        final reason = fields['$id/reason'];
+        final planned = fields['$id/plannedSeconds'];
+        found = BreakRecord(
+          id: id,
+          startedAt: e.start,
+          reason: reason is String && reason.isNotEmpty ? reason : null,
+          plannedSeconds: planned is int && planned > 0 ? planned : null,
+        );
+      }
+    }
+    return found;
+  }
+
+  /// Changes the reason and planned length of pause [id]. A null [plannedSeconds] leaves it open.
+  void setPause(String id, {String? reason, int? plannedSeconds}) => doc.runInTransaction(() {
+        _fields
+          ..set('$id/reason', reason)
+          ..set('$id/plannedSeconds', plannedSeconds);
       });
 
   /// When the pause under way started, or null when no pause is running. Should a merge leave
@@ -443,6 +476,18 @@ enum TaskStatus {
   /// Kept for later, off the note.
   backlog,
   deleted,
+}
+
+/// A pause under way: when it started and, for a break chosen on purpose, its type and how long it
+/// should last.
+class BreakRecord {
+  final String id;
+  final int startedAt;
+  final String? reason;
+  final int? plannedSeconds;
+
+  const BreakRecord(
+      {required this.id, required this.startedAt, this.reason, this.plannedSeconds});
 }
 
 /// A note torn off: the tasks written on it, in order, and when it was started and torn off.

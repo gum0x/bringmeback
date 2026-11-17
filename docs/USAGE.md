@@ -81,6 +81,25 @@ The break ends, and the line goes away, when you:
 
 Writing or moving tasks lower down the note doesn't end the break.
 
+### Choosing a break
+
+A tap on pause is a plain pause, with no timer. **Hold** the pause button (or right click it) to choose
+a kind of break instead: Coffee 5 min, Stretch 10 min, Walk 15 min, Errand 30 min or Lunch 45 min by
+default, or **Just pause**. The break line then shows what the break is for and the time left, e.g.
+"Lunch · 32:10 left". Holding the button during a break changes it.
+
+**Double tap** (or double click) the break line, or press its pencil, to change the reason and the
+length. The length counts from when the break started; leave it empty for no timer. Under 5 minutes
+the app suggests a proper break.
+
+When a planned break runs out, a sound plays and a message says "Lunch is over. Back to *your task*",
+with **Back to work**. The break line turns red and counts how far over the break has gone. The task's
+clock only starts when you say you are back, so the record stays honest.
+
+Set the kinds of break in **Settings → Breaks**: change each length with − and +, tap the icon to
+rename it, change its icon or remove it, **Add a break type**, or **Reset break types**. The list is kept
+on this device; a break's reason and length are part of the note, so they sync to your other devices.
+
 Set the countdown length in the task dialog (default 20 minutes). The bottom bar has **Restart
 countdown**, and its ⋮ menu **Reset total time**.
 

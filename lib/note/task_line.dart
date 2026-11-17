@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../bloc/breaks.dart';
 import '../bloc/tasks_bloc.dart';
 import '../focus/focus_page.dart';
 import '../sync/sync_status.dart';
 import '../timer.dart';
+import 'break_dialogs.dart';
 import 'paper.dart';
 import 'task_dialog.dart';
 
@@ -198,14 +200,27 @@ class NoteToolbar extends StatelessWidget {
       return BottomAppBar(
         child: Row(
           children: [
-            IconButton.filledTonal(
-              tooltip: running ? 'Pause (logs a break)' : 'Resume work',
-              onPressed: current < 0
-                  ? null
-                  : () => bloc.add(running
-                      ? StopTimerEvent(index: current)
-                      : ResumeTimerEvent(index: current)),
-              icon: Icon(running ? Icons.pause : Icons.play_arrow),
+            // A tap pauses or resumes; holding it (or a right click) chooses a kind of break.
+            // The tooltip shows on hover only, so holding is left to the break choice.
+            Tooltip(
+              message: running ? 'Pause (logs a break)' : 'Resume work',
+              triggerMode: TooltipTriggerMode.manual,
+              child: Semantics(
+                onLongPressHint: 'Choose a break',
+                child: GestureDetector(
+                  key: const ValueKey('pause-button'),
+                  onLongPress: running || state.onBreak ? () => chooseBreak(context) : null,
+                  onSecondaryTap: running || state.onBreak ? () => chooseBreak(context) : null,
+                  child: IconButton.filledTonal(
+                    onPressed: current < 0
+                        ? null
+                        : () => bloc.add(running
+                            ? StopTimerEvent(index: current)
+                            : ResumeTimerEvent(index: current)),
+                    icon: Icon(running ? Icons.pause : Icons.play_arrow),
+                  ),
+                ),
+              ),
             ),
             const SizedBox(width: 4),
             IconButton(
@@ -617,58 +632,108 @@ class BreakLine extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = NoteColors.of(context);
     final current = state.currentIndex;
-    final seconds = state.breakSecondsAt(nowSeconds());
+    final now = nowSeconds();
+    final seconds = state.breakSecondsAt(now);
+    final remaining = state.breakRemainingAt(now);
+    final over = remaining != null && remaining <= 0;
+    final reason = state.breakReason;
     final small = theme.textTheme.bodyMedium?.copyWith(
       color: colors.faded,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
+    final String title;
+    final String subtitle;
+    if (remaining == null) {
+      title = '${reason ?? 'On a break'} · ${formatClock(seconds)}';
+      subtitle = 'No task clock is running';
+    } else if (!over) {
+      title = '${reason ?? 'Break'} · ${formatClock(remaining)} left';
+      subtitle = 'Of ${formatMinutes((state.breakPlannedSeconds! / 60).ceil())} · no task clock running';
+    } else {
+      title = 'Break over · +${formatClock(-remaining)}';
+      subtitle = current >= 0
+          ? 'Time to get back to ${state.tasks[current].name.isEmpty ? 'your task' : state.tasks[current].name}'
+          : 'Time to get back to your tasks';
+    }
     return Semantics(
       container: true,
       liveRegion: true,
-      label: 'On a break. No task clock is running.',
+      label: over
+          ? 'Break over. No task clock is running.'
+          : 'On a break${reason == null ? '' : ': $reason'}. No task clock is running.',
       child: Container(
         key: const ValueKey('break-line'),
         constraints: const BoxConstraints(minHeight: 64),
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.55),
+          color: over
+              ? theme.colorScheme.errorContainer.withValues(alpha: 0.55)
+              : theme.colorScheme.tertiaryContainer.withValues(alpha: 0.55),
           border: Border(bottom: BorderSide(color: colors.rule)),
         ),
         child: Row(
           children: [
-            SizedBox(
-              width: 30,
-              child: Icon(Icons.coffee_outlined,
-                  size: 20, color: theme.colorScheme.onTertiaryContainer),
-            ),
-            const SizedBox(width: 12),
+            // Double tap or click on the break changes what it is for and how long it lasts. Only
+            // here, so the buttons beside it answer a single tap at once.
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'On a break · ${formatClock(seconds)}',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: colors.ink,
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+              child: Semantics(
+                onTapHint: 'Change the break',
+                child: GestureDetector(
+                  key: const ValueKey('break-details'),
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTap: () => editBreak(context),
+                  child: Row(children: [
+                    SizedBox(
+                      width: 30,
+                      child: Icon(over ? Icons.alarm : breakIconFor(reason, state.breakCategories),
+                          size: 20,
+                          color: over
+                              ? theme.colorScheme.onErrorContainer
+                              : theme.colorScheme.onTertiaryContainer),
                     ),
-                  ),
-                  Text('No task clock is running', style: small),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: colors.ink,
+                              fontWeight: FontWeight.w600,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                          Text(subtitle, style: small),
+                        ],
+                      ),
+                    ),
+                  ]),
+                ),
               ),
+            ),
+            IconButton(
+              tooltip: 'Change the break',
+              onPressed: () => editBreak(context),
+              icon: const Icon(Icons.edit_outlined, size: 18),
             ),
             if (current >= 0)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
-                child: TextButton.icon(
-                  onPressed: () => context
-                      .read<TasksBloc>()
-                      .add(ResumeTimerEvent(index: current)),
-                  icon: const Icon(Icons.play_arrow, size: 18),
-                  label: const Text('Back to work'),
-                ),
+                child: over
+                    ? FilledButton.icon(
+                        onPressed: () =>
+                            context.read<TasksBloc>().add(ResumeTimerEvent(index: current)),
+                        icon: const Icon(Icons.play_arrow, size: 18),
+                        label: const Text('Back to work'),
+                      )
+                    : TextButton.icon(
+                        onPressed: () =>
+                            context.read<TasksBloc>().add(ResumeTimerEvent(index: current)),
+                        icon: const Icon(Icons.play_arrow, size: 18),
+                        label: const Text('Back to work'),
+                      ),
               ),
           ],
         ),

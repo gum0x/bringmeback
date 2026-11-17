@@ -1,3 +1,4 @@
+import 'package:bringmeback/bloc/breaks.dart';
 import 'package:bringmeback/bloc/history.dart';
 import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
@@ -539,5 +540,129 @@ void main() {
     expect(bloc.state.onBreak, isFalse);
     expect(bloc.state.tasks.first.name, 'Phone');
     expect(bloc.state.tasks.first.running, isTrue);
+  });
+  noteTest('holding pause offers the break types, and the break counts down', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+        'Write report');
+    await tester.longPress(find.byKey(const ValueKey('pause-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Take a break'), findsOneWidget);
+    for (final c in bloc.state.breakCategories) {
+      expect(find.byKey(ValueKey('break-category-${c.name}')), findsOneWidget);
+    }
+    expect(find.text('Just pause'), findsOneWidget);
+
+    await tester.tap(find.text('Lunch'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+    expect(bloc.state.tasks.single.running, isFalse);
+    expect((bloc.state.breakReason, bloc.state.breakPlannedSeconds), ('Lunch', 45 * 60));
+    expect(find.byKey(const ValueKey('break-line')), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^Lunch · 4[45]:\d\d left$')), findsOneWidget);
+    expect(find.textContaining('Of 45 min'), findsOneWidget);
+
+    // Holding it on the break changes the break.
+    await tester.longPress(find.byKey(const ValueKey('pause-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Change the break'), findsOneWidget);
+    await tester.tap(find.text('Just pause'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isTrue);
+    expect((bloc.state.breakReason, bloc.state.breakPlannedSeconds), (null, null));
+    expect(find.textContaining('On a break'), findsOneWidget);
+
+    // A tap still pauses and resumes as before.
+    await tester.tap(find.byTooltip('Resume work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+  });
+
+  noteTest('double tapping a break changes its reason and timer', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+        'Write report');
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+
+    final line = find.byKey(const ValueKey('break-line'));
+    await tester.tap(line);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(line);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AlertDialog, 'Change the break'), findsOneWidget);
+
+    // A preset fills both fields.
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Walk · 15 min'));
+    await tester.pump();
+    expect(find.widgetWithText(TextField, 'Walk'), findsOneWidget);
+
+    // Too short a break gets a nudge.
+    await tester.enterText(find.widgetWithText(TextField, 'Break minutes'), '2');
+    await tester.pump();
+    expect(find.byKey(const ValueKey('break-hint')), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Break minutes'), '20');
+    await tester.enterText(find.widgetWithText(TextField, 'Reason'), 'Walk the dog');
+    await tester.pump();
+    expect(find.byKey(const ValueKey('break-hint')), findsNothing);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    expect((bloc.state.breakReason, bloc.state.breakPlannedSeconds), ('Walk the dog', 20 * 60));
+    expect(find.textContaining('Walk the dog ·'), findsOneWidget);
+
+    // The pencil on the line opens the same dialog; clearing the minutes takes the timer away.
+    await tester.tap(find.byTooltip('Change the break'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Break minutes'), '');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(tester);
+    expect((bloc.state.breakReason, bloc.state.breakPlannedSeconds), ('Walk the dog', null));
+  });
+
+  noteTest('a break run over says so and calls back to the task', (tester, bloc) async {
+    await writeThrough(tester, find.widgetWithText(FloatingActionButton, 'New task'),
+        'Write report');
+    await tester.tap(find.byTooltip('Pause (logs a break)'));
+    await settle(tester);
+    final doc = bloc.taskDocument!;
+    doc.endPauses();
+    doc.startPause('p', reason: 'Coffee', plannedSeconds: 5 * 60, at: nowSeconds() - 6 * 60);
+    bloc.add(UpdateTimerEvent());
+    await settle(tester);
+    expect(find.textContaining(RegExp(r'^Break over · \+01:0\d$')), findsOneWidget);
+    expect(find.text('Time to get back to Write report'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Back to work'));
+    await settle(tester);
+    expect(bloc.state.onBreak, isFalse);
+    expect(bloc.state.tasks.single.running, isTrue);
+  });
+
+  noteTest('break types are set in Settings', (tester, bloc) async {
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Add a break type'), 100);
+    expect(find.byKey(const ValueKey('break-setting-Coffee')), findsOneWidget);
+    await tester.tap(find.byTooltip('Longer Coffee'));
+    await tester.pumpAndSettle();
+    expect(bloc.state.breakCategories.first.minutes, 6);
+
+    await tester.tap(find.text('Add a break type'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Nap');
+    await tester.enterText(find.widgetWithText(TextField, 'Minutes'), '20');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Add'));
+    await tester.pumpAndSettle();
+    expect(bloc.state.breakCategories.last.name, 'Nap');
+    expect(bloc.state.breakCategories.last.minutes, 20);
+
+    await tester.tap(find.byTooltip('Edit Lunch'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+    expect(bloc.state.breakCategories.map((c) => c.name), isNot(contains('Lunch')));
+
+    await tester.scrollUntilVisible(find.text('Reset break types'), 100);
+    await tester.tap(find.text('Reset break types'));
+    await tester.pumpAndSettle();
+    expect(bloc.state.breakCategories, defaultBreakCategories);
   });
 }

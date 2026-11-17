@@ -9,7 +9,8 @@ described in [VIEWS.md](VIEWS.md).
 
 - Task list with drag to reorder, keyboard shortcuts and Alt variants for the web.
 - Only the top task runs; done and delete hand the timer on; Undo for both.
-- Pause logs a break; done keeps when it finished.
+- Pause logs a break; holding it chooses a kind of break with a planned length. Done keeps when it
+  finished.
 - Countdown with time's up alert, 30-minute reminder, mute.
 - Phone and desktop layouts, light and dark theme.
 - Sync-ready data model and the task list in a crdt_lf document (sync steps 1 and 2).
