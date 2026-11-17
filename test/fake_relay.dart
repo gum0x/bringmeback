@@ -21,13 +21,16 @@ class FakeRelay {
 
   void deliver(FakeConnection from, String message) {
     final parsed = jsonDecode(message) as List;
+    if (from.dead) return;
     if (parsed[0] == 'REQ') {
       from.subscription = parsed[1] as String;
+      // A relay ends the stored events of a subscription with EOSE, at once for ephemeral ones.
+      if (!from.incoming.isClosed) from.incoming.add(jsonEncode(['EOSE', from.subscription]));
     } else if (parsed[0] == 'EVENT') {
       published.add(message);
       if (deaf) return;
       for (final c in connections) {
-        if (c != from && c.subscription != null && !c.incoming.isClosed) {
+        if (c != from && !c.dead && c.subscription != null && !c.incoming.isClosed) {
           c.incoming.add(jsonEncode(['EVENT', c.subscription, parsed[1]]));
         }
       }
@@ -39,6 +42,10 @@ class FakeConnection implements RelayConnection {
   final FakeRelay relay;
   final incoming = StreamController<Object?>();
   String? subscription;
+
+  /// A connection that died without closing, as after the computer slept: nothing goes through in
+  /// either direction, and no close ever arrives.
+  bool dead = false;
 
   FakeConnection(this.relay);
 

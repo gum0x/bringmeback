@@ -32,6 +32,14 @@ With **Find my devices online** on, devices that are both open sync without anyo
 - Every 30 seconds, a device that sees no other device announces itself again, and devices answer
   each other's announces again. Two devices that missed each other's announce (a relay dropped it, or
   one came online while the other's relay was reconnecting) still find each other.
+- Every 30 seconds, each relay is asked to answer (the subscription is sent again, and a relay replies
+  at once). A relay that answered nothing since the last round is connected again, which also
+  announces the device on it. A relay socket can die without closing, after the computer sleeps or
+  changes network; before this check, such a device still showed its relays as connected but heard
+  and reached no one, so other devices saw "No other device online".
+- A device that was seen online but isn't connected keeps announcing every 30 seconds, and stops
+  counting as online when nothing is heard from it for three rounds. A phone sent to the background
+  never says bye, and its old session used to keep the other device from announcing again.
 - When the app comes back to the front, connected devices compare again; after 20 seconds or more
   hidden, it reconnects to the relays first.
 - A link that drops is tried again after 5 s, then waiting twice as long each time, up to 5 minutes.

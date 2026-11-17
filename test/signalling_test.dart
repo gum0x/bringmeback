@@ -128,4 +128,36 @@ void main() {
     expect(relay.published, hasLength(2));
     await a.stop();
   });
+
+  test('a relay that went silent without closing is connected again, and announces again', () async {
+    final relay = FakeRelay();
+    final a = node(relay)..start();
+    await pumpEventQueue();
+    expect(a.relaysConnected, 1);
+    expect(relay.published, hasLength(1));
+
+    // A relay that answers keeps its connection: the probe gets EOSE back.
+    a.checkRelays();
+    await pumpEventQueue();
+    a.checkRelays();
+    await pumpEventQueue();
+    expect(relay.connections, hasLength(1));
+    expect(a.relaysConnected, 1);
+
+    // The socket dies without a close, as after the computer slept.
+    relay.connections.single.dead = true;
+    a.checkRelays(); // probe, unanswered
+    await pumpEventQueue();
+    expect(a.relaysConnected, 1);
+    a.checkRelays(); // still silent: dropped, and tried again
+    await pumpEventQueue();
+    expect(a.relaysConnected, 0);
+    await Future<void>.delayed(const Duration(milliseconds: 1100));
+    await pumpEventQueue();
+    expect(relay.connections, hasLength(2));
+    expect(a.relaysConnected, 1);
+    // The new connection announced this device again.
+    expect(relay.published, hasLength(2));
+    await a.stop();
+  });
 }

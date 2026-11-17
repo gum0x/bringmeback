@@ -188,6 +188,13 @@ class SyncCubit extends Cubit<SyncState> {
   /// The last announce heard from each device, to connect to it again on [syncNow].
   final _announces = <String, SymbolonSignal>{};
 
+  /// When each device was last heard from on the relays, in this run.
+  final _heardAt = <String, DateTime>{};
+
+  /// How many automatic rounds an online device that isn't connected may stay silent before it no
+  /// longer counts as online. Devices that aren't connected announce on every round.
+  static const _forgetAfter = 3;
+
   /// Links by device id, and the devices whose link is being set up.
   final _links = <String, PeerLink>{};
   final _pending = <String>{};
@@ -320,6 +327,7 @@ class SyncCubit extends Cubit<SyncState> {
     _signalling = null;
     _answered.clear();
     _announces.clear();
+    _heardAt.clear();
     await _closeLinks();
     _emit(state.copyWith(
         problems: const {}, builds: const {}, relaysUp: 0, relayCount: 0, relaysUnreachable: false));
@@ -354,14 +362,42 @@ class SyncCubit extends Cubit<SyncState> {
   /// Keeps devices that are both online in sync without anyone pressing anything:
   /// - connected devices compare their changes again, so a change lost on the way (or one made while
   ///   a message was in flight) is sent again;
-  /// - this device announces itself again when it sees no other device, and answers the others'
-  ///   announces again, so two devices that missed each other's announce still find each other.
+  /// - this device announces itself again while it sees no other device, or sees one it isn't
+  ///   connected to, and answers the others' announces again, so two devices that missed each
+  ///   other's announce still find each other.
   ///   Answers are limited to one per device per tick, so two devices that can't connect don't
   ///   flood the relays.
+  /// - relays that stopped answering are connected again ([Signalling.checkRelays]);
+  /// - a device not connected and not heard from for [_forgetAfter] ticks no longer counts as online:
+  ///   a phone that went to the background never says bye, and its old session would otherwise keep
+  ///   this device from announcing itself again.
   void _autoSyncTick() {
     _sync?.resync();
+    _signalling?.checkRelays();
     _answered.clear();
-    if (state.online.isEmpty && state.connected.isEmpty) _signalling?.send(SignalKind.announce);
+    final stale = DateTime.now().subtract(_autoSyncEvery * _forgetAfter);
+    final gone = {
+      for (final id in state.online)
+        if (!state.connected.contains(id) && !(_heardAt[id]?.isAfter(stale) ?? false)) id,
+    };
+    if (gone.isNotEmpty) {
+      for (final id in gone) {
+        _forget(id);
+      }
+      _emit(state.copyWith(online: state.online.difference(gone)));
+    }
+    // Announce while any device is missing: none is online, or one is online but not connected.
+    if (state.online.isEmpty || !state.connected.containsAll(state.online)) {
+      _signalling?.send(SignalKind.announce);
+    }
+  }
+
+  /// Drops what this device knows of the online device [id], which isn't connected.
+  void _forget(String id) {
+    _announces.remove(id);
+    _heardAt.remove(id);
+    _retries.remove(id)?.cancel();
+    _backoff.remove(id);
   }
 
   /// The Sync now button: makes this device and every other online device of the group exchange
@@ -400,6 +436,7 @@ class SyncCubit extends Cubit<SyncState> {
 
   void _heard(SymbolonSignal signal) {
     final device = _id(signal.device);
+    _heardAt[device] = DateTime.now();
     switch (signal.kind) {
       case SignalKind.announce:
         _announces[device] = signal;

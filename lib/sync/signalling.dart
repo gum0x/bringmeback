@@ -94,6 +94,21 @@ class Signalling {
     return '["EVENT",${_signer.signalEvent(now, _box.topic, content)}]';
   }
 
+  /// Checks that every relay still answers, and reconnects the ones that don't. Call it every so
+  /// often (`SyncCubit` does on each automatic sync round).
+  ///
+  /// A relay connection can die without ever closing: after the computer sleeps, or when it changes
+  /// network, the socket stays "open" but nothing goes through in either direction, so this device
+  /// neither hears nor reaches the others while it still counts the relay as connected. Each check
+  /// sends the subscription again, which a relay answers at once (with EOSE). A relay that sent
+  /// nothing at all since the previous check is taken as dead and connected again, which also
+  /// announces this device on it.
+  void checkRelays() {
+    for (final relay in _relays) {
+      relay.check();
+    }
+  }
+
   /// Says goodbye and disconnects from every relay.
   Future<void> stop() async {
     send(SignalKind.bye);
@@ -189,6 +204,10 @@ class _Relay {
   Duration _backoff = const Duration(seconds: 1);
   bool _closed = false;
   bool _open = false;
+  String? _subscriptionId;
+
+  /// True from a liveness probe until the relay sends anything.
+  bool _awaitingReply = false;
 
   _Relay(this.url, this.owner);
 
@@ -209,10 +228,14 @@ class _Relay {
       return;
     }
     _open = true;
+    _subscriptionId = id;
+    _awaitingReply = false;
     owner._relayChanged();
     _backoff = const Duration(seconds: 1);
-    _listening = channel.messages.listen((m) => owner._receive(id, m),
-        onDone: _dropped, onError: (Object _) => _dropped(), cancelOnError: true);
+    _listening = channel.messages.listen((m) {
+      _awaitingReply = false;
+      owner._receive(id, m);
+    }, onDone: _dropped, onError: (Object _) => _dropped(), cancelOnError: true);
     channel.add(owner._subscription(id));
     // Announce on every (re)connect, so devices that came online meanwhile find this one.
     channel.add(owner._event(SignalKind.announce));
@@ -222,8 +245,26 @@ class _Relay {
     if (_open) _channel?.add(message);
   }
 
+  /// See [Signalling.checkRelays].
+  void check() {
+    final id = _subscriptionId;
+    if (_closed || !_open || id == null) return;
+    if (_awaitingReply) {
+      // Silent since the last probe: the socket is dead even though it never closed.
+      final channel = _channel;
+      _dropped();
+      _channel = null;
+      unawaited(channel?.close().catchError((Object _) {}));
+      return;
+    }
+    _awaitingReply = true;
+    _channel?.add(owner._subscription(id));
+  }
+
   void _dropped() {
+    if (!_open && _retry?.isActive == true) return;
     _open = false;
+    _subscriptionId = null;
     owner._relayChanged();
     _listening?.cancel();
     _scheduleRetry();
