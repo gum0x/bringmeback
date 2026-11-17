@@ -80,4 +80,83 @@ void main() {
     await a.close();
     await b.close();
   });
+
+  test('a device whose relay socket died silently is found again by a device that comes back',
+      () async {
+    // The desktop stays open while its relay socket dies without closing (the computer slept); the
+    // phone goes to the background without a bye, then comes back with a new session.
+    const tick = Duration(milliseconds: 200);
+    final relay = FakeRelay();
+    final net = FakeNetwork();
+    SharedPreferences.setMockInitialValues({});
+    final desktop =
+        SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await desktop.load();
+    await desktop.createGroup();
+    await desktop.setLive(true);
+    SharedPreferences.setMockInitialValues({});
+    final phone = SyncCubit(
+        connect: relay.connect, transport: net.create, autoSyncEvery: tick, staleAfter: Duration.zero);
+    await phone.load();
+    await phone.joinGroup(desktop.state.code!);
+    await phone.setLive(true);
+    await pumpEventQueue();
+    expect(phone.state.connected, {desktop.state.device!.id});
+
+    // The phone is frozen in the background: its link dies, no bye is sent.
+    phone.paused();
+    for (final t in net.transports) {
+      await t.close();
+    }
+    for (final c in relay.connections) {
+      c.dead = true;
+    }
+    await pumpEventQueue();
+
+    // The phone comes back: it reconnects to the relay with a new session and announces.
+    await phone.resumed();
+    await Future<void>.delayed(tick * 10);
+    await pumpEventQueue();
+
+    expect(phone.state.online, {desktop.state.device!.id});
+    expect(phone.state.connected, {desktop.state.device!.id});
+    expect(desktop.state.connected, {phone.state.device!.id});
+    await phone.close();
+    await desktop.close();
+  });
+
+  test('a device that left without a bye stops counting as online after a few rounds', () async {
+    const tick = Duration(milliseconds: 100);
+    final relay = FakeRelay();
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: relay.connect, transport: FakeNetwork().create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    SharedPreferences.setMockInitialValues({});
+    // B can't connect directly (no transport), so it is online but never connected.
+    final b = SyncCubit(
+        connect: relay.connect,
+        transport: () => Future.error(StateError('no WebRTC')),
+        autoSyncEvery: tick);
+    await b.load();
+    await b.joinGroup(a.state.code!);
+    await b.setLive(true);
+    await pumpEventQueue();
+    expect(a.state.online, {b.state.device!.id});
+
+    // While B is there, it keeps announcing, so A keeps it online.
+    await Future<void>.delayed(tick * 6);
+    expect(a.state.online, {b.state.device!.id});
+
+    // B vanishes without a bye.
+    for (final c in relay.connections) {
+      if (c != relay.connections.first) c.dead = true;
+    }
+    await Future<void>.delayed(tick * 6);
+    await pumpEventQueue();
+    expect(a.state.online, isEmpty);
+    await a.close();
+    await b.close();
+  });
 }

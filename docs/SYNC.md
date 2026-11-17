@@ -32,6 +32,14 @@ With **Find my devices online** on, devices that are both open sync without anyo
 - Every 30 seconds, a device that sees no other device announces itself again, and devices answer
   each other's announces again. Two devices that missed each other's announce (a relay dropped it, or
   one came online while the other's relay was reconnecting) still find each other.
+- Every 30 seconds, each relay is asked to answer (the subscription is sent again, and a relay replies
+  at once). A relay that answered nothing since the last round is connected again, which also
+  announces the device on it. A relay socket can die without closing, after the computer sleeps or
+  changes network; before this check, such a device still showed its relays as connected but heard
+  and reached no one, so other devices saw "No other device online".
+- A device that was seen online but isn't connected keeps announcing every 30 seconds, and stops
+  counting as online when nothing is heard from it for three rounds. A phone sent to the background
+  never says bye, and its old session used to keep the other device from announcing again.
 - When the app comes back to the front, connected devices compare again; after 20 seconds or more
   hidden, it reconnects to the relays first.
 - A link that drops is tried again after 5 s, then waiting twice as long each time, up to 5 minutes.
@@ -99,3 +107,16 @@ may run, with one open time entry.
 - Messages are never lost inside a working link (the channel is reliable and ordered), so the
   30-second comparison mainly covers links that dropped, devices passing changes on for each other,
   and announces lost on the relays.
+
+## Tearing off while out of sync
+
+**One device tears off, the other keeps using yesterday's note.** Nothing is lost when they sync.
+A task checked off on the old note counts as done on yesterday's torn-off note. A task written on
+the old note after the tear-off lands on today's note. The unfinished tasks wait to be written again,
+as usual.
+
+**Both devices tear off the same note.** History keeps one note per note started: the two records
+merge into one, with the tasks of both, closed at the earlier tear-off. When both devices wrote the
+same unfinished task again, today's note would have it twice. After the merge, each device keeps
+the copy the task's `carriedTo` names (the same one on both devices) and deletes the other, unless
+that copy was checked off.
