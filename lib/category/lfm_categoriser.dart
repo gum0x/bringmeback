@@ -181,8 +181,8 @@ class LfmCategoriser {
         if (nameOf[e.category] case final name?) (e.text.trim(), name)
     ].take(maxExamples).toList().reversed;
     final starters = [
-      for (final MapEntry(key: id, value: task) in sampleTasks.entries)
-        if (nameOf[id] case final name?) (task, name)
+      for (final MapEntry(key: id, value: tasks) in sampleTasks.entries)
+        if (nameOf[id] case final name?) (tasks.first, name)
     ];
     final sorted = [...starters, ...user];
     LlamaChatMessage say(LlamaChatRole role, String text) =>

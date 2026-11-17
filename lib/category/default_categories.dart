@@ -95,17 +95,73 @@ DefaultCategory? defaultCategory(String id) {
   return null;
 }
 
-/// One sample task for each default category, which shows the models what goes there.
-const sampleTasks = {
-  'work-planning': 'Answer work emails',
-  'focused-work': 'Code the new search feature',
-  'meetings': 'Weekly sync with the design team',
-  'personal-projects': 'Work on my side project website',
-  'learning': 'Read a chapter of the history book',
-  'housekeeping': 'Vacuum the living room',
-  'errands': 'Pick up the parcel at the post office',
-  'money-paperwork': 'Renew the car insurance',
-  'workout-self-care': 'Yoga class',
-  'family-friends': 'Dinner with my parents',
-  'leisure': 'Play video games',
+/// A few sample tasks for each default category, which show the models what goes there. Kept
+/// apart from the tasks in test/bench, so the benchmark measures what a model makes of new tasks.
+const sampleTasks = <String, List<String>>{
+  'work-planning': [
+    'Answer work emails',
+    'Plan the week',
+    'Update the weekly KPI report',
+    'Sort out my work to-do list',
+  ],
+  'focused-work': [
+    'Code the new search feature',
+    'Debug the payment error',
+    'Write the design document',
+    'Prepare the presentation for the client',
+  ],
+  'meetings': [
+    'Weekly sync with the design team',
+    'Call with the client',
+    'Interview a candidate',
+    'Team retrospective',
+  ],
+  'personal-projects': [
+    'Work on my side project website',
+    'Build a birdhouse',
+    'Update my hobby repo on GitHub',
+    'Edit my YouTube video',
+  ],
+  'learning': [
+    'Read a chapter of the history book',
+    'Online course lesson',
+    'Study for the exam',
+    'Language app practice',
+  ],
+  'housekeeping': [
+    'Vacuum the living room',
+    'Wash the dishes',
+    'Cook dinner',
+    'Fix the leaking tap',
+  ],
+  'errands': [
+    'Pick up the parcel at the post office',
+    'Grocery shopping',
+    'Return the shoes to the store',
+    'Get medicine at the pharmacy',
+  ],
+  'money-paperwork': [
+    'Renew the car insurance',
+    'File the tax return',
+    'Transfer the rent',
+    'Fill in the visa form',
+  ],
+  'workout-self-care': [
+    'Yoga class',
+    'Gym session',
+    'Doctor appointment',
+    'Meditate for ten minutes',
+  ],
+  'family-friends': [
+    'Dinner with my parents',
+    'Visit grandma',
+    'Plan the kids\' weekend',
+    'Text my best friend',
+  ],
+  'leisure': [
+    'Play video games',
+    'Go to the cinema',
+    'Plan a weekend trip',
+    'Read a novel',
+  ],
 };

@@ -9,7 +9,7 @@ import 'default_categories.dart';
 /// Picks a category for a task with a sentence embedding model, on the device.
 ///
 /// An embedding model turns a text into a point in space where texts that mean alike sit close,
-/// whatever their language. Each category is described by its name and keywords, one sample task
+/// whatever their language. Each category is described by its name and keywords, sample tasks
 /// and the tasks the user filed under it; a task goes to the category with the closest description.
 /// It ranks rather than writes, so it is much smaller and quicker than a chat model.
 class EmbeddingCategoriser {
@@ -24,17 +24,20 @@ class EmbeddingCategoriser {
   /// Put before a category's description.
   final String documentPrefix;
 
-  EmbeddingCategoriser._(this._engine, this.queryPrefix, this.documentPrefix);
+  /// Whether a category's name and keywords count, besides its sample and hand-filed tasks.
+  final bool describe;
+
+  EmbeddingCategoriser._(this._engine, this.queryPrefix, this.documentPrefix, this.describe);
 
   static Future<EmbeddingCategoriser> load(ModelSource model,
-      {String queryPrefix = '', String documentPrefix = ''}) async {
+      {String queryPrefix = '', String documentPrefix = '', bool describe = true}) async {
     final engine = await LlamaEngine.load(LlamaModel(model),
         params: const ModelParams(contextSize: 512));
     if (!engine.supportsEmbeddings) {
       await engine.dispose();
       throw LlamaUnsupportedException('This model can\'t embed text.');
     }
-    return EmbeddingCategoriser._(engine, queryPrefix, documentPrefix);
+    return EmbeddingCategoriser._(engine, queryPrefix, documentPrefix, describe);
   }
 
   Future<String> get backendName => _engine.getBackendName();
@@ -55,7 +58,7 @@ class EmbeddingCategoriser {
   }
 
   /// How close [text] comes to each category, as cosine similarity: the best of its description,
-  /// its sample task and the tasks filed under it.
+  /// its sample tasks and the tasks filed under it.
   Future<Map<String, double>> scores(String text, List<TaskCategory> categories,
       {List<CategoryExample> examples = const []}) async {
     if (text.trim().isEmpty || categories.isEmpty) return {};
@@ -63,8 +66,9 @@ class EmbeddingCategoriser {
     final result = <String, double>{};
     for (final c in categories) {
       final texts = [
-        '$documentPrefix${c.name.trim()}: ${c.keywords.trim().split(RegExp(r'\s+')).join(', ')}',
-        if (sampleTasks[c.id] case final sample?) '$queryPrefix$sample',
+        if (describe || !sampleTasks.containsKey(c.id))
+          '$documentPrefix${c.name.trim()}: ${c.keywords.trim().split(RegExp(r'\s+')).join(', ')}',
+        for (final sample in sampleTasks[c.id] ?? const <String>[]) '$queryPrefix$sample',
         for (final e in examples.take(30))
           if (e.category == c.id) '$queryPrefix${e.text.trim()}',
       ];

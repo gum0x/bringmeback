@@ -11,6 +11,10 @@ on:
       - 'tool/download_bench_models.sh'
       - '.github/workflows/category-bench.yaml'
   workflow_dispatch:
+    inputs:
+      only:
+        description: 'Only the models whose names match this regular expression'
+        required: false
 
 permissions:
   contents: read
@@ -41,6 +45,9 @@ jobs:
 
     - name: Download the models
       shell: bash
+      env:
+        # On pull requests, the models still in the running; run by hand for all of them.
+        BENCH_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.only || 'MiniLM|EmbeddingGemma|Qwen3-0.6B' }}
       run: |
         models=$(./tool/download_bench_models.sh "$RUNNER_TEMP/models")
         echo "BENCH_MODELS=$models" >> "$GITHUB_ENV"

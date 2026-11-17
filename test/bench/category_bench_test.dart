@@ -119,15 +119,21 @@ void main() {
             await llm.dispose();
           }
         } else {
-          final embed = await EmbeddingCategoriser.load(ModelSource.path(path),
-              queryPrefix: (prefixes.elementAtOrNull(0) ?? '').replaceAll(r'\n', '\n'),
-              documentPrefix: (prefixes.elementAtOrNull(1) ?? '').replaceAll(r'\n', '\n'));
-          try {
-            await bench(name, (text, categories) => embed.scores(text, categories),
-                (ranked) => ranked.length < 2 || ranked[0] - ranked[1] >= EmbeddingCategoriser.margin,
-                size: sizeOf(path));
-          } finally {
-            await embed.dispose();
+          for (final describe in [true, false]) {
+            final embed = await EmbeddingCategoriser.load(ModelSource.path(path),
+                queryPrefix: (prefixes.elementAtOrNull(0) ?? '').replaceAll(r'\n', '\n'),
+                documentPrefix: (prefixes.elementAtOrNull(1) ?? '').replaceAll(r'\n', '\n'),
+                describe: describe);
+            try {
+              await bench(
+                  '$name, ${describe ? 'keywords and samples' : 'samples only'}',
+                  (text, categories) => embed.scores(text, categories),
+                  (ranked) =>
+                      ranked.length < 2 || ranked[0] - ranked[1] >= EmbeddingCategoriser.margin,
+                  size: sizeOf(path));
+            } finally {
+              await embed.dispose();
+            }
           }
         }
       } on Object catch (e) {

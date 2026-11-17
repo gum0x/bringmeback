@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# BENCH_ONLY, a regular expression, limits it to the models whose names match.
 # Downloads the models .github/workflows/category-bench.yaml compares, from Hugging Face, into
 # $1, and prints BENCH_MODELS for test/bench/category_bench_test.dart. A model whose repository or
 # file isn't found is skipped, with a note.
@@ -11,6 +12,7 @@ models=""
 while IFS= read -r spec; do
   [ -z "$spec" ] && continue
   IFS=$'\x1f' read -r kind name where pattern qp dp <<<"${spec//##/$'\x1f'}"
+  if [ -n "${BENCH_ONLY:-}" ] && ! [[ $name =~ $BENCH_ONLY ]]; then continue; fi
   repos=$where
   if [[ $where == search:* ]]; then
     repos=$(curl -fsSL "https://huggingface.co/api/models?search=$(jq -rn --arg s "${where#search:}" '$s|@uri')&sort=downloads&limit=8" | jq -r '.[].id')
@@ -40,6 +42,7 @@ llm##Gemma 3 270M##search:gemma-3-270m-it GGUF##270m.*Q8_0\.gguf$##
 embed##multilingual-e5-small##search:multilingual-e5-small gguf##(f16|q8_0)\.gguf$##query: ##query: 
 embed##multilingual-e5-base##search:multilingual-e5-base gguf##(q8_0)\.gguf$##query: ##query: 
 embed##paraphrase-multilingual-MiniLM-L12-v2##search:paraphrase-multilingual-MiniLM-L12-v2 gguf##(f16|q8_0)\.gguf$####
+embed##paraphrase-multilingual-MiniLM-L12-v2 Q8##search:paraphrase-multilingual-MiniLM-L12-v2 gguf##q8_0\.gguf$####
 embed##EmbeddingGemma-300M##search:embeddinggemma-300m GGUF##Q8_0\.gguf$##task: classification | query: ##task: classification | query: 
 embed##Qwen3-Embedding-0.6B##search:Qwen3-Embedding-0.6B GGUF##Q4_K_M\.gguf$##Instruct: Given a to-do list task, find the life area it belongs to\nQuery: ##
 SPECS
