@@ -9,6 +9,7 @@ import 'note/note_view.dart';
 import 'note/task_line.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
+import 'tab/tab_lock.dart';
 import 'sync/sync_status.dart';
 import 'version/build_info.dart';
 import 'version/platform.dart' as platform;
@@ -20,7 +21,65 @@ export 'note/paper.dart' show StrikeText;
 export 'note/task_line.dart' show TaskLine, TaskClock;
 
 void main() {
-  runApp(const App());
+  runApp(const ActiveTab(child: App()));
+}
+
+/// Runs the app only in the browser tab that holds it (see `acquireTab`). Another tab shows that the
+/// app is open elsewhere, with a button to move it here; the tab it moves from then reloads into
+/// that same message, so it never writes again.
+class ActiveTab extends StatefulWidget {
+  final Widget child;
+
+  const ActiveTab({super.key, required this.child});
+
+  @override
+  State<ActiveTab> createState() => _ActiveTabState();
+}
+
+class _ActiveTabState extends State<ActiveTab> {
+  /// Null while asking, then whether this tab runs the app.
+  bool? _active;
+
+  @override
+  void initState() {
+    super.initState();
+    _acquire(steal: false);
+  }
+
+  Future<void> _acquire({required bool steal}) async {
+    final active = await acquireTab(steal: steal, onLost: platform.reloadApp);
+    if (mounted) setState(() => _active = active);
+  }
+
+  @override
+  Widget build(BuildContext context) => switch (_active) {
+        true => widget.child,
+        null => const SizedBox.shrink(),
+        false => MaterialApp(
+            title: 'bringmeback',
+            theme: ThemeData(colorSchemeSeed: Colors.blue),
+            darkTheme: ThemeData(colorSchemeSeed: Colors.blue, brightness: Brightness.dark),
+            home: Scaffold(
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const Text('bringmeback is open in another tab',
+                        textAlign: TextAlign.center, style: TextStyle(fontSize: 20)),
+                    const SizedBox(height: 12),
+                    const Text(
+                        'It runs in one tab at a time, so your tasks stay in one place and every '
+                        'change reaches your other devices.',
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                        onPressed: () => _acquire(steal: true), child: const Text('Use here')),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      };
 }
 
 class App extends StatelessWidget {
