@@ -140,4 +140,3 @@ Not covered yet:
 | S2 Sealed payloads | Open only with the same key and context | covered: `pairing_test › sealed payloads open only with the same key and context` |
 | S3 Replays older than 2 minutes | Dropped | covered: `signalling_test › ignores other groups, junk, duplicates and old messages` |
 | S4 Oversized relay messages | Dropped before parsing | covered: same test (64 KiB limit in `Signalling`) |
-| S5 Tests | No test sends anything to a public relay: every test uses an in-memory fake relay, and a real connection fails the test | covered: `signalling_test › tests never connect to a real relay` (guard set in `test/flutter_test_config.dart`) |
