@@ -27,7 +27,8 @@ record of where the time went, without asking you to keep one.
    and can't wait goes on top; anything else goes into its own place in the order, below what you
    are doing.
 4. **An interruption is a new task on top.** It takes the focus and its timer, and the task you were on
-   pauses one place below, ready to resume when the interruption is done.
+   pauses one place below, ready to resume when the interruption is done. It has its own red button,
+   and it is flagged as an interruption, so the record shows what was planned and what was not.
 5. **Every task says how long it should take.** Each line shows the time expected; the running task
    also shows the time left, or how far over it has gone.
 
@@ -37,10 +38,10 @@ The path a new user follows. Every change should keep each step obvious and shor
 step or a decision here, it needs a strong reason.
 
 1. Open the app. The empty state says what to do: add a task.
-2. Press **New task** (or Alt+N). A task appears on top and its timer starts. Type its name.
+2. Press **+** (or Alt+N) and type the task's name. It is written on the note and its timer starts.
 3. Add the next few tasks below it, in priority order: what you will do next comes next.
-4. Interrupted? Press **New task** again. The interruption goes on top and is timed; the task you were
-   on pauses just below it.
+4. Interrupted? Press the red **Interruption** button (or Alt+I). The interruption goes on top and is
+   timed; the task you were on pauses just below it.
 5. Step away: press **Pause**. The break is logged. Press **Resume** when back.
 6. Finish: tick the task's checkbox. It is struck through and stays on the note, and the next one,
    often the task the interruption paused, starts timing.

@@ -101,6 +101,9 @@ class TaskState {
   /// Where the task's Pomodoro is, encoded; see `PomodoroRecord`.
   final String? pomodoro;
 
+  /// Whether the task was written on top as an interruption, rather than planned.
+  final bool interruption;
+
   TaskState(
       {required this.name,
       this.notes = '',
@@ -112,7 +115,8 @@ class TaskState {
       this.inFocus = false,
       this.doneAt,
       this.carriedFrom,
-      this.pomodoro})
+      this.pomodoro,
+      this.interruption = false})
       : entries = entries ?? [];
 
   bool get done => doneAt != null;
@@ -239,17 +243,22 @@ class TasksState {
 
 abstract class TasksEvent {}
 
-/// Writes a task on top of the note, as an interruption: it becomes the current task and its timer
-/// runs.
+/// Writes a task on top of the note: it becomes the current task and its timer runs. With
+/// [interruption], the task is flagged as one, so History shows it was not planned.
 class AddTaskOnTopEvent extends TasksEvent {
   final String name;
   final ValueKey<String> id;
   final int? timerLengthSeconds;
 
   final String notes;
+  final bool interruption;
 
   AddTaskOnTopEvent(
-      {required this.name, required this.id, this.timerLengthSeconds, this.notes = ''});
+      {required this.name,
+      required this.id,
+      this.timerLengthSeconds,
+      this.notes = '',
+      this.interruption = false});
 }
 
 /// Writes a task right after the one at [index].
@@ -656,7 +665,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       doc.insert(0, event.id.value,
           name: event.name,
           notes: event.notes,
-          timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60);
+          timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60,
+          interruption: event.interruption);
       _runTop(doc, true);
       _focusId = event.id.value;
     });

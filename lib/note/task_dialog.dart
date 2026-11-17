@@ -7,20 +7,22 @@ typedef TaskDetails = ({String name, String notes, int timerLengthSeconds});
 /// Countdown lengths offered with one tap, in minutes.
 const _presetMinutes = [10, 20, 25, 45];
 
-/// Asks for a task's name and countdown length, to write a new task or edit one. Returns null when
-/// cancelled.
+/// Asks for a task's name and countdown length, to write a new task or edit one, or to write an
+/// [interruption]. Returns null when cancelled.
 Future<TaskDetails?> showTaskDialog(BuildContext context,
     {String name = '',
     String notes = '',
     int timerLengthSeconds = 20 * 60,
-    bool editing = false}) {
+    bool editing = false,
+    bool interruption = false}) {
   return showDialog<TaskDetails>(
     context: context,
     builder: (context) => _TaskDialog(
         name: name,
         notes: notes,
         timerLengthSeconds: timerLengthSeconds,
-        editing: editing),
+        editing: editing,
+        interruption: interruption),
   );
 }
 
@@ -29,12 +31,14 @@ class _TaskDialog extends StatefulWidget {
   final String notes;
   final int timerLengthSeconds;
   final bool editing;
+  final bool interruption;
 
   const _TaskDialog(
       {required this.name,
       required this.notes,
       required this.timerLengthSeconds,
-      required this.editing});
+      required this.editing,
+      this.interruption = false});
 
   @override
   State<_TaskDialog> createState() => _TaskDialogState();
@@ -83,7 +87,14 @@ class _TaskDialogState extends State<_TaskDialog> {
     final minutes = _validMinutes;
     return AlertDialog(
       scrollable: true,
-      title: Text(widget.editing ? 'Edit task' : 'New task'),
+      icon: widget.interruption
+          ? Icon(Icons.bolt, color: Theme.of(context).colorScheme.error)
+          : null,
+      title: Text(widget.editing
+          ? 'Edit task'
+          : widget.interruption
+              ? 'Interruption'
+              : 'New task'),
       content: SizedBox(
         width: 400,
         child: Column(
@@ -98,10 +109,10 @@ class _TaskDialogState extends State<_TaskDialog> {
               maxLines: 4,
               textInputAction: TextInputAction.done,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Task',
-                hintText: 'What will you do?',
-                border: OutlineInputBorder(),
+                hintText: widget.interruption ? 'What came up?' : 'What will you do?',
+                border: const OutlineInputBorder(),
               ),
               onSubmitted: (_) => _save(),
             ),

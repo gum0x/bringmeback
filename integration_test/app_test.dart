@@ -15,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-final addOnTopButton = find.widgetWithText(FloatingActionButton, 'New task');
+final addOnTopButton = find.byKey(const Key('interruptionButton'));
 final taskCards = find.byType(TaskLine);
 
 Finder inTask(int index, Finder finder) =>
@@ -79,7 +79,7 @@ Future<void> fillTaskDialog(WidgetTester tester, String name,
   await tester.pumpAndSettle();
 }
 
-/// Writes a task through the dialog that [opener] opens: on top with New task by default.
+/// Writes a task through the dialog that [opener] opens: on top with Interruption by default.
 Future<void> writeTask(WidgetTester tester, String name,
     {Finder? opener, String? minutes}) async {
   await tester.tap(opener ?? addOnTopButton);

@@ -28,6 +28,24 @@ void main() {
     expect(d.status('b'), TaskStatus.open);
   });
 
+  test('an interruption is flagged, syncs to other devices and keeps its flag when carried', () {
+    final a = newDoc()
+      ..setNoteStartedAt(100)
+      ..insert(0, 'plan', name: 'Write report')
+      ..insert(0, 'call', name: 'Phone call', interruption: true);
+    expect(a.task('call').interruption, isTrue);
+    expect(a.task('plan').interruption, isFalse);
+
+    final b = newDoc();
+    exchange(a, b);
+    expect(b.task('call').interruption, isTrue);
+    expect(b.task('plan').interruption, isFalse);
+
+    a.tearOff('n1', 200);
+    a.carry('call', 'call2', 0);
+    expect(a.task('call2').interruption, isTrue);
+  });
+
   test('a task checked off stays on the note, struck through, until unchecked', () {
     final d = newDoc()
       ..insert(0, 'a')

@@ -32,6 +32,9 @@ import 'tasks_bloc.dart';
 /// `<taskId>/pomodoro` is where the task's Pomodoro is, as a `PomodoroRecord` in JSON, so a focus
 /// picks up where it was on any device.
 ///
+/// `<taskId>/interruption` is true for a task written on top with the Interruption button, so History
+/// can tell interruptions apart from planned work. A task carried to a later note keeps it.
+///
 /// Pauses are logged as hidden tasks: fields with `<taskId>/kind` set to `pause` and one time entry,
 /// never in the order.
 class TaskDocument {
@@ -81,6 +84,7 @@ class TaskDocument {
       notes: field<String>('notes', ''),
       doneAt: fields['$id/doneAt'] is int ? fields['$id/doneAt'] as int : null,
       carriedFrom: field<String?>('carriedFrom', null),
+      interruption: field<bool>('interruption', false),
       id: ValueKey<String>(id),
       timerLengthSeconds: field<int>('timerLength', 20 * 60),
       timerStartAt: field<int>('timerStartAt', 0),
@@ -102,7 +106,8 @@ class TaskDocument {
       int? timerStartAt,
       int totalResetAt = 0,
       List<TimeEntry> entries = const [],
-      bool running = false}) {
+      bool running = false,
+      bool interruption = false}) {
     doc.runInTransaction(() {
       _order.insert(index, id);
       _fields
@@ -111,6 +116,7 @@ class TaskDocument {
         ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
         ..set('$id/totalResetAt', totalResetAt);
       if (notes.isNotEmpty) _fields.set('$id/notes', notes);
+      if (interruption) _fields.set('$id/interruption', true);
       for (final e in entries) {
         _fields.set('$id/e/${e.start}', e.end);
       }
@@ -184,7 +190,8 @@ class TaskDocument {
         insert(index, newId,
             name: from.name,
             notes: from.notes,
-            timerLengthSeconds: from.timerLengthSeconds);
+            timerLengthSeconds: from.timerLengthSeconds,
+            interruption: from.interruption);
         _fields
           ..set('$newId/carriedFrom', fromId)
           ..set('$fromId/carriedTo', newId);
