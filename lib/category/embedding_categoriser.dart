@@ -21,7 +21,8 @@ const multilingualModelFile = 'paraphrase-multilingual-MiniLM-L12-118M-v2-Q8_0.g
 
 /// [multilingualModelFile]'s SHA-256, checked after downloading, since the conversion is a third
 /// party's. Checked by the category-bench workflow too.
-const multilingualModelSha256 = '';
+const multilingualModelSha256 =
+    '1bcc1fd3f65d1269f8e733218d77ac5a479796fade0e87257606c2c4f2854662';
 
 /// About how big [multilingualModel] is, for Settings to say before downloading.
 const multilingualModelMegabytes = 132;

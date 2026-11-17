@@ -147,4 +147,4 @@ Not covered yet:
 | S3 Replays older than 2 minutes | Dropped | covered: `signalling_test › ignores other groups, junk, duplicates and old messages` |
 | S4 Oversized relay messages | Dropped before parsing | covered: same test (64 KiB limit in `Signalling`) |
 | S5 Task names and categories | Never leave the device to be categorised: rules, word vectors and the model all run on it | known limit by design; no network code in `lib/category/` |
-| S6 The multilingual model is a third party's GGUF conversion | Downloaded only on the user's say-so and checked against a pinned SHA-256 (not in browsers, which load it themselves) | gap until the SHA-256 is pinned; `category-bench.yaml` checks the pin |
+| S6 The multilingual model is a third party's GGUF conversion | Downloaded only on the user's say-so and checked against a pinned SHA-256 (not in browsers, which load it themselves) | covered: the download's checksum is verified by llamadart; `category-bench.yaml › Check the multilingual model the app downloads` checks the pin still matches |

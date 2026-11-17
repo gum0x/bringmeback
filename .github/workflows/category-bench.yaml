@@ -51,7 +51,7 @@ jobs:
         src=lib/category/embedding_categoriser.dart
         repo=$(grep -o "repoId: '[^']*'" $src | cut -d"'" -f2)
         file=$(grep -o "multilingualModelFile = '[^']*'" $src | cut -d"'" -f2)
-        want=$(grep -o "multilingualModelSha256 = '[^']*'" $src | cut -d"'" -f2)
+        want=$(grep -A1 "multilingualModelSha256 =" $src | grep -oE "[0-9a-f]{64}")
         curl -fSL --retry 3 -o "$RUNNER_TEMP/app-model.gguf" "https://huggingface.co/$repo/resolve/main/$file"
         got=$(sha256sum "$RUNNER_TEMP/app-model.gguf" | cut -d' ' -f1)
         echo "$repo/$file: $got, $(stat -c %s "$RUNNER_TEMP/app-model.gguf") bytes"
