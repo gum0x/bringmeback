@@ -15,6 +15,9 @@ class HistoryTask {
   /// Whether this task was written again from an earlier note.
   final bool carriedFrom;
 
+  /// How many times it was rewritten after it was written on its note.
+  final int rewrites;
+
   const HistoryTask(
       {required this.id,
       required this.name,
@@ -22,7 +25,8 @@ class HistoryTask {
       required this.day,
       this.doneAt,
       this.workedSeconds = 0,
-      this.carriedFrom = false});
+      this.carriedFrom = false,
+      this.rewrites = 0});
 }
 
 /// One note as it was written, the current one included.
@@ -71,6 +75,7 @@ History buildHistory(TaskDocument doc, {int? now}) {
       doneAt: task.doneAt,
       workedSeconds: task.totalSecondsAt(now!),
       carriedFrom: task.carriedFrom != null,
+      rewrites: task.rewrites,
     );
   }
 

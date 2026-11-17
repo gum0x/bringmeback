@@ -49,6 +49,13 @@ above today's note. Press **Write again** on the ones that still matter, in the 
 and **Let go** of the rest. Rewriting them by hand, one by one, is the point: it makes you choose again
 instead of letting the list grow.
 
+**Rewrites.** Changing a task's name, details or expected time after you wrote it on the note
+counts as a rewrite (a change in the first 2 minutes is still writing it, and done tasks don't
+count). When you tear off a note on which one task was rewritten 3 times or more, or tasks were
+rewritten 5 times or more in all, the app says so: plans that keep changing usually mean a task
+wasn't clear yet when you wrote it. History's **Tasks** list shows how often each task was
+rewritten.
+
 You can also tear off a note during the day from the note's ⋯ menu, with **Tear off and start a fresh
 note**.
 

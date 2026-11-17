@@ -139,6 +139,7 @@ class TasksStack extends StatefulWidget {
 
 class _TasksStackState extends State<TasksStack> {
   StreamSubscription<String>? _timeUp;
+  StreamSubscription<NoteReview>? _noteReviews;
 
   @override
   void initState() {
@@ -150,6 +151,9 @@ class _TasksStackState extends State<TasksStack> {
         duration: const Duration(seconds: 10),
         showCloseIcon: true,
       ));
+    });
+    _noteReviews = context.read<TasksBloc>().noteReviews.listen((review) {
+      if (mounted) showNoteReview(context, review);
     });
     _reopenFocus();
   }
@@ -172,6 +176,7 @@ class _TasksStackState extends State<TasksStack> {
   @override
   void dispose() {
     _timeUp?.cancel();
+    _noteReviews?.cancel();
     super.dispose();
   }
 

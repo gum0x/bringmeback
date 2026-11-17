@@ -9,7 +9,10 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ticker.dart';
+import 'note_review.dart';
 import 'task_document.dart';
+
+export 'note_review.dart';
 
 final Random _random = Random.secure();
 
@@ -101,6 +104,10 @@ class TaskState {
   /// Where the task's Pomodoro is, encoded; see `PomodoroRecord`.
   final String? pomodoro;
 
+  /// How many times the task was rewritten after it was written on the note: its name, details or
+  /// expected time changed. See [TaskDocument.recordRewrite].
+  final int rewrites;
+
   TaskState(
       {required this.name,
       this.notes = '',
@@ -112,7 +119,8 @@ class TaskState {
       this.inFocus = false,
       this.doneAt,
       this.carriedFrom,
-      this.pomodoro})
+      this.pomodoro,
+      this.rewrites = 0})
       : entries = entries ?? [];
 
   bool get done => doneAt != null;
@@ -522,6 +530,11 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   /// The name of each task whose countdown runs out, as it happens.
   Stream<String> get timeUp => _timeUp.stream;
 
+  final StreamController<NoteReview> _noteReviews = StreamController<NoteReview>.broadcast();
+
+  /// What was observed on each note as it is torn off, when it is worth telling: see [NoteReview].
+  Stream<NoteReview> get noteReviews => _noteReviews.stream;
+
   final _document = Completer<CRDTDocument>();
   bool _loading = false;
   StreamSubscription<CRDTDocumentEvent>? _remote;
@@ -704,12 +717,24 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     final id = event.id.value;
     _edit(emit, (doc) {
       final task = doc.task(id);
-      if (task.name != event.name) doc.setName(id, event.name);
+      final changed = <String>[];
+      if (task.name != event.name) {
+        doc.setName(id, event.name);
+        changed.add('name');
+      }
       final notes = event.notes;
-      if (notes != null && task.notes != notes) doc.setNotes(id, notes);
+      if (notes != null && task.notes != notes) {
+        doc.setNotes(id, notes);
+        changed.add('notes');
+      }
       if (task.timerLengthSeconds != event.timerLengthSeconds) {
         _lastRemaining.remove(id);
         doc.setTimer(id, event.timerLengthSeconds, nowSeconds());
+        changed.add('time');
+      }
+      // A rewrite is a change of plan for a task still to do; correcting a done one is not.
+      if (changed.isNotEmpty && task.doneAt == null && doc.ids.contains(id)) {
+        doc.recordRewrite(id, changed);
       }
     });
   }
@@ -720,6 +745,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         doc.setNoteStartedAt(nowSeconds());
         return;
       }
+      final review = NoteReview.of(doc.tasks());
+      if (review.flagged) _noteReviews.add(review);
       // Tearing off ends the work under way, and logs the break until the next task starts.
       final working = _working(doc);
       doc.tearOff(newId(), nowSeconds());
@@ -1062,6 +1089,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     tick?.cancel();
     _remote?.cancel();
     _timeUp.close();
+    _noteReviews.close();
     return super.close();
   }
 }

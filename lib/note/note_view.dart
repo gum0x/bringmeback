@@ -722,3 +722,36 @@ String formatDay(BuildContext context, DateTime day) {
   }
   return MaterialLocalizations.of(context).formatFullDate(day);
 }
+
+/// Tells what was observed on the note just torn off, see [NoteReview]. It shows only when
+/// something was observed, and asks nothing: one tap closes it.
+Future<void> showNoteReview(BuildContext context, NoteReview review) => showDialog<void>(
+      context: context,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return AlertDialog(
+          icon: const Icon(Icons.edit_note),
+          title: const Text('Your plan kept changing'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('On the note you just tore off:', style: theme.textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                for (final line in review.observations)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text('• $line', style: theme.textTheme.bodyMedium),
+                  ),
+                const SizedBox(height: 8),
+                Text(NoteReview.meaning, style: theme.textTheme.bodyMedium),
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Got it')),
+          ],
+        );
+      },
+    );

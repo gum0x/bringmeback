@@ -452,6 +452,52 @@ void main() {
     ]);
   });
 
+  noteTest('editing a task right after writing it is not a rewrite',
+      (tester, bloc) async {
+    bloc.add(InsertTaskEvent(index: 0, name: 'Write reprot', id: const ValueKey('a')));
+    bloc.add(EditTaskEvent(
+        id: const ValueKey('a'), name: 'Write report', timerLengthSeconds: 20 * 60));
+    await settle(tester);
+    expect(bloc.state.tasks.single.name, 'Write report');
+    expect(bloc.state.tasks.single.rewrites, 0);
+  });
+
+  noteTest('tearing off a note whose plan kept changing says so', (tester, bloc) async {
+    bloc.add(InsertTaskEvent(index: 0, name: 'Sort out taxes', id: const ValueKey('a')));
+    bloc.add(InsertTaskEvent(index: 1, name: 'Call bank', id: const ValueKey('b')));
+    await settle(tester);
+    final doc = bloc.taskDocument!;
+    final written = doc.fieldInt('a/writtenAt')!;
+    for (var i = 1; i <= 4; i++) {
+      doc.recordRewrite('a', ['name'], at: written + 600 * i);
+    }
+    doc.recordRewrite('b', ['time'], at: written + 600);
+    expect(doc.task('a').rewrites, 4);
+
+    bloc.add(TearOffNoteEvent());
+    await settle(tester);
+    expect(find.text('Your plan kept changing'), findsOneWidget);
+    expect(find.textContaining('"Sort out taxes" was rewritten 4 times'), findsOneWidget);
+    expect(find.textContaining('5 times in all'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Got it'));
+    await settle(tester);
+    expect(find.text('Your plan kept changing'), findsNothing);
+    expect(find.text('Not finished on your last note'), findsOneWidget);
+
+    final history = buildHistory(bloc.taskDocument!);
+    expect([for (final t in history.notes.last.tasks) t.rewrites], [4, 1]);
+  });
+
+  noteTest('tearing off a note planned once and kept to says nothing', (tester, bloc) async {
+    bloc.add(InsertTaskEvent(index: 0, name: 'Write report', id: const ValueKey('a')));
+    await settle(tester);
+    final doc = bloc.taskDocument!;
+    doc.recordRewrite('a', ['time'], at: doc.fieldInt('a/writtenAt')! + 600);
+    bloc.add(TearOffNoteEvent());
+    await settle(tester);
+    expect(find.text('Your plan kept changing'), findsNothing);
+  });
+
   noteTest('a note from an earlier day has to be torn off first', (tester, bloc) async {
     bloc.add(InsertTaskEvent(index: 0, name: 'Yesterday', id: const ValueKey('y')));
     await settle(tester);

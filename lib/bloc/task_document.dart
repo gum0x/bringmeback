@@ -29,6 +29,11 @@ import 'tasks_bloc.dart';
 /// unfinished task of a torn-off note moved to the backlog is written as a new task instead, as
 /// when it is carried.
 ///
+/// `<taskId>/writtenAt` is when the task was written on the note. Each time the task is rewritten
+/// after that (its name, details or expected time changed in the task dialog), a
+/// `<taskId>/r/<seconds>` key records it, with what changed as its value, so rewrites made on
+/// different devices add up instead of overwriting one count.
+///
 /// `<taskId>/pomodoro` is where the task's Pomodoro is, as a `PomodoroRecord` in JSON, so a focus
 /// picks up where it was on any device.
 ///
@@ -88,6 +93,7 @@ class TaskDocument {
       entries: entries,
       inFocus: inFocus,
       pomodoro: field<String?>('pomodoro', null),
+      rewrites: fields.keys.where((k) => k.startsWith('$id/r/')).length,
     );
   }
 
@@ -109,7 +115,8 @@ class TaskDocument {
         ..set('$id/name', name)
         ..set('$id/timerLength', timerLengthSeconds)
         ..set('$id/timerStartAt', timerStartAt ?? nowSeconds())
-        ..set('$id/totalResetAt', totalResetAt);
+        ..set('$id/totalResetAt', totalResetAt)
+        ..set('$id/writtenAt', nowSeconds());
       if (notes.isNotEmpty) _fields.set('$id/notes', notes);
       for (final e in entries) {
         _fields.set('$id/e/${e.start}', e.end);
@@ -232,6 +239,7 @@ class TaskDocument {
           carry(id, newId, index);
         } else {
           _order.insert(index, id);
+          _fields.set('$id/writtenAt', nowSeconds());
         }
       });
 
@@ -346,6 +354,17 @@ class TaskDocument {
     }
   }
 
+  /// Records that task [id] was rewritten at [at] (now by default): [what] changed, e.g. `name`.
+  /// A change within [rewriteGraceSeconds] of writing the task is still part of writing it, and
+  /// isn't recorded. Returns whether it was recorded.
+  bool recordRewrite(String id, Iterable<String> what, {int? at}) {
+    final when = at ?? nowSeconds();
+    final written = fieldInt('$id/writtenAt');
+    if (written != null && when - written < rewriteGraceSeconds) return false;
+    _fields.set('$id/r/$when', what.join(','));
+    return true;
+  }
+
   void move(int from, int to) => _order.move(from, to);
 
   void setName(String id, String name) => _fields.set('$id/name', name);
@@ -424,6 +443,10 @@ class TaskDocument {
     ]);
   }
 }
+
+/// How long after writing a task changing it still counts as writing it, not as rewriting it: a
+/// typo fixed or a time adjusted right away is not a change of plan.
+const rewriteGraceSeconds = 2 * 60;
 
 /// What became of a task.
 enum TaskStatus {

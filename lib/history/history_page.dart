@@ -166,6 +166,8 @@ class _TaskHistory extends StatelessWidget {
         subtitle: Text([
           status,
           if (task.workedSeconds > 0) 'worked ${formatClock(task.workedSeconds)}',
+          if (task.rewrites > 0)
+            'rewritten ${task.rewrites == 1 ? 'once' : '${task.rewrites} times'}',
         ].join(' · ')),
       ));
     }

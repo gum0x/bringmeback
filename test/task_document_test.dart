@@ -136,4 +136,41 @@ void main() {
       expect(d.task('b').name, 'call bank');
     }
   });
+
+  test('a rewrite counts only after the task has been written a while', () {
+    final d = newDoc()..insert(0, 'a', name: 'write report');
+    final written = d.fieldInt('a/writtenAt')!;
+    // Fixing it right after writing it is still writing it.
+    expect(d.recordRewrite('a', ['name'], at: written + 30), isFalse);
+    expect(d.task('a').rewrites, 0);
+    expect(d.recordRewrite('a', ['name'], at: written + rewriteGraceSeconds), isTrue);
+    expect(d.recordRewrite('a', ['time', 'notes'], at: written + 600), isTrue);
+    expect(d.task('a').rewrites, 2);
+    expect(d.fieldInt('b/writtenAt'), isNull);
+  });
+
+  test('a task written again on a new note starts with no rewrites', () {
+    final d = newDoc()..insert(0, 'a', name: 'vague task');
+    final written = d.fieldInt('a/writtenAt')!;
+    for (var i = 1; i <= 3; i++) {
+      d.recordRewrite('a', ['name'], at: written + 600 * i);
+    }
+    d.tearOff('n1', written + 3600);
+    d.carry('a', 'a2', 0);
+    expect(d.task('a').rewrites, 3);
+    expect(d.task('a2').rewrites, 0);
+    expect(d.fieldInt('a2/writtenAt'), isNotNull);
+  });
+
+  test('rewrites made on two devices add up', () {
+    final laptop = newDoc()..insert(0, 'a', name: 'plan trip');
+    final phone = newDoc();
+    exchange(laptop, phone);
+    final written = laptop.fieldInt('a/writtenAt')!;
+    laptop.recordRewrite('a', ['name'], at: written + 600);
+    phone.recordRewrite('a', ['time'], at: written + 900);
+    exchange(laptop, phone);
+    expect(laptop.task('a').rewrites, 2);
+    expect(phone.task('a').rewrites, 2);
+  });
 }
