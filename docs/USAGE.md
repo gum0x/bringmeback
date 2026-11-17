@@ -57,7 +57,7 @@ share, with work split by the kind of work:
 | Housekeeping | cleaning, laundry, cooking, repairs |
 | Errands and shopping | groceries, orders, the post office |
 | Money and paperwork | bills, taxes, insurance, forms |
-| Workout and self-care | gym, a run, yoga, the dentist |
+| Self-care and workout | gym, a run, yoga, the dentist |
 | Family and friends | call mom, a birthday, dinner with friends |
 | Leisure | a movie, a trip, a concert |
 

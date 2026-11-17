@@ -6,6 +6,7 @@ import 'package:llamadart/llamadart.dart';
 
 import '../bloc/task_document.dart';
 import 'categoriser.dart';
+import 'default_categories.dart';
 
 /// Liquid AI's LFM2.5-1.2B Instruct, quantised to 4 bits: a small language model made for phones
 /// and browsers. On real tasks the 350M size got too many wrong (4 of 10 in Spanish, against 8 of
@@ -180,7 +181,7 @@ class LfmCategoriser {
         if (nameOf[e.category] case final name?) (e.text.trim(), name)
     ].take(maxExamples).toList().reversed;
     final starters = [
-      for (final MapEntry(key: id, value: task) in starterExamples.entries)
+      for (final MapEntry(key: id, value: task) in sampleTasks.entries)
         if (nameOf[id] case final name?) (task, name)
     ];
     final sorted = [...starters, ...user];
@@ -196,21 +197,7 @@ class LfmCategoriser {
     ];
   }
 
-  /// One task for each default category, so the model sees how sorting goes.
-  @visibleForTesting
-  static const starterExamples = {
-    'work-planning': 'Answer work emails',
-    'focused-work': 'Code the new search feature',
-    'meetings': 'Weekly sync with the design team',
-    'personal-projects': 'Work on my side project website',
-    'learning': 'Read a chapter of the history book',
-    'housekeeping': 'Vacuum the living room',
-    'errands': 'Pick up the parcel at the post office',
-    'money-paperwork': 'Renew the car insurance',
-    'workout-self-care': 'Yoga class',
-    'family-friends': 'Dinner with my parents',
-    'leisure': 'Play video games',
-  };
+
 
   /// The system prompt: the categories, with what goes in each.
   @visibleForTesting

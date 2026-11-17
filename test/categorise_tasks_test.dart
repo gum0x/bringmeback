@@ -26,11 +26,11 @@ void main() {
 
   test('a task written gets a category from the default list, saved with the task', () async {
     final bloc = await newBloc();
-    expect(bloc.state.categories.map((c) => c.name), contains('Workout and self-care'));
+    expect(bloc.state.categories.map((c) => c.name), contains('Self-care and workout'));
 
     bloc.add(AddTaskOnTopEvent(name: 'Book dentist appointment', id: const ValueKey('a')));
     await settle();
-    expect(categoryName(bloc, 0), 'Workout and self-care');
+    expect(categoryName(bloc, 0), 'Self-care and workout');
     expect(bloc.state.tasks[0].categoryByHand, isFalse);
     expect(bloc.taskDocument!.task('a').category, bloc.state.tasks[0].category);
 

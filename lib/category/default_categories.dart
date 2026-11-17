@@ -68,7 +68,7 @@ const defaultCategories = <DefaultCategory>[
   ),
   (
     id: 'workout-self-care',
-    name: 'Workout and self-care',
+    name: 'Self-care and workout',
     keywords: 'workout gym run exercise yoga walk sport stretch doctor dentist health sleep '
         'meditate rest',
     rules: '',
@@ -94,3 +94,18 @@ DefaultCategory? defaultCategory(String id) {
   }
   return null;
 }
+
+/// One sample task for each default category, which shows the models what goes there.
+const sampleTasks = {
+  'work-planning': 'Answer work emails',
+  'focused-work': 'Code the new search feature',
+  'meetings': 'Weekly sync with the design team',
+  'personal-projects': 'Work on my side project website',
+  'learning': 'Read a chapter of the history book',
+  'housekeeping': 'Vacuum the living room',
+  'errands': 'Pick up the parcel at the post office',
+  'money-paperwork': 'Renew the car insurance',
+  'workout-self-care': 'Yoga class',
+  'family-friends': 'Dinner with my parents',
+  'leisure': 'Play video games',
+};
