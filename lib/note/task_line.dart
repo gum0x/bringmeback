@@ -16,7 +16,8 @@ import 'task_dialog.dart';
 Future<void> writeTask(BuildContext context,
     {int index = 0, bool onTop = false}) async {
   final tasksBloc = context.read<TasksBloc>();
-  final details = await showTaskDialog(context, categories: tasksBloc.state.categories);
+  final details = await showTaskDialog(context,
+      categories: tasksBloc.state.categories, suggest: tasksBloc.suggestCategories);
   if (details == null || !context.mounted) return;
   final id = ValueKey<String>(newId());
   if (tasksBloc.state.atLimit) {
@@ -71,6 +72,7 @@ Future<void> editTask(BuildContext context, int index) async {
       categories: state.categories,
       category: pick,
       autoCategory: task.categoryByHand ? null : state.category(task.category)?.name,
+      suggest: tasksBloc.suggestCategories,
       editing: true);
   if (details == null) return;
   tasksBloc.add(EditTaskEvent(
@@ -528,6 +530,14 @@ class CategoryTag extends StatelessWidget {
       onSelected: (pick) =>
           bloc.add(SetTaskCategoryEvent(id: task.id.value, category: pick)),
       itemBuilder: (context) => [
+        if (!task.categoryByHand) ...[
+          PopupMenuItem(
+            value: CategoryPick.hand(category.id),
+            child: ListTile(
+                leading: const Icon(Icons.check), title: Text('Keep ${category.name}')),
+          ),
+          const PopupMenuDivider(),
+        ],
         for (final c in bloc.state.categories)
           CheckedPopupMenuItem(
             value: CategoryPick.hand(c.id),

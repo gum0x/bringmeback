@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -27,6 +29,7 @@ Future<TaskDetails?> showTaskDialog(BuildContext context,
     List<TaskCategory> categories = const [],
     CategoryPick category = const CategoryPick.auto(),
     String? autoCategory,
+    Future<List<String>> Function(String name)? suggest,
     bool editing = false}) {
   return showDialog<TaskDetails>(
     context: context,
@@ -37,6 +40,7 @@ Future<TaskDetails?> showTaskDialog(BuildContext context,
         categories: categories,
         category: category,
         autoCategory: autoCategory,
+        suggest: suggest,
         editing: editing),
   );
 }
@@ -48,6 +52,9 @@ class _TaskDialog extends StatefulWidget {
   final List<TaskCategory> categories;
   final CategoryPick category;
   final String? autoCategory;
+
+  /// Categories that suit a task with the name being written, best first.
+  final Future<List<String>> Function(String name)? suggest;
   final bool editing;
 
   const _TaskDialog(
@@ -57,6 +64,7 @@ class _TaskDialog extends StatefulWidget {
       required this.categories,
       required this.category,
       required this.autoCategory,
+      this.suggest,
       required this.editing});
 
   @override
@@ -71,16 +79,35 @@ class _TaskDialogState extends State<_TaskDialog> {
   late final TextEditingController _minutes =
       TextEditingController(text: '${widget.timerLengthSeconds ~/ 60}');
   late CategoryPick _category = widget.category;
+  List<String> _suggested = const [];
+  String _suggestedFor = '';
+  Timer? _suggestSoon;
 
   @override
   void initState() {
     super.initState();
-    _name.addListener(() => setState(() {}));
+    _name.addListener(() {
+      setState(() {});
+      _suggestSoon?.cancel();
+      _suggestSoon = Timer(const Duration(milliseconds: 400), _suggest);
+    });
+    _suggest();
     _minutes.addListener(() => setState(() {}));
+  }
+
+  Future<void> _suggest() async {
+    final suggest = widget.suggest;
+    final name = _name.text.trim();
+    if (suggest == null || name == _suggestedFor) return;
+    _suggestedFor = name;
+    final ids = name.isEmpty ? const <String>[] : await suggest(name);
+    if (!mounted || _suggestedFor != name) return;
+    setState(() => _suggested = ids);
   }
 
   @override
   void dispose() {
+    _suggestSoon?.cancel();
     _name.dispose();
     _notes.dispose();
     _minutes.dispose();
@@ -183,6 +210,17 @@ class _TaskDialogState extends State<_TaskDialog> {
               const SizedBox(height: 20),
               Text('Category', style: Theme.of(context).textTheme.labelLarge),
               const SizedBox(height: 8),
+              if (_suggested.isNotEmpty) ...[
+                _Suggestions(
+                  categories: [
+                    for (final id in _suggested)
+                      ...widget.categories.where((c) => c.id == id),
+                  ],
+                  value: _category,
+                  onChanged: (pick) => setState(() => _category = pick),
+                ),
+                const SizedBox(height: 12),
+              ],
               _CategoryChoice(
                 categories: widget.categories,
                 value: _category,
@@ -200,6 +238,48 @@ class _TaskDialogState extends State<_TaskDialog> {
             onPressed: _canSave ? _save : null,
             child: Text(widget.editing ? 'Save' : 'Add')),
       ],
+    );
+  }
+}
+
+/// The categories suggested for the task's name, to pick with one tap.
+class _Suggestions extends StatelessWidget {
+  final List<TaskCategory> categories;
+  final CategoryPick value;
+  final ValueChanged<CategoryPick> onChanged;
+
+  const _Suggestions({required this.categories, required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Suggested for this task', style: theme.textTheme.labelMedium),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final c in categories)
+                ChoiceChip(
+                  avatar: const Icon(Icons.auto_awesome, size: 16),
+                  label: Text(c.name),
+                  selected: value.byHand && value.id == c.id,
+                  onSelected: (_) => onChanged(CategoryPick.hand(c.id)),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

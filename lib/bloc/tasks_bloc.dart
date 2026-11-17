@@ -867,6 +867,52 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     }
   }
 
+  /// Up to [max] categories that suit a task named [name], best first, for the user to pick from
+  /// while writing it: a rule it mentions, the categoriser's pick, then the next closest by the word
+  /// vectors, and the language model's pick when it's on.
+  Future<List<String>> suggestCategories(String name, {int max = 3}) async {
+    final doc = _doc;
+    final categories = state.categories;
+    if (doc == null || name.trim().isEmpty || categories.isEmpty) return const [];
+    final examples = [
+      for (final e in doc.categoryExamples()) (text: e.name, category: e.category)
+    ];
+    final picks = <String>[];
+    void add(String? id) {
+      if (id != null && picks.length < max && !picks.contains(id)) picks.add(id);
+    }
+
+    add(Categoriser.byRule(name, categories));
+    Categoriser? words;
+    try {
+      words = await _categoriser();
+    } on Object catch (e) {
+      debugPrint('Categoriser unavailable: $e');
+    }
+    add(words?.categorise(name, categories, examples: examples));
+    if (smartCategoriser case final smart?) {
+      try {
+        add(await smart(name, categories, examples));
+      } on Object catch (e) {
+        debugPrint('Language model categoriser unavailable: $e');
+      }
+    }
+    if (words != null) {
+      final close = words.scores(name, categories).entries
+          .where((e) => e.value >= suggestionFit)
+          .toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      for (final e in close) {
+        add(e.key);
+      }
+    }
+    return picks;
+  }
+
+  /// How well a category's words have to fit a task to be suggested, from 0 to 1: lower than
+  /// [Categoriser.threshold], since the user picks.
+  static const suggestionFit = 0.35;
+
   void _onCategorised(_CategorisedEvent event, Emitter<TasksState> emit) {
     final doc = _doc;
     if (doc == null) return;

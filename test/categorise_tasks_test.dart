@@ -1,9 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:bringmeback/bloc/task_document.dart';
 import 'package:bringmeback/bloc/tasks_bloc.dart';
 import 'package:bringmeback/category/categoriser.dart';
 import 'package:bringmeback/category/default_categories.dart';
-import 'package:flutter/foundation.dart';
+import 'package:bringmeback/note/task_dialog.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -129,5 +132,49 @@ void main() {
     expect(bloc.state.tasks.map((t) => t.name), ['Acme invoice', 'Write report']);
     expect(bloc.state.tasks.map((t) => bloc.state.category(t.category)?.name), ['Acme', null]);
     await bloc.close();
+  });
+
+  test('suggests up to three categories while a task is written, a rule first', () async {
+    final bloc = await newBloc();
+    bloc.add(AddCategoryEvent(name: 'Bringmeback', rules: 'bringmeback'));
+    await settle();
+    final own = bloc.state.categories.last.id;
+    expect(await bloc.suggestCategories('Fix the bringmeback sync bug'),
+        allOf(hasLength(lessThanOrEqualTo(3)), contains(own), isNot(isEmpty)));
+    expect((await bloc.suggestCategories('Fix the bringmeback sync bug')).first, own);
+    expect((await bloc.suggestCategories('Go for a run')).first, 'workout-self-care');
+    expect(await bloc.suggestCategories('  '), isEmpty);
+    await bloc.close();
+  });
+
+  testWidgets('a suggested category picked in the dialog is the user\'s choice', (tester) async {
+    late Future<TaskDetails?> result;
+    await tester.pumpWidget(MaterialApp(home: Builder(
+      builder: (context) => TextButton(
+        onPressed: () => result = showTaskDialog(context,
+            categories: [
+              for (final d in defaultCategories) TaskCategory(id: d.id, name: d.name),
+            ],
+            suggest: (name) async => name.contains('run') ? ['workout-self-care', 'leisure'] : []),
+        child: const Text('open'),
+      ),
+    )));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Suggested for this task'), findsNothing);
+    await tester.enterText(find.byType(TextField).first, 'Go for a run');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    expect(find.text('Suggested for this task'), findsOneWidget);
+    final suggested = find.widgetWithText(ChoiceChip, 'Self-care and workout').first;
+    await tester.ensureVisible(suggested);
+    await tester.pumpAndSettle();
+    await tester.tap(suggested);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    final details = await result;
+    expect(details!.category.byHand, isTrue);
+    expect(details.category.id, 'workout-self-care');
   });
 }
