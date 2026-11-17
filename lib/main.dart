@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'bloc/tasks_bloc.dart';
+import 'category/category_model_cubit.dart';
 import 'focus/focus_page.dart';
 import 'focus/pomodoro.dart';
 import 'history/history_page.dart';
@@ -38,6 +39,14 @@ class App extends StatelessWidget {
                   SyncCubit(document: context.read<TasksBloc>().document)
                     ..load()),
           BlocProvider(lazy: false, create: (_) => UpdateCubit()..load()),
+          // Not lazy: when the user turned the multilingual model on, it loads with the app.
+          BlocProvider(
+              lazy: false,
+              create: (context) {
+                final model = CategoryModelCubit()..restore();
+                context.read<TasksBloc>().smartCategoriser = model.categorise;
+                return model;
+              }),
         ],
         child: _AppLifecycle(
             child: MaterialApp(

@@ -2,14 +2,19 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../bloc/task_document.dart';
 import '../bloc/tasks_bloc.dart';
+import '../category/default_categories.dart';
+import '../category/embedding_categoriser.dart';
+import '../category/category_model_cubit.dart';
 import '../focus/pomodoro.dart';
 import '../sync/peer.dart' show syncProtocol;
 import '../timer.dart';
 import '../version/build_info.dart';
 import '../version/update_cubit.dart';
 
-/// How the app behaves on this device. Settings are saved here and are not synced.
+/// How the app behaves. The note size and Pomodoro lengths are saved on this device only; the
+/// categories are kept with the tasks and synced with the group's other devices.
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -30,8 +35,11 @@ class SettingsPage extends StatelessWidget {
               _BacklogSwitch(),
               _Section('Pomodoro'),
               _PomodoroDefaults(),
+              _Section('Categories'),
+              _Categories(),
               _Section('About'),
               _VersionTiles(),
+              _ModelCredits(),
             ],
           ),
         ),
@@ -278,6 +286,209 @@ class _PomodoroDefaultsState extends State<_PomodoroDefaults> {
   }
 }
 
+/// The categories tasks are filed under. Each task written or renamed gets the one that fits it
+/// best, chosen on this device; the list syncs with the group's other devices.
+class _Categories extends StatelessWidget {
+  const _Categories();
+
+  @override
+  Widget build(BuildContext context) {
+    final bloc = context.read<TasksBloc>();
+    final theme = Theme.of(context);
+    return BlocBuilder<TasksBloc, TasksState>(
+      buildWhen: (a, b) => !listEquals(a.categories, b.categories),
+      builder: (context, state) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'Each task gets one category: the one whose rules it mentions, or else the one '
+              'that fits its name best, chosen on this device. Keywords help tell categories '
+              'apart. Tap a task\'s category to correct it, and later tasks like it follow. '
+              'Changes sync with your other devices.',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+          const _ModelTile(),
+          for (final c in state.categories)
+            ListTile(
+              key: ValueKey('category-${c.id}'),
+              leading: const Icon(Icons.label_outline),
+              title: Text(c.name),
+              subtitle: switch ([
+                if (c.rulePhrases.isNotEmpty) 'Always: ${c.rulePhrases.join(', ')}',
+                if (c.keywords.isNotEmpty) c.keywords,
+              ]) {
+                [] => null,
+                final lines => Text(lines.join('\n'), maxLines: 3, overflow: TextOverflow.ellipsis),
+              },
+              trailing: const Icon(Icons.edit_outlined),
+              onTap: () => _edit(context, c),
+            ),
+          ListTile(
+            leading: const Icon(Icons.add),
+            title: const Text('Add category'),
+            onTap: () => _edit(context, null),
+          ),
+          if (_deletedDefaults(state) case final deleted when deleted.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.restore),
+              title: const Text('Restore default categories'),
+              subtitle: Text(deleted.join(', ')),
+              onTap: () => bloc.add(RestoreDefaultCategoriesEvent()),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The names of the default categories the user deleted.
+  static List<String> _deletedDefaults(TasksState state) {
+    final shown = {for (final c in state.categories) c.id};
+    return [for (final d in defaultCategories) if (!shown.contains(d.id)) d.name];
+  }
+
+  Future<void> _edit(BuildContext context, TaskCategory? category) async {
+    final bloc = context.read<TasksBloc>();
+    final result = await showDialog<_CategoryEdit>(
+      context: context,
+      builder: (context) => _CategoryDialog(category: category),
+    );
+    switch (result) {
+      case null:
+        return;
+      case _CategoryEdit(delete: true):
+        if (category != null) bloc.add(RemoveCategoryEvent(id: category.id));
+      case _CategoryEdit(:final name, :final keywords, :final rules) when category == null:
+        bloc.add(AddCategoryEvent(name: name, keywords: keywords, rules: rules));
+      case _CategoryEdit(:final name, :final keywords, :final rules):
+        bloc.add(EditCategoryEvent(id: category.id, name: name, keywords: keywords, rules: rules));
+    }
+  }
+}
+
+class _CategoryEdit {
+  final String name;
+  final String keywords;
+  final String rules;
+  final bool delete;
+
+  const _CategoryEdit({this.name = '', this.keywords = '', this.rules = '', this.delete = false});
+}
+
+/// Names a category and its keywords, or deletes it.
+class _CategoryDialog extends StatefulWidget {
+  final TaskCategory? category;
+
+  const _CategoryDialog({required this.category});
+
+  @override
+  State<_CategoryDialog> createState() => _CategoryDialogState();
+}
+
+class _CategoryDialogState extends State<_CategoryDialog> {
+  late final _name = TextEditingController(text: widget.category?.name ?? '');
+  late final _keywords = TextEditingController(text: widget.category?.keywords ?? '');
+  late final _rules = TextEditingController(text: widget.category?.rules ?? '');
+
+  @override
+  void initState() {
+    super.initState();
+    _name.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _keywords.dispose();
+    _rules.dispose();
+    super.dispose();
+  }
+
+  bool get _canSave => _name.text.trim().isNotEmpty;
+
+  void _save() {
+    if (!_canSave) return;
+    Navigator.pop(
+        context,
+        _CategoryEdit(
+            name: _name.text.trim(), keywords: _keywords.text.trim(), rules: _rules.text.trim()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final editing = widget.category != null;
+    final theme = Theme.of(context);
+    return AlertDialog(
+      scrollable: true,
+      title: Text(editing ? 'Edit category' : 'New category'),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'Work, Health, Home…',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _save(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _keywords,
+              minLines: 1,
+              maxLines: 3,
+              // Enter saves, as in the name.
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Keywords',
+                hintText: 'meeting, report, client (optional)',
+                helperText: 'Words tasks in this category often use',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _save(),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _rules,
+              minLines: 1,
+              maxLines: 3,
+              // Enter saves, as in the name.
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Always for tasks that mention',
+                hintText: 'bringmeback, Acme (optional)',
+                helperText: 'Names or phrases, separated by commas. A task that mentions one '
+                    'goes here, whatever else it says.',
+                helperMaxLines: 3,
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _save(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (editing)
+          TextButton(
+            onPressed: () => Navigator.pop(context, const _CategoryEdit(delete: true)),
+            style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+            child: const Text('Delete'),
+          ),
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _canSave ? _save : null, child: Text(editing ? 'Save' : 'Add')),
+      ],
+    );
+  }
+}
+
 /// This build's version, and whether a newer one is out.
 class _VersionTiles extends StatelessWidget {
   const _VersionTiles();
@@ -339,5 +550,88 @@ class _VersionTiles extends StatelessWidget {
         ]);
       },
     );
+  }
+}
+
+/// Credit for the models the app uses, as their licences ask.
+class _ModelCredits extends StatelessWidget {
+  const _ModelCredits();
+
+  @override
+  Widget build(BuildContext context) => const ListTile(
+        title: Text('Models'),
+        subtitle: Text('Categories in any language use paraphrase-multilingual-MiniLM-L12-v2 '
+            'by sentence-transformers (Apache 2.0). English word vectors come from spaCy\'s '
+            'en_core_web_lg (CC0).'),
+      );
+}
+
+/// Turns on categorising with the multilingual model on this device, and shows the download.
+class _ModelTile extends StatelessWidget {
+  const _ModelTile();
+
+  static bool _available(BuildContext context) {
+    try {
+      context.read<CategoryModelCubit>();
+      return true;
+    } on ProviderNotFoundException {
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Pages opened on their own, as in tests, may have no model above them.
+    if (!_available(context)) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return BlocBuilder<CategoryModelCubit, CategoryModelState>(builder: (context, state) {
+      final model = context.read<CategoryModelCubit>();
+      final String status;
+      Widget? below;
+      switch (state.status) {
+        case CategoryModelStatus.off:
+          status = 'Downloads a small multilingual model (about $multilingualModelMegabytes MB) '
+              'to this device once, to categorise tasks in Spanish, Portuguese, Chinese, Hindi, '
+              'Arabic and 45 more languages. It runs on this device only; tasks are never sent '
+              'anywhere.';
+        case CategoryModelStatus.downloading:
+          final mb = state.receivedBytes ~/ 1000000;
+          status = 'Downloading: $mb of about $multilingualModelMegabytes MB. Categories come from the '
+              'English word vectors until it\'s ready.';
+          below = LinearProgressIndicator(value: state.fraction);
+        case CategoryModelStatus.loading:
+          status = 'Loading the model…';
+          below = const LinearProgressIndicator();
+        case CategoryModelStatus.ready:
+          status = 'Categorising new and renamed tasks on this device'
+              '${state.backend == null ? '' : ' (${state.backend})'}. '
+              'Turn off to delete the download.';
+        case CategoryModelStatus.failed:
+          status = state.error ?? 'The model couldn\'t load.';
+          below = Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(onPressed: model.turnOn, child: const Text('Try again')),
+          );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            key: const Key('categoryModelSwitch'),
+            secondary: const Icon(Icons.auto_awesome),
+            title: const Text('Categories in any language'),
+            subtitle: Text(status,
+                style: state.status == CategoryModelStatus.failed
+                    ? TextStyle(color: theme.colorScheme.error)
+                    : null),
+            isThreeLine: true,
+            value: state.on,
+            onChanged: (on) => on ? model.turnOn() : model.turnOff(),
+          ),
+          if (below != null)
+            Padding(padding: const EdgeInsets.fromLTRB(72, 0, 16, 8), child: below),
+        ],
+      );
+    });
   }
 }

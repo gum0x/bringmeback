@@ -54,6 +54,11 @@ jobs:
       shell: bash
       run: ./tool/build_symbolon.sh web
 
+    # The multilingual category model in the browser needs llamadart's WebGPU bridge, pinned by its version.
+    - name: Add the model web bridge
+      shell: bash
+      run: ./tool/build_llm_web.sh
+
     # The site lives under /<repo>/. CanvasKit is bundled instead of loaded from Google's CDN.
     # The app shows its commit and time, and compares them with build-info.json to offer a reload
     # when a newer build is deployed.

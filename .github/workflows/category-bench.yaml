@@ -1,0 +1,71 @@
+name: Category models
+
+# Compares small on-device models for categorising tasks, in several languages, on the tasks in
+# test/bench/bench_tasks.dart. The results are on the run's summary page.
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'lib/category/**'
+      - 'test/bench/**'
+      - 'tool/download_bench_models.sh'
+      - '.github/workflows/category-bench.yaml'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Only the models whose names match this regular expression'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: Compare category models
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version: '3.47.7'
+        channel: 'stable'
+        cache: true
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    # The app downloads this file from a third party's repository and checks its SHA-256; this
+    # checks the pinned SHA-256 still matches what's there.
+    - name: Check the multilingual model the app downloads
+      shell: bash
+      run: |
+        src=lib/category/embedding_categoriser.dart
+        repo=$(grep -o "repoId: '[^']*'" $src | cut -d"'" -f2)
+        file=$(grep -o "multilingualModelFile = '[^']*'" $src | cut -d"'" -f2)
+        want=$(grep -A1 "multilingualModelSha256 =" $src | grep -oE "[0-9a-f]{64}")
+        curl -fSL --retry 3 -o "$RUNNER_TEMP/app-model.gguf" "https://huggingface.co/$repo/resolve/main/$file"
+        got=$(sha256sum "$RUNNER_TEMP/app-model.gguf" | cut -d' ' -f1)
+        echo "$repo/$file: $got, $(stat -c %s "$RUNNER_TEMP/app-model.gguf") bytes"
+        [ "$got" = "$want" ] || { echo "::error::SHA-256 is $got, the app expects '$want'"; exit 1; }
+
+    - name: Download the models
+      shell: bash
+      env:
+        # On pull requests, the models still in the running; run by hand for all of them.
+        BENCH_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.only || 'MiniLM|EmbeddingGemma|Qwen3-0.6B' }}
+      run: |
+        models=$(./tool/download_bench_models.sh "$RUNNER_TEMP/models")
+        echo "BENCH_MODELS=$models" >> "$GITHUB_ENV"
+        ls -l "$RUNNER_TEMP/models"
+
+    - name: Compare
+      run: flutter test test/bench/category_bench_test.dart --reporter expanded

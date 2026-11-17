@@ -8,6 +8,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../category/categoriser.dart';
 import '../ticker.dart';
 import 'task_document.dart';
 
@@ -98,6 +99,12 @@ class TaskState {
   /// The task of an earlier note this one was written again from.
   final String? carriedFrom;
 
+  /// The id of the category the task is filed under, or null for none yet.
+  final String? category;
+
+  /// Whether the user chose [category] (or chose none), rather than the categoriser.
+  final bool categoryByHand;
+
   /// Where the task's Pomodoro is, encoded; see `PomodoroRecord`.
   final String? pomodoro;
 
@@ -112,7 +119,9 @@ class TaskState {
       this.inFocus = false,
       this.doneAt,
       this.carriedFrom,
-      this.pomodoro})
+      this.pomodoro,
+      this.category,
+      this.categoryByHand = false})
       : entries = entries ?? [];
 
   bool get done => doneAt != null;
@@ -166,9 +175,13 @@ class TasksState {
   /// a break no task's clock runs.
   final int? breakStartedAt;
 
+  /// The categories tasks are filed under, set in Settings and synced. Deleted ones left out.
+  final List<TaskCategory> categories;
+
   TasksState(
       {required this.tasks,
       this.muted = false,
+      this.categories = const [],
       this.taskLimit = defaultTaskLimit,
       this.backlogEnabled = false,
       this.breakStartedAt,
@@ -191,7 +204,17 @@ class TasksState {
       backlogEnabled: backlogEnabled,
       noteMinutes: noteMinutes,
       breakStartedAt: breakStartedAt,
+      categories: categories,
     );
+  }
+
+  /// The category with [id], or null when there is none in the list.
+  TaskCategory? category(String? id) {
+    if (id == null) return null;
+    for (final c in categories) {
+      if (c.id == id) return c;
+    }
+    return null;
   }
 
   bool get onBreak => breakStartedAt != null;
@@ -239,6 +262,30 @@ class TasksState {
 
 abstract class TasksEvent {}
 
+/// What the user picked for a task's category.
+class CategoryPick {
+  /// The category, or null for none.
+  final String? id;
+
+  /// Whether the user chose it. When not, the categoriser picks one.
+  final bool byHand;
+
+  /// Let the categoriser pick.
+  const CategoryPick.auto()
+      : id = null,
+        byHand = false;
+
+  /// The user's own choice; [id] null for none.
+  const CategoryPick.hand(this.id) : byHand = true;
+
+  @override
+  bool operator ==(Object other) =>
+      other is CategoryPick && other.id == id && other.byHand == byHand;
+
+  @override
+  int get hashCode => Object.hash(id, byHand);
+}
+
 /// Writes a task on top of the note, as an interruption: it becomes the current task and its timer
 /// runs.
 class AddTaskOnTopEvent extends TasksEvent {
@@ -247,9 +294,14 @@ class AddTaskOnTopEvent extends TasksEvent {
   final int? timerLengthSeconds;
 
   final String notes;
+  final CategoryPick category;
 
   AddTaskOnTopEvent(
-      {required this.name, required this.id, this.timerLengthSeconds, this.notes = ''});
+      {required this.name,
+      required this.id,
+      this.timerLengthSeconds,
+      this.notes = '',
+      this.category = const CategoryPick.auto()});
 }
 
 /// Writes a task right after the one at [index].
@@ -271,13 +323,15 @@ class InsertTaskEvent extends TasksEvent {
   final int? timerLengthSeconds;
 
   final String notes;
+  final CategoryPick category;
 
   InsertTaskEvent(
       {required this.index,
       required this.name,
       required this.id,
       this.timerLengthSeconds,
-      this.notes = ''});
+      this.notes = '',
+      this.category = const CategoryPick.auto()});
 }
 
 /// Checks a task off, or unchecks it. Either way it stays on the note.
@@ -296,8 +350,15 @@ class EditTaskEvent extends TasksEvent {
 
   final String? notes;
 
+  /// The category picked in the dialog, or null to leave it as it is.
+  final CategoryPick? category;
+
   EditTaskEvent(
-      {required this.id, required this.name, required this.timerLengthSeconds, this.notes});
+      {required this.id,
+      required this.name,
+      required this.timerLengthSeconds,
+      this.notes,
+      this.category});
 }
 
 /// Tears off the current note and starts an empty one. Its unfinished tasks wait to be written again
@@ -489,6 +550,55 @@ class UpdateTaskTimerEvent extends TasksEvent {
 
 class LoadStateEvent extends TasksEvent {}
 
+/// Files a task under a category, from the task's category menu.
+class SetTaskCategoryEvent extends TasksEvent {
+  final String id;
+  final CategoryPick category;
+
+  SetTaskCategoryEvent({required this.id, required this.category});
+}
+
+/// Adds a category to the list in Settings.
+class AddCategoryEvent extends TasksEvent {
+  final String name;
+  final String keywords;
+  final String rules;
+
+  AddCategoryEvent({required this.name, this.keywords = '', this.rules = ''});
+}
+
+/// Renames a category or changes its keywords or rules.
+class EditCategoryEvent extends TasksEvent {
+  final String id;
+  final String name;
+  final String keywords;
+  final String rules;
+
+  EditCategoryEvent(
+      {required this.id, required this.name, required this.keywords, this.rules = ''});
+}
+
+class RemoveCategoryEvent extends TasksEvent {
+  final String id;
+
+  RemoveCategoryEvent({required this.id});
+}
+
+/// Brings back the default categories that were deleted.
+class RestoreDefaultCategoriesEvent extends TasksEvent {}
+
+/// Categories picked for tasks, by task id, with the name each was picked from.
+class _CategorisedEvent extends TasksEvent {
+  final Map<String, ({String name, String? category})> picks;
+
+  _CategorisedEvent(this.picks);
+}
+
+/// Picks a category for a task with the multilingual model: the category's id, or null when unsure.
+/// Throws when the model isn't available, and the word vectors pick instead.
+typedef SmartCategoriser = Future<String?> Function(
+    String text, List<TaskCategory> categories, List<CategoryExample> examples);
+
 /// Changes from another device reached the document.
 class _RemoteChangesEvent extends TasksEvent {}
 
@@ -529,13 +639,39 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   /// The task document, once loaded, for syncing with the group's other devices.
   Future<CRDTDocument> get document => _document.future;
 
-  TasksBloc() : super(TasksState(tasks: [])) {
+  // Loads the categoriser, on first use; tests pass their own.
+  final Future<Categoriser> Function() _categoriser;
+
+  /// The multilingual model, when the user turned it on: tried after rules and the English word
+  /// vectors.
+  SmartCategoriser? smartCategoriser;
+
+  TasksBloc({Future<Categoriser> Function()? categoriser})
+      : _categoriser = categoriser ?? Categoriser.bundled,
+        super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>((e, emit) => _insert(emit, e.index + 1, e.id.value,
         e.name, e.timerLengthSeconds));
     on<InsertTaskEvent>((e, emit) => _insert(
         emit, e.index, e.id.value, e.name, e.timerLengthSeconds,
-        notes: e.notes));
+        notes: e.notes, category: e.category));
+    on<SetTaskCategoryEvent>(_onSetTaskCategory);
+    on<AddCategoryEvent>((e, emit) => _editCategories(
+        emit,
+        (doc) => doc.addCategory(newId(), e.name.trim(),
+            keywords: e.keywords.trim(), rules: e.rules.trim())));
+    on<EditCategoryEvent>((e, emit) => _editCategories(emit, (doc) {
+          final before = doc.categories().where((c) => c.id == e.id).firstOrNull;
+          // Only what changed is written, so a default category keeps following the app's defaults
+          // in the fields the user didn't touch.
+          if (before?.name != e.name.trim()) doc.setCategoryName(e.id, e.name.trim());
+          if (before?.keywords != e.keywords.trim()) doc.setCategoryKeywords(e.id, e.keywords.trim());
+          if (before?.rules != e.rules.trim()) doc.setCategoryRules(e.id, e.rules.trim());
+        }));
+    on<RemoveCategoryEvent>((e, emit) => _editCategories(emit, (doc) => doc.removeCategory(e.id)));
+    on<RestoreDefaultCategoriesEvent>(
+        (e, emit) => _editCategories(emit, (doc) => doc.restoreDefaultCategories()));
+    on<_CategorisedEvent>(_onCategorised);
     on<SetDoneEvent>((e, emit) => _setDone(emit, e.index, e.done));
     on<EditTaskEvent>(_onEditTask);
     on<TearOffNoteEvent>(_onTearOff);
@@ -604,6 +740,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     return TasksState(
       tasks: tasks,
       muted: _muted,
+      categories: doc.categories(),
       taskLimit: _taskLimit,
       backlogEnabled: _backlogEnabled,
       breakStartedAt: tasks.any((t) => t.running) ? null : doc.pauseStartedAt,
@@ -659,25 +796,170 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       doc.insert(0, event.id.value,
           name: event.name,
           notes: event.notes,
+          category: event.category.id,
+          categoryByHand: event.category.byHand,
           timerLengthSeconds: event.timerLengthSeconds ?? 20 * 60);
       _runTop(doc, true);
       _focusId = event.id.value;
     });
+    if (!event.category.byHand) _categorise([event.id.value]);
   }
 
   void _insert(Emitter<TasksState> emit, int index, String id, String name,
       int? timerLengthSeconds,
-      {String notes = ''}) {
+      {String notes = '', CategoryPick category = const CategoryPick.auto()}) {
     _edit(emit, (doc) {
       final working = _working(doc);
       final current = _currentId(doc);
       doc.insert(index.clamp(0, doc.ids.length), id,
           name: name,
           notes: notes,
+          category: category.id,
+          categoryByHand: category.byHand,
           timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
       _runTop(doc, working || _breakEndsFor(doc, current));
       _focusId = id;
     });
+    if (!category.byHand) _categorise([id]);
+  }
+
+  /// Files the tasks [ids] whose category the user hasn't chosen, once the categoriser has loaded.
+  /// Only the device where the task was written or changed does it; the result syncs like any edit.
+  Future<void> _categorise(List<String> ids) async {
+    final doc = _doc;
+    if (ids.isEmpty || doc == null) return;
+    final categories = doc.categories();
+    // With no categories there is nothing to choose from, and no need to load the vectors.
+    if (categories.isEmpty && ids.every((id) => doc.task(id).category == null)) return;
+    final examples = [
+      for (final e in doc.categoryExamples()) (text: e.name, category: e.category)
+    ];
+    Categoriser? words;
+    try {
+      words = await _categoriser();
+    } on Object catch (e) {
+      // Only the rules and the multilingual model apply then; the user can still pick a category.
+      debugPrint('Categoriser unavailable: $e');
+    }
+    final picks = <String, ({String name, String? category})>{};
+    for (final id in ids) {
+      final task = doc.task(id);
+      if (task.categoryByHand) continue;
+      picks[id] = (
+        name: task.name,
+        category: await _pick(task.name, categories, examples, words),
+      );
+    }
+    if (!isClosed && picks.isNotEmpty) add(_CategorisedEvent(picks));
+  }
+
+  /// A rule the task mentions decides first; then the word vectors, which are quick and sure for
+  /// plain English; then the multilingual model, when it's on, for what the word vectors can't
+  /// place, such as other languages.
+  Future<String?> _pick(String name, List<TaskCategory> categories,
+      List<CategoryExample> examples, Categoriser? words) async {
+    if (Categoriser.byRule(name, categories) case final id?) return id;
+    if (words?.categorise(name, categories, examples: examples) case final id?) return id;
+    final smart = smartCategoriser;
+    if (smart == null) return null;
+    try {
+      return await smart(name, categories, examples);
+    } on Object catch (e) {
+      debugPrint('Multilingual model unavailable: $e');
+      return null;
+    }
+  }
+
+  /// Up to [max] categories that suit a task named [name], best first, for the user to pick from
+  /// while writing it: a rule it mentions, the categoriser's pick, then the next closest by the word
+  /// vectors, and the multilingual model's pick when it's on.
+  Future<List<String>> suggestCategories(String name, {int max = 3}) async {
+    final doc = _doc;
+    final categories = state.categories;
+    if (doc == null || name.trim().isEmpty || categories.isEmpty) return const [];
+    final examples = [
+      for (final e in doc.categoryExamples()) (text: e.name, category: e.category)
+    ];
+    final picks = <String>[];
+    void add(String? id) {
+      if (id != null && picks.length < max && !picks.contains(id)) picks.add(id);
+    }
+
+    add(Categoriser.byRule(name, categories));
+    Categoriser? words;
+    try {
+      words = await _categoriser();
+    } on Object catch (e) {
+      debugPrint('Categoriser unavailable: $e');
+    }
+    add(words?.categorise(name, categories, examples: examples));
+    if (smartCategoriser case final smart?) {
+      try {
+        add(await smart(name, categories, examples));
+      } on Object catch (e) {
+        debugPrint('Multilingual model unavailable: $e');
+      }
+    }
+    if (words != null) {
+      final close = words.scores(name, categories).entries
+          .where((e) => e.value >= suggestionFit)
+          .toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      for (final e in close) {
+        add(e.key);
+      }
+    }
+    return picks;
+  }
+
+  /// How well a category's words have to fit a task to be suggested, from 0 to 1: lower than
+  /// [Categoriser.threshold], since the user picks.
+  static const suggestionFit = 0.35;
+
+  void _onCategorised(_CategorisedEvent event, Emitter<TasksState> emit) {
+    final doc = _doc;
+    if (doc == null) return;
+    var changed = false;
+    for (final MapEntry(key: id, value: pick) in event.picks.entries) {
+      final task = doc.task(id);
+      // Gone, renamed or filed by the user since: the newer state stands.
+      if (task.categoryByHand ||
+          task.name != pick.name ||
+          doc.fieldInt('$id/timerStartAt') == null) {
+        continue;
+      }
+      if (pick.category == task.category) continue;
+      doc.setTaskCategory(id, pick.category, byHand: false);
+      changed = true;
+    }
+    if (!changed) return;
+    emit(_view());
+    _saveState();
+  }
+
+  void _onSetTaskCategory(SetTaskCategoryEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) => _pickCategory(doc, event.id, event.category));
+  }
+
+  /// Files task [id] as the user picked: under their choice, or back to the categoriser.
+  void _pickCategory(TaskDocument doc, String id, CategoryPick pick) {
+    final task = doc.task(id);
+    if (pick.byHand) {
+      if (!task.categoryByHand || task.category != pick.id) {
+        doc.setTaskCategory(id, pick.id, byHand: true);
+      }
+    } else if (task.categoryByHand) {
+      doc.clearTaskCategory(id);
+      _categorise([id]);
+    }
+  }
+
+  /// Changes the category list, then files again the tasks on the note the user hasn't filed.
+  void _editCategories(Emitter<TasksState> emit, void Function(TaskDocument doc) change) {
+    _edit(emit, change);
+    final doc = _doc;
+    if (doc == null) return;
+    _categorise([for (final id in doc.ids) if (!doc.task(id).categoryByHand) id]);
   }
 
   /// Whether a break under way ends because a task other than [previousCurrent] was put first:
@@ -714,6 +996,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
         _lastRemaining.remove(id);
         doc.setTimer(id, event.timerLengthSeconds, nowSeconds());
       }
+      if (event.category case final pick?) _pickCategory(doc, id, pick);
+      // A new name may belong somewhere else.
+      if (task.name != event.name && !doc.task(id).categoryByHand) _categorise([id]);
     });
   }
 
@@ -900,6 +1185,8 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onUpdateTaskName(UpdateTaskNameEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) => doc.setName(event.id.value, event.newName));
+    final task = _doc?.task(event.id.value);
+    if (task != null && !task.categoryByHand) _categorise([event.id.value]);
   }
 
   void _onUpdateTaskTimer(

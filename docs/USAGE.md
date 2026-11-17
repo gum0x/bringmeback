@@ -41,6 +41,64 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
   clock. A note holds 8 hours by default; when you commit more, the time turns red. Change it in
   **Settings → Time per note**.
 
+## Categories
+
+Each task is filed under one category, shown next to its name, so History can later tell where the
+time went. The app comes with a list built from the life areas most task and time-use frameworks
+share, with work split by the kind of work:
+
+| Category | For tasks like |
+| --- | --- |
+| Work planning | read work emails, prepare tomorrow's work, weekly KPIs |
+| Focused work | fix a bug, write the design doc |
+| Meetings and calls | standup, call with the client |
+| Personal projects | side projects and hobby builds |
+| Learning | a course, a book chapter, a language lesson |
+| Housekeeping | cleaning, laundry, cooking, repairs |
+| Errands and shopping | groceries, orders, the post office |
+| Money and paperwork | bills, taxes, insurance, forms |
+| Self-care and workout | gym, a run, yoga, the dentist |
+| Family and friends | call mom, a birthday, dinner with friends |
+| Leisure | a movie, a trip, a concert |
+
+Manage them in **Settings → Categories**: rename or change any of them, delete the ones you don't
+use (**Restore default categories** brings them back), and add your own. Each category has:
+
+- **Keywords**: words its tasks often use, which help tell categories apart.
+- **Always for tasks that mention**: names or phrases, separated by commas. A task that mentions one
+  goes there whatever else it says. Use it for names the app can't know: put `bringmeback` on
+  Personal projects and "Fix the sync bug in bringmeback" goes there. When rules of two categories
+  match, the longer phrase wins.
+
+Changes to the list sync with your other devices, like the tasks.
+
+While you write a task, the dialog suggests up to three categories for its name: tap one to file it
+there yourself. If you leave it on **Automatic**, the app picks the category (✨ on the tag, meaning
+you didn't choose it): a rule it mentions, or else the category that fits its name best. That runs entirely on the device, with no service behind
+it: it compares the task's words with each category's name and keywords using word vectors bundled
+with the app (English). When nothing fits well enough, the task gets no category rather than a wrong
+one.
+
+To confirm an automatic pick, tap the tag and choose **Keep**; to correct it, pick another category,
+or **No category**; or pick one in the task dialog. Your choice stays, even when you rename the task, until you pick **Choose automatically**.
+Tasks you filed by hand also teach the app: a new task much like one of them goes the same way.
+
+### Categories in any language
+
+The word vectors only know English. For tasks in other languages, turn on **Categories in any
+language** in Settings. The app downloads a small multilingual model,
+paraphrase-multilingual-MiniLM-L12-v2 (about 130 MB, once, on this device only; Apache 2.0), and runs
+it on the device. It knows over 50 languages, Spanish, Portuguese, Chinese, Hindi and Arabic among
+them. It doesn't write anything: it turns a task into a point in space where tasks that mean alike
+sit close, whatever their language, and files it under the category whose sample tasks, keywords
+and hand-filed tasks are closest. That takes about 10 ms a task. Nothing leaves the device. Rules
+still decide first, then the English word vectors, then the model. Turning it off deletes the
+download.
+
+It needs iOS 16.4 or macOS 14 or later. In a browser it needs WebGPU and a page served with
+cross-origin isolation (the Docker image does this; the GitHub Pages site can't, so there Settings
+says it can't run).
+
 ## A new day
 
 A note belongs to the day it was started (a day starts at 4:00). The next day the app asks you to

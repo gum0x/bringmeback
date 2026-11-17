@@ -27,6 +27,9 @@ dependencies:
   flutter_webrtc: 1.6.3
   web: ^1.1.1
   web_socket_channel: ^3.0.3
+  # Runs LFM2.5 on the device for categories, when the user turns it on (lib/category/lfm_*.dart).
+  # Needs iOS 16.4 and macOS 14.0 or newer.
+  llamadart: ^0.19.9
 
 dev_dependencies:
   flutter_test:
@@ -40,3 +43,10 @@ flutter:
   assets:
     - assets/alert.mp3
     - assets/bmb-reminder.mp3
+    - assets/word_vectors.bin
+
+hooks:
+  user_defines:
+    llamadart:
+      # Only GGUF models through llama.cpp; leaves LiteRT-LM out of the app.
+      llamadart_native_runtimes: [llama_cpp]

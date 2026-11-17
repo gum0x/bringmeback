@@ -47,3 +47,6 @@ app.*.map.json
 
 # Built by tool/build_symbolon.sh web
 /web/symbolon/
+
+# Fetched by `dart run llamadart:web_setup` (see tool/build_llm_web.sh)
+/web/webgpu_bridge/
