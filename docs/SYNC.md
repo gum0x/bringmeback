@@ -107,3 +107,16 @@ may run, with one open time entry.
 - Messages are never lost inside a working link (the channel is reliable and ordered), so the
   30-second comparison mainly covers links that dropped, devices passing changes on for each other,
   and announces lost on the relays.
+
+## Tearing off while out of sync
+
+**One device tears off, the other keeps using yesterday's note.** Nothing is lost when they sync.
+A task checked off on the old note counts as done on yesterday's torn-off note. A task written on
+the old note after the tear-off lands on today's note. The unfinished tasks wait to be written again,
+as usual.
+
+**Both devices tear off the same note.** History keeps one note per note started: the two records
+merge into one, with the tasks of both, closed at the earlier tear-off. When both devices wrote the
+same unfinished task again, today's note would have it twice. After the merge, each device keeps
+the copy the task's `carriedTo` names (the same one on both devices) and deletes the other, unless
+that copy was checked off.

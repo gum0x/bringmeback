@@ -159,7 +159,42 @@ class TaskDocument {
           closedAt: closedAt,
           taskIds: [for (final t in value.split(',')) if (t.isNotEmpty) t]));
     }
-    return notes..sort((a, b) => a.closedAt.compareTo(b.closedAt));
+    // Two devices out of sync can each tear off the same note: one record per note started, with
+    // the tasks of both, closed at the earlier tear-off.
+    final byStart = <int, NoteRecord>{};
+    for (final note in notes..sort((a, b) => a.id.compareTo(b.id))) {
+      final same = byStart[note.startedAt];
+      byStart[note.startedAt] = same == null
+          ? note
+          : NoteRecord(
+              id: same.id,
+              startedAt: same.startedAt,
+              closedAt: same.closedAt < note.closedAt ? same.closedAt : note.closedAt,
+              taskIds: [...same.taskIds, ...note.taskIds.where((t) => !same.taskIds.contains(t))]);
+    }
+    return byStart.values.toList()..sort((a, b) => a.closedAt.compareTo(b.closedAt));
+  }
+
+  /// Repairs the note after changes from a device that worked apart from this one merged in: when
+  /// both devices tore off the same note and wrote the same unfinished task again, today's note has
+  /// it twice. The copy the task's `carriedTo` names stays (the same one on every device); the other
+  /// is deleted, unless it was checked off.
+  void mergeCarried() {
+    final values = _values;
+    final ids = this.ids;
+    final drop = <String>[
+      for (final id in ids)
+        if (values['$id/carriedFrom'] case final String from)
+          if (values['$from/carriedTo'] case final String kept)
+            if (kept != id && ids.contains(kept) && doneAt(id) == null) id,
+    ];
+    if (drop.isEmpty) return;
+    doc.runInTransaction(() {
+      for (final id in drop) {
+        final index = this.ids.indexOf(id);
+        if (index >= 0) removeAt(index, id);
+      }
+    });
   }
 
   /// Tears off the note in the order: keeps it as note [noteId] and starts an empty one at [at].
