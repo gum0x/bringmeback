@@ -11,7 +11,8 @@ import 'peer.dart';
 /// When a link connects, each side sends its version vector, and the other answers with every change
 /// the vector doesn't cover. After that, each change made here goes to every link as it happens.
 /// After taking in changes, a side sends its vector again, so each side knows when the other has
-/// caught up: a link is in sync while both vectors are the same. Changes travel only inside the
+/// caught up: a link is in sync while both vectors are the same. A side that gets a vector with
+/// changes it lacks answers with its own vector, so [resync] on either side fills in both. Changes travel only inside the
 /// links' Noise channel.
 ///
 /// Wire format, inside each Noise message: one flags byte (bit 0 set when more fragments follow) and
@@ -78,6 +79,16 @@ class DocumentSync {
     _send(link, _vector, _doc.getVersionVector().toBytes());
   }
 
+  /// Asks every linked device to compare again: each side then sends the other whatever it is
+  /// missing. Safe to call any number of times, also while changes are on their way: a change that
+  /// arrives twice is applied once.
+  void resync() {
+    final vector = _doc.getVersionVector().toBytes();
+    for (final link in _links.keys.toList()) {
+      _send(link, _vector, vector);
+    }
+  }
+
   void _drop(PeerLink link) {
     final incoming = _links.remove(link);
     if (incoming == null) return;
@@ -110,6 +121,11 @@ class DocumentSync {
         final remote = VersionVector.fromBytes(body);
         _sendChanges(link, _doc.exportChangesNewerThan(remote));
         _links[link]?.remote = remote.mutable();
+        // The sender has changes this device lacks: say what this one has, so it sends them. Without
+        // this, a resync started on one device would only fill in that device.
+        if (!_doc.getVersionVector().isStrictlyNewerOrEqualThan(remote)) {
+          _send(link, _vector, _doc.getVersionVector().toBytes());
+        }
         _status();
       case _changes:
         final changes = [for (final blob in ChangeCodec.decodeBlobs(body)) Change.fromBytes(blob)];

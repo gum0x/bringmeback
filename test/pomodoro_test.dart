@@ -111,4 +111,77 @@ void main() {
     await settings.save();
     expect(await PomodoroSettings.load(), settings);
   });
+
+  group('fitting a task', () {
+    test('the task time is cut into full sessions and a shorter last one', () {
+      expect(sliceTask(60 * 60, 25 * 60), [25 * 60, 25 * 60, 10 * 60]);
+      expect(sliceTask(20 * 60, 25 * 60), [20 * 60]);
+      expect(sliceTask(50 * 60, 25 * 60), [25 * 60, 25 * 60]);
+      // A rest of 5 minutes or less joins the session before it.
+      expect(sliceTask(28 * 60, 25 * 60), [28 * 60]);
+      expect(sliceTask(55 * 60, 25 * 60), [25 * 60, 30 * 60]);
+    });
+
+    test('sessions follow the slices, breaks stay as they are', () {
+      final c = PomodoroCubit(
+          settings: settings,
+          taskSeconds: 60 * 60,
+          now: () => now,
+          startTicking: false);
+      addTearDown(c.close);
+      void go(Duration d) {
+        now = now.add(d);
+        c.tick();
+      }
+
+      expect(c.state.remainingSeconds, 25 * 60);
+      expect(describeTaskPlan(c.state),
+          "Fits the task's 1 h: 25 + 25 + 10 min of focus, 1 h 20 min with breaks");
+      c.start();
+      go(const Duration(minutes: 25));
+      expect(c.state.phase, PomodoroPhase.shortBreak);
+      expect(c.state.remainingSeconds, 5 * 60);
+      go(const Duration(minutes: 5));
+      expect(c.state.remainingSeconds, 25 * 60);
+      go(const Duration(minutes: 25));
+      // Second session done: the long break, since it comes every 2 here.
+      expect(c.state.phase, PomodoroPhase.longBreak);
+      go(const Duration(minutes: 15));
+      expect(c.state.phase, PomodoroPhase.work);
+      expect(c.state.remainingSeconds, 10 * 60, reason: 'the last slice');
+      expect(c.state.taskTimeUsed, isFalse);
+      go(const Duration(minutes: 10));
+      go(const Duration(minutes: 5));
+      // The task's time is used up: on past it, sessions are full length again.
+      expect(c.state.phase, PomodoroPhase.work);
+      expect(c.state.taskTimeUsed, isTrue);
+      expect(c.state.remainingSeconds, 25 * 60);
+    });
+
+    test('a session skipped early counts only the time worked', () {
+      final c = PomodoroCubit(
+          settings: settings,
+          taskSeconds: 30 * 60,
+          now: () => now,
+          startTicking: false);
+      addTearDown(c.close);
+      expect(c.state.taskSlices, [30 * 60], reason: 'a 5 min rest joins');
+      c.start();
+      now = now.add(const Duration(minutes: 10));
+      c.skip();
+      c.skip();
+      expect(c.state.phase, PomodoroPhase.work);
+      expect(c.state.focusedSeconds, 10 * 60);
+      expect(c.state.remainingSeconds, 20 * 60);
+    });
+
+    test('a task with no time left gets full sessions', () {
+      final c = PomodoroCubit(
+          settings: settings, taskSeconds: -60, now: () => now, startTicking: false);
+      addTearDown(c.close);
+      expect(c.state.taskSeconds, isNull);
+      expect(c.state.remainingSeconds, 25 * 60);
+      expect(describeTaskPlan(c.state), isNull);
+    });
+  });
 }

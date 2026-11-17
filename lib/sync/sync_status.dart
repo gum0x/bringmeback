@@ -136,3 +136,60 @@ class _SyncStatusButtonState extends State<SyncStatusButton> {
     });
   }
 }
+
+/// Sync now, in the bottom bar: makes the group's online devices exchange whatever either is
+/// missing, now ([SyncCubit.syncNow]). Shown only on a device that is in a sync group. A short
+/// message says what it did.
+class SyncNowButton extends StatefulWidget {
+  const SyncNowButton({super.key});
+
+  @override
+  State<SyncNowButton> createState() => _SyncNowButtonState();
+}
+
+class _SyncNowButtonState extends State<SyncNowButton> {
+  bool _busy = false;
+
+  Future<void> _press(SyncCubit sync) async {
+    setState(() => _busy = true);
+    final SyncNowResult result;
+    try {
+      result = await sync.syncNow();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    final n = sync.state.online.length;
+    String devices(int n) => n == 1 ? '1 device' : '$n devices';
+    final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
+    messenger.showSnackBar(switch (result) {
+      SyncNowResult.off => SnackBar(
+          content: const Text('Sync is off on this device.'),
+          persist: false,
+          action: SnackBarAction(
+              label: 'Devices',
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const SyncPage())))),
+      SyncNowResult.syncing => SnackBar(content: Text('Syncing with ${devices(n)}')),
+      SyncNowResult.connecting => SnackBar(content: Text('Connecting to ${devices(n)}')),
+      SyncNowResult.looking =>
+        const SnackBar(content: Text('Looking for your other devices')),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sync = context.read<SyncCubit?>();
+    if (sync == null) return const SizedBox.shrink();
+    return BlocBuilder<SyncCubit, SyncState>(
+      buildWhen: (a, b) => a.paired != b.paired || a.live != b.live,
+      builder: (context, state) => !state.paired
+          ? const SizedBox.shrink()
+          : IconButton(
+              tooltip: state.live ? 'Sync now' : 'Sync now (sync is off)',
+              onPressed: _busy ? null : () => _press(sync),
+              icon: const Icon(Icons.sync),
+            ),
+    );
+  }
+}

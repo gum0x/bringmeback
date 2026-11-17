@@ -1,5 +1,7 @@
 import 'package:bringmeback/sync/sync_cubit.dart';
 import 'package:bringmeback/sync/sync_status.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -37,5 +39,30 @@ void main() {
     expect(SyncStatus.of(inSync).health, SyncHealth.inSync);
     expect(SyncStatus.of(inSync).label, 'In sync with 1 device');
     await cubit.close();
+  });
+
+  testWidgets('Sync now shows only in a sync group, and says what it did', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final cubit = SyncCubit(connect: FakeRelay().connect);
+    await tester.runAsync(cubit.load);
+    await tester.pumpWidget(BlocProvider.value(
+        value: cubit,
+        child: const MaterialApp(home: Scaffold(bottomNavigationBar: SyncNowButton()))));
+    expect(find.byTooltip('Sync now'), findsNothing);
+
+    await tester.runAsync(cubit.createGroup);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Sync now (sync is off)'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+    expect(find.text('Sync is off on this device.'), findsOneWidget);
+
+    await tester.runAsync(() => cubit.setLive(true));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Sync now'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pump();
+    expect(find.text('Looking for your other devices'), findsOneWidget);
+    await tester.runAsync(cubit.close);
   });
 }

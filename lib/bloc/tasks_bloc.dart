@@ -21,13 +21,32 @@ String newId() => List.generate(
 int nowSeconds() =>
     DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond;
 
-/// How many tasks fit on a note unless Settings says otherwise, done ones included. A small note
-/// keeps the day focused: when it is full, finish or delete something before writing more.
-const defaultNoteLines = 10;
+/// How many unfinished tasks the note holds before writing another one asks first, unless Settings
+/// says otherwise. A short list keeps the day focused, so past it the app suggests the backlog
+/// instead; the user can still write the task on the note. Done tasks don't count.
+const defaultTaskLimit = 7;
 
-/// The range Settings offers for the size of a note.
-const minNoteLines = 3;
-const maxNoteLines = 20;
+/// The range Settings offers for the limit.
+const minTaskLimit = 3;
+const maxTaskLimit = 20;
+
+/// How much time a note may hold unless Settings says otherwise, in minutes: the expected times of
+/// its tasks added up. More than that shows in red, as a day planned too full.
+const defaultNoteMinutes = 8 * 60;
+
+/// The range Settings offers for the time a note holds, and its step.
+const minNoteMinutes = 60;
+const maxNoteMinutes = 16 * 60;
+const noteMinutesStep = 30;
+
+/// Rounds [seconds] since the epoch up to the next quarter of an hour, so an estimate based on it
+/// doesn't tick.
+int roundUpToQuarterHour(int seconds) {
+  final time = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+  final hour = DateTime(time.year, time.month, time.day, time.hour);
+  final quarters = (time.difference(hour).inSeconds + 15 * 60 - 1) ~/ (15 * 60);
+  return hour.add(Duration(minutes: 15 * quarters)).millisecondsSinceEpoch ~/ 1000;
+}
 
 /// A day starts at 4:00, so working past midnight still counts as the same day.
 const dayStartHour = 4;
@@ -86,6 +105,9 @@ class TaskState {
   /// Whether the user chose [category] (or chose none), rather than the categoriser.
   final bool categoryByHand;
 
+  /// Where the task's Pomodoro is, encoded; see `PomodoroRecord`.
+  final String? pomodoro;
+
   TaskState(
       {required this.name,
       this.notes = '',
@@ -97,6 +119,7 @@ class TaskState {
       this.inFocus = false,
       this.doneAt,
       this.carriedFrom,
+      this.pomodoro,
       this.category,
       this.categoryByHand = false})
       : entries = entries ?? [];
@@ -131,11 +154,26 @@ class TasksState {
   /// Unfinished tasks of torn-off notes, waiting to be written again or let go.
   final List<TaskState> pending;
 
+  /// Tasks kept for later, off the note, oldest first.
+  final List<TaskState> backlog;
+
   /// Whether the document has loaded.
   final bool loaded;
 
-  /// How many tasks fit on a note, set in Settings.
-  final int noteLines;
+  /// How many unfinished tasks the note holds before writing another one asks first, set in
+  /// Settings.
+  final int taskLimit;
+
+  /// Whether the experimental backlog is on, set in Settings. Off, the backlog is hidden and the
+  /// over-limit prompt doesn't offer it.
+  final bool backlogEnabled;
+
+  /// How much time a note may hold, in minutes, set in Settings.
+  final int noteMinutes;
+
+  /// When the break under way started, or null while working or when no break was logged. During
+  /// a break no task's clock runs.
+  final int? breakStartedAt;
 
   /// The categories tasks are filed under, set in Settings and synced. Deleted ones left out.
   final List<TaskCategory> categories;
@@ -143,10 +181,14 @@ class TasksState {
   TasksState(
       {required this.tasks,
       this.muted = false,
-      this.noteLines = defaultNoteLines,
       this.categories = const [],
+      this.taskLimit = defaultTaskLimit,
+      this.backlogEnabled = false,
+      this.breakStartedAt,
+      this.noteMinutes = defaultNoteMinutes,
       int? noteStartedAt,
       this.pending = const [],
+      this.backlog = const [],
       this.loaded = false})
       : noteStartedAt = noteStartedAt ?? nowSeconds();
 
@@ -156,8 +198,12 @@ class TasksState {
       muted: muted ?? this.muted,
       noteStartedAt: noteStartedAt,
       pending: pending,
+      backlog: backlog,
       loaded: loaded,
-      noteLines: noteLines,
+      taskLimit: taskLimit,
+      backlogEnabled: backlogEnabled,
+      noteMinutes: noteMinutes,
+      breakStartedAt: breakStartedAt,
       categories: categories,
     );
   }
@@ -171,10 +217,41 @@ class TasksState {
     return null;
   }
 
+  bool get onBreak => breakStartedAt != null;
+
+  /// How long the break under way has lasted, or 0 when there is none.
+  int breakSecondsAt(int now) {
+    final start = breakStartedAt;
+    return start == null || now < start ? 0 : now - start;
+  }
+
   /// The index of the task being worked on: the first one not checked off, or -1.
   int get currentIndex => tasks.indexWhere((t) => !t.done);
 
-  bool get full => tasks.length >= noteLines;
+  /// How many tasks on the note are not done yet.
+  int get openCount => tasks.where((t) => !t.done).length;
+
+  /// Whether writing one more task would go over the limit, so the app asks first.
+  bool get atLimit => openCount >= taskLimit;
+
+  /// The time committed to on this note: the expected times of all its tasks, done ones included.
+  int get committedSeconds => tasks.fold(0, (sum, t) => sum + t.timerLengthSeconds);
+
+  /// Whether more time is committed than a note holds.
+  bool get overCommitted => committedSeconds > noteMinutes * 60;
+
+  /// Time still to work on what is not done: each task's countdown left, none for one over time.
+  /// Breaks are not counted.
+  int secondsLeftAt(int now) =>
+      tasks.where((t) => !t.done).fold(0, (sum, t) => sum + max(0, t.remainingSecondsAt(now)));
+
+  /// When everything on the note would be done, working on without breaks, rounded up to the
+  /// quarter hour. Null when nothing is left to do.
+  int? finishAt([int? now]) {
+    final at = now ?? nowSeconds();
+    final left = secondsLeftAt(at);
+    return left == 0 ? null : roundUpToQuarterHour(at + left);
+  }
 
   bool get allDone => tasks.isNotEmpty && tasks.every((t) => t.done);
 
@@ -371,12 +448,68 @@ class ResetTotalEvent extends TasksEvent {
 
 class ToggleMuteEvent extends TasksEvent {}
 
-/// Sets how many tasks fit on a note. Tasks already written stay when it shrinks; only writing more
-/// waits until there is room.
-class SetNoteLinesEvent extends TasksEvent {
-  final int lines;
+/// Sets how many unfinished tasks the note holds before writing another one asks first. Nothing
+/// already written moves when it shrinks.
+class SetTaskLimitEvent extends TasksEvent {
+  final int limit;
 
-  SetNoteLinesEvent(this.lines);
+  SetTaskLimitEvent(this.limit);
+}
+
+/// Turns the experimental backlog on or off.
+class SetBacklogEnabledEvent extends TasksEvent {
+  final bool enabled;
+
+  SetBacklogEnabledEvent(this.enabled);
+}
+
+/// Lets go of a new task on purpose instead of writing it: it is kept in History as let go, and not
+/// written anywhere.
+class LetGoNewTaskEvent extends TasksEvent {
+  final String name;
+  final ValueKey<String> id;
+  final String notes;
+
+  LetGoNewTaskEvent({required this.name, required this.id, this.notes = ''});
+}
+
+/// Keeps a new task in the backlog, off the note.
+class AddToBacklogEvent extends TasksEvent {
+  final String name;
+  final ValueKey<String> id;
+  final int? timerLengthSeconds;
+  final String notes;
+
+  AddToBacklogEvent(
+      {required this.name, required this.id, this.timerLengthSeconds, this.notes = ''});
+}
+
+/// Moves an unfinished task of a torn-off note to the backlog.
+class MoveToBacklogEvent extends TasksEvent {
+  final String id;
+
+  MoveToBacklogEvent({required this.id});
+}
+
+/// Writes a backlog task at the end of the note.
+class WriteFromBacklogEvent extends TasksEvent {
+  final String id;
+
+  WriteFromBacklogEvent({required this.id});
+}
+
+/// Takes a task out of the backlog without writing it.
+class RemoveFromBacklogEvent extends TasksEvent {
+  final String id;
+
+  RemoveFromBacklogEvent({required this.id});
+}
+
+/// Sets how much time a note may hold, in minutes.
+class SetNoteMinutesEvent extends TasksEvent {
+  final int minutes;
+
+  SetNoteMinutesEvent(this.minutes);
 }
 
 /// Says which task, if any, is open in the Pomodoro focus view. That task's own countdown stays
@@ -385,6 +518,14 @@ class SetFocusModeEvent extends TasksEvent {
   final String? taskId;
 
   SetFocusModeEvent({this.taskId});
+}
+
+/// Keeps where the task with [taskId]'s Pomodoro is, in the document so it syncs; null forgets it.
+class SetPomodoroEvent extends TasksEvent {
+  final String taskId;
+  final String? record;
+
+  SetPomodoroEvent({required this.taskId, this.record});
 }
 
 class UpdateTimerEvent extends TasksEvent {
@@ -480,7 +621,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Countdown seen at the previous tick, per task, to detect when it crosses an alert point.
   final Map<String, int> _lastRemaining = {};
   bool _muted = false;
-  int _noteLines = defaultNoteLines;
+  int _taskLimit = defaultTaskLimit;
+  bool _backlogEnabled = false;
+  int _noteMinutes = defaultNoteMinutes;
   // The task open in the Pomodoro focus view, whose countdown alerts are held back. Local to this
   // device.
   String? _focusModeId;
@@ -540,8 +683,30 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<FocusTaskEvent>(_onFocusTask);
     on<ResetTotalEvent>(_onResetTotal);
     on<ToggleMuteEvent>(_onToggleMute);
-    on<SetNoteLinesEvent>(_onSetNoteLines);
+    on<SetTaskLimitEvent>(_onSetTaskLimit);
+    on<SetBacklogEnabledEvent>((e, emit) {
+      _backlogEnabled = e.enabled;
+      emit(_view());
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setBool('experimentalBacklog', _backlogEnabled));
+    });
+    on<LetGoNewTaskEvent>((e, emit) =>
+        _edit(emit, (doc) => doc.letGoNew(e.id.value, name: e.name, notes: e.notes)));
+    on<AddToBacklogEvent>((e, emit) => _edit(
+        emit,
+        (doc) => doc.addToBacklog(e.id.value,
+            name: e.name, notes: e.notes, timerLengthSeconds: e.timerLengthSeconds ?? 20 * 60)));
+    on<MoveToBacklogEvent>((e, emit) => _edit(emit, (doc) {
+          if (doc.pendingIds.contains(e.id)) doc.moveToBacklog(e.id);
+        }));
+    on<WriteFromBacklogEvent>(_onWriteFromBacklog);
+    on<RemoveFromBacklogEvent>((e, emit) => _edit(emit, (doc) {
+          if (doc.backlogIds.contains(e.id)) doc.removeFromBacklog(e.id);
+        }));
+    on<SetNoteMinutesEvent>(_onSetNoteMinutes);
     on<SetFocusModeEvent>((event, emit) => _focusModeId = event.taskId);
+    on<SetPomodoroEvent>((e, emit) =>
+        _edit(emit, (doc) => doc.setPomodoro(e.taskId, e.record)));
     on<MoveTaskEvent>(_onMoveTask);
     on<StartTimerEvent>(_onStartTimer);
     on<StopTimerEvent>(_onStopTimer);
@@ -552,10 +717,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<UpdateTaskTimerEvent>(_onUpdateTaskTimer);
     on<LoadStateEvent>(_onLoadState);
     on<_ClearAllEvent>(_onClearAll);
-    on<_RemoteChangesEvent>((event, emit) {
-      emit(_view());
-      _saveState();
-    });
+    on<_RemoteChangesEvent>((event, emit) => _edit(emit, (doc) => doc.mergeTimers()));
 
     add(LoadStateEvent());
     tick = SecondTicker(() => add(UpdateTimerEvent()));
@@ -564,15 +726,25 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   TasksState _view() {
     final doc = _doc;
     if (doc == null) {
-      return TasksState(tasks: [], muted: _muted, noteLines: _noteLines);
+      return TasksState(
+          tasks: [],
+          muted: _muted,
+          taskLimit: _taskLimit,
+          backlogEnabled: _backlogEnabled,
+          noteMinutes: _noteMinutes);
     }
+    final tasks = doc.tasks(focusId: _focusId);
     return TasksState(
-      tasks: doc.tasks(focusId: _focusId),
+      tasks: tasks,
       muted: _muted,
-      noteLines: _noteLines,
       categories: doc.categories(),
+      taskLimit: _taskLimit,
+      backlogEnabled: _backlogEnabled,
+      breakStartedAt: tasks.any((t) => t.running) ? null : doc.pauseStartedAt,
+      noteMinutes: _noteMinutes,
       noteStartedAt: doc.noteStartedAt,
       pending: [for (final id in doc.pendingIds) doc.task(id)],
+      backlog: [for (final id in doc.backlogIds) doc.task(id)],
       loaded: true,
     );
   }
@@ -618,7 +790,6 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onAddTaskOnTop(AddTaskOnTopEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      if (doc.ids.length >= _noteLines) return;
       doc.insert(0, event.id.value,
           name: event.name,
           notes: event.notes,
@@ -635,15 +806,15 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
       int? timerLengthSeconds,
       {String notes = '', CategoryPick category = const CategoryPick.auto()}) {
     _edit(emit, (doc) {
-      if (doc.ids.length >= _noteLines) return;
       final working = _working(doc);
+      final current = _currentId(doc);
       doc.insert(index.clamp(0, doc.ids.length), id,
           name: name,
           notes: notes,
           category: category.id,
           categoryByHand: category.byHand,
           timerLengthSeconds: timerLengthSeconds ?? 20 * 60);
-      _runTop(doc, working);
+      _runTop(doc, working || _breakEndsFor(doc, current));
       _focusId = id;
     });
     if (!category.byHand) _categorise([id]);
@@ -741,6 +912,15 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _categorise([for (final id in doc.ids) if (!doc.task(id).categoryByHand) id]);
   }
 
+  /// Whether a break under way ends because a task other than [previousCurrent] was put first:
+  /// prioritising a task means getting back to work on it.
+  bool _breakEndsFor(TaskDocument doc, String? previousCurrent) {
+    final current = _currentId(doc);
+    return current != null &&
+        current != previousCurrent &&
+        doc.pauseStartedAt != null;
+  }
+
   /// Checking off the current task hands the timer on to the next unchecked one; unchecking a task
   /// above it takes the timer back.
   void _setDone(Emitter<TasksState> emit, int index, bool done) {
@@ -788,11 +968,19 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _onCarry(CarryTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
-      if (doc.ids.length >= _noteLines) return;
       if (!doc.pendingIds.contains(event.id)) return;
       final working = _working(doc);
       final newTaskId = newId();
       doc.carry(event.id, newTaskId, doc.ids.length);
+      _runTop(doc, working);
+    });
+  }
+
+  void _onWriteFromBacklog(WriteFromBacklogEvent event, Emitter<TasksState> emit) {
+    _edit(emit, (doc) {
+      if (!doc.backlogIds.contains(event.id)) return;
+      final working = _working(doc);
+      doc.writeFromBacklog(event.id, newId(), doc.ids.length);
       _runTop(doc, working);
     });
   }
@@ -845,12 +1033,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _saveState();
   }
 
-  /// Moving an unchecked task above the current one makes it the one being worked on.
+  /// Moving an unchecked task above the current one makes it the one being worked on. During a
+  /// break that also ends the break and starts its clock.
   void _onMoveTask(MoveTaskEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
       final working = _working(doc);
+      final current = _currentId(doc);
       doc.move(event.fromIndex, event.toIndex);
-      _runTop(doc, working);
+      _runTop(doc, working || _breakEndsFor(doc, current));
     });
   }
 
@@ -891,11 +1081,18 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _edit(emit, (doc) => doc.setTotalResetAt(id, nowSeconds()));
   }
 
-  void _onSetNoteLines(SetNoteLinesEvent event, Emitter<TasksState> emit) {
-    _noteLines = event.lines.clamp(minNoteLines, maxNoteLines);
+  void _onSetTaskLimit(SetTaskLimitEvent event, Emitter<TasksState> emit) {
+    _taskLimit = event.limit.clamp(minTaskLimit, maxTaskLimit);
     emit(_view());
     SharedPreferences.getInstance()
-        .then((prefs) => prefs.setInt('noteLines', _noteLines));
+        .then((prefs) => prefs.setInt('taskLimit', _taskLimit));
+  }
+
+  void _onSetNoteMinutes(SetNoteMinutesEvent event, Emitter<TasksState> emit) {
+    _noteMinutes = event.minutes.clamp(minNoteMinutes, maxNoteMinutes);
+    emit(_view());
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setInt('noteMinutes', _noteMinutes));
   }
 
   void _onToggleMute(ToggleMuteEvent event, Emitter<TasksState> emit) {
@@ -1015,8 +1212,13 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     _loading = true;
     final prefs = await SharedPreferences.getInstance();
     _muted = prefs.getBool('muted') ?? false;
-    _noteLines = (prefs.getInt('noteLines') ?? defaultNoteLines)
-        .clamp(minNoteLines, maxNoteLines);
+    // A new key: the old 'noteLines' was a hard cap counting done tasks too, so it doesn't carry
+    // over.
+    _taskLimit = (prefs.getInt('taskLimit') ?? defaultTaskLimit)
+        .clamp(minTaskLimit, maxTaskLimit);
+    _backlogEnabled = prefs.getBool('experimentalBacklog') ?? false;
+    _noteMinutes = (prefs.getInt('noteMinutes') ?? defaultNoteMinutes)
+        .clamp(minNoteMinutes, maxNoteMinutes);
 
     // The peer id names this install as the author of its changes; it must stay the same.
     var peerId = prefs.getString('peerId');

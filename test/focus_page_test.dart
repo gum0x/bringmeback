@@ -152,6 +152,30 @@ void main() {
     });
   });
 
+  testWidgets('the sessions fit the time the task has left', (tester) async {
+    await tester.runAsync(() async {
+      tasks = TasksBloc();
+      await tasks.document;
+    });
+    pomodoro = PomodoroCubit(
+        taskSeconds: 60 * 60, now: () => now, startTicking: false);
+    await addTasks(tester, ['Write docs']);
+    await pumpFocus(tester, 'Write docs');
+    await tester.pump();
+
+    expect(find.text('25:00'), findsOneWidget);
+    expect(find.text('Session 1 of 3 for this task'), findsOneWidget);
+    expect(
+        find.text(
+            "Fits the task's 1 h: 25 + 25 + 10 min of focus, 1 h 10 min with breaks"),
+        findsOneWidget);
+
+    await tester.runAsync(() async {
+      await pomodoro.close();
+      await tasks.close();
+    });
+  });
+
   testWidgets('settings dialog returns the new lengths', (tester) async {
     (PomodoroSettings, bool)? result;
     await tester.pumpWidget(MaterialApp(
