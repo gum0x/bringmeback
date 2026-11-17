@@ -22,10 +22,14 @@ const lfmModelMegabytes = 230;
 
 /// Picks a category for a task with [lfmModel], on the device.
 ///
-/// The model reads the task and the list of categories, with their keywords and rules, and a few
-/// tasks the user filed by hand. It doesn't write an answer freely: each category's name is scored
-/// as the answer, token by token, so the answer can only be one of the user's categories, and how
-/// likely each name is says how sure the model is.
+/// The model reads the list of categories, with their keywords and rules, then a few tasks already
+/// sorted (the user's own, and one example for each default category), as earlier turns of the
+/// chat, and then the task. It doesn't write an answer freely: the categories' names are scored as
+/// its reply, so the answer can only be one of them, and the scores say how sure it is.
+///
+/// Reading the prompt is what takes time (around a second on a laptop's CPU), and this model can't
+/// reuse a prompt it read before, so names are told apart by their first token in one pass. Only
+/// when names start alike does it read again, with the shared start, to tell those apart.
 class LfmCategoriser {
   /// How likely the best category has to be, from 0 to 1, for the task to be filed under it.
   static const threshold = 0.4;
@@ -48,8 +52,8 @@ class LfmCategoriser {
       {ModelSource? model, ModelDownloadProgressCallback? onProgress}) async {
     final engine = await LlamaEngine.load(
       LlamaModel(model ?? lfmModel),
-      // Prompts are a few hundred tokens: a category list and one task.
-      params: const ModelParams(contextSize: 2048),
+      // Prompts are several hundred tokens: a category list, examples and one task.
+      params: const ModelParams(contextSize: 4096),
       onProgress: onProgress,
     );
     if (!engine.supportsNextTokenScoring) {
@@ -70,80 +74,122 @@ class LfmCategoriser {
     return best.value >= threshold ? best.key : null;
   }
 
-  /// How likely each category is as the answer for [text], from 0 to 1, adding up to 1.
+  /// How likely the model's answer for [text] is each category, from 0 to 1. Categories whose names
+  /// start like the most likely one's share a score until the names part.
   Future<Map<String, double>> scores(String text, List<TaskCategory> categories,
       {List<CategoryExample> examples = const []}) async {
     final offered = categories.take(maxCategories).toList();
     if (text.trim().isEmpty || offered.isEmpty) return {};
-    final prompt = (await _engine.chatTemplate([
-      LlamaChatMessage.fromText(
-          role: LlamaChatRole.system, text: instructions(offered, examples: examples)),
-      LlamaChatMessage.fromText(role: LlamaChatRole.user, text: text.trim()),
-    ], enableThinking: false))
+    final prompt = (await _engine.chatTemplate(chat(text, offered, examples: examples),
+            enableThinking: false))
         .prompt;
-
-    // Each name's probability is that of its tokens one after the other. Names that start alike
-    // share the scoring of their common start, and each step reuses the prompt already read.
     final names = [
       for (final c in offered) await _engine.tokenize(c.name.trim(), addSpecial: false),
     ];
-    final next = <String, Set<int>>{};
-    for (final tokens in names) {
-      for (var i = 0; i < tokens.length; i++) {
-        (next[tokens.take(i).join(',')] ??= {}).add(tokens[i]);
+
+    // Walks down the names token by token, following the most likely start. A name that ends
+    // where others go on (say "Work" beside "Work planning") is scored by how unlikely it is that
+    // the reply goes on with any of theirs.
+    final scores = <String, double>{};
+    var group = [for (var i = 0; i < offered.length; i++) if (names[i].isNotEmpty) i];
+    var weight = 1.0;
+    for (var depth = 0; group.length > 1; depth++) {
+      final ended = [for (final i in group) if (names[i].length == depth) i];
+      final byToken = <int, List<int>>{};
+      for (final i in group) {
+        if (names[i].length > depth) (byToken[names[i][depth]] ??= []).add(i);
       }
+      final tokens = byToken.keys.toList();
+      var probabilities = [1.0];
+      if (tokens.length > 1 || ended.isNotEmpty) {
+        final said = depth == 0 ? '' : await _engine.detokenize(names[group.first].sublist(0, depth));
+        final scored = await _engine.scoreNextToken('$prompt$said', candidates: tokens);
+        final logprobs = [for (final c in scored.candidates) c.logprob];
+        probabilities = softmax(logprobs);
+        if (ended.isNotEmpty) {
+          final goesOn = logprobs.map(math.exp).fold(0.0, (a, b) => a + b).clamp(0.0, 1.0);
+          for (final i in ended) {
+            scores[offered[i].id] = weight * (1 - goesOn) / ended.length;
+          }
+          weight *= goesOn;
+        }
+      }
+      var best = 0;
+      for (var k = 1; k < tokens.length; k++) {
+        if (probabilities[k] > probabilities[best]) best = k;
+      }
+      for (var k = 0; k < tokens.length; k++) {
+        if (k == best) continue;
+        final members = byToken[tokens[k]]!;
+        for (final i in members) {
+          scores[offered[i].id] = weight * probabilities[k] / members.length;
+        }
+      }
+      weight *= probabilities[best];
+      group = byToken[tokens[best]]!;
     }
-    final logprob = <String, Map<int, double>>{};
-    for (final MapEntry(key: prefix, value: candidates) in next.entries) {
-      final said = prefix.isEmpty
-          ? ''
-          : await _engine.detokenize([for (final t in prefix.split(',')) int.parse(t)]);
-      final scored = await _engine.scoreNextToken('$prompt$said', candidates: candidates.toList());
-      logprob[prefix] = {for (final c in scored.candidates) c.token: c.logprob};
-    }
-    final total = [
-      for (final tokens in names)
-        tokens.isEmpty
-            ? double.negativeInfinity
-            : [
-                for (var i = 0; i < tokens.length; i++)
-                  logprob[tokens.take(i).join(',')]![tokens[i]]!
-              ].reduce((a, b) => a + b),
-    ];
-    final probabilities = softmax(total);
-    return {for (final (i, c) in offered.indexed) c.id: probabilities[i]};
+    if (group.length == 1) scores[offered[group.single].id] = weight;
+    return scores;
   }
 
   Future<void> dispose() => _engine.dispose();
 
-  /// The system prompt: the categories, with what goes in each, and examples.
+  /// The chat the model reads: instructions, then sorted tasks as earlier turns, then [text].
   @visibleForTesting
-  static String instructions(List<TaskCategory> categories,
+  static List<LlamaChatMessage> chat(String text, List<TaskCategory> categories,
       {List<CategoryExample> examples = const []}) {
     final nameOf = {for (final c in categories) c.id: c.name.trim()};
-    final shown = [
+    final user = [
       for (final e in examples)
-        if (nameOf[e.category] case final name?) (e.text, name)
-    ].take(maxExamples);
+        if (nameOf[e.category] case final name?) (e.text.trim(), name)
+    ].take(maxExamples).toList().reversed;
+    final starters = [
+      for (final MapEntry(key: id, value: task) in starterExamples.entries)
+        if (nameOf[id] case final name?) (task, name)
+    ];
     return [
-      'You sort the tasks of a personal to-do list into categories. The user sends one task. '
-          'Reply with the name of the one category it belongs to, exactly as written below, '
-          'and nothing else.',
-      '',
-      'Categories:',
-      for (final c in categories)
-        [
-          '- ${c.name.trim()}',
-          if (c.keywords.isNotEmpty) ' (for example: ${c.keywords.trim().split(RegExp(r'\s+')).join(', ')})',
-          if (c.rulePhrases.isNotEmpty) '. Always for tasks that mention: ${c.rulePhrases.join(', ')}',
-        ].join(),
-      if (shown.isNotEmpty) ...[
-        '',
-        'Tasks the user sorted before:',
-        for (final (text, name) in shown) '$text => $name',
+      LlamaChatMessage.fromText(role: LlamaChatRole.system, text: instructions(categories)),
+      for (final (task, name) in [...starters, ...user]) ...[
+        LlamaChatMessage.fromText(role: LlamaChatRole.user, text: task),
+        LlamaChatMessage.fromText(role: LlamaChatRole.assistant, text: name),
       ],
-    ].join('\n');
+      LlamaChatMessage.fromText(role: LlamaChatRole.user, text: text.trim()),
+    ];
   }
+
+  /// One task for each default category, so the model sees how sorting goes.
+  @visibleForTesting
+  static const starterExamples = {
+    'work-planning': 'Answer work emails',
+    'focused-work': 'Code the new search feature',
+    'meetings': 'Weekly sync with the design team',
+    'personal-projects': 'Work on my side project website',
+    'learning': 'Read a chapter of the history book',
+    'housekeeping': 'Vacuum the living room',
+    'errands': 'Pick up the parcel at the post office',
+    'money-paperwork': 'Renew the car insurance',
+    'workout-self-care': 'Yoga class',
+    'family-friends': 'Dinner with my parents',
+    'leisure': 'Play video games',
+  };
+
+  /// The system prompt: the categories, with what goes in each.
+  @visibleForTesting
+  static String instructions(List<TaskCategory> categories) => [
+        'You sort the tasks of a personal to-do list into categories. The user sends one task. '
+            'Reply with the name of the one category it belongs to, exactly as written below, '
+            'and nothing else.',
+        '',
+        'Categories:',
+        for (final c in categories)
+          [
+            '- ${c.name.trim()}',
+            if (c.keywords.trim().isNotEmpty)
+              ' (${c.keywords.trim().split(RegExp(r'\s+')).join(', ')})',
+            if (c.rulePhrases.isNotEmpty)
+              '. Always for tasks that mention: ${c.rulePhrases.join(', ')}',
+          ].join(),
+      ].join('\n');
 
   /// Turns log-probabilities into probabilities that add up to 1.
   @visibleForTesting

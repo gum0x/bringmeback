@@ -12,18 +12,24 @@ Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 20));
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('the prompt lists each category, with its keywords, rules and examples', () {
-    final text = LfmCategoriser.instructions(const [
-      TaskCategory(id: 'w', name: 'Work planning', keywords: 'email plan'),
+  test('the chat lists each category, then sorted tasks as turns, then the task', () {
+    final chat = LfmCategoriser.chat('Ship BMB', const [
+      TaskCategory(id: 'work-planning', name: 'Work planning', keywords: 'email plan'),
       TaskCategory(id: 'p', name: 'Personal projects', rules: 'bringmeback, BMB'),
     ], examples: [
-      (text: 'backlog grooming', category: 'w'),
+      (text: 'backlog grooming', category: 'work-planning'),
       (text: 'gone', category: 'deleted'),
     ]);
-    expect(text, contains('- Work planning (for example: email, plan)'));
-    expect(text, contains('- Personal projects. Always for tasks that mention: bringmeback, bmb'));
-    expect(text, contains('backlog grooming => Work planning'));
-    expect(text, isNot(contains('gone')));
+    final text = [for (final m in chat) '${m.role.name}: ${m.content}'];
+    expect(text.first, contains('- Work planning (email, plan)'));
+    expect(text.first, contains('- Personal projects. Always for tasks that mention: bringmeback, bmb'));
+    expect(text.sublist(1), [
+      'user: Answer work emails',
+      'assistant: Work planning',
+      'user: backlog grooming',
+      'assistant: Work planning',
+      'user: Ship BMB',
+    ]);
   });
 
   test('softmax turns log-probabilities into probabilities', () {
