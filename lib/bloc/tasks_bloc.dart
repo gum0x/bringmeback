@@ -850,20 +850,21 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     if (!isClosed && picks.isNotEmpty) add(_CategorisedEvent(picks));
   }
 
-  /// A rule the task mentions decides first; then the language model, when it's on and sure; then
-  /// the word vectors.
+  /// A rule the task mentions decides first; then the word vectors, which are quick and sure for
+  /// plain English; then the language model, when it's on, for what the word vectors can't place,
+  /// such as other languages.
   Future<String?> _pick(String name, List<TaskCategory> categories,
       List<CategoryExample> examples, Categoriser? words) async {
     if (Categoriser.byRule(name, categories) case final id?) return id;
+    if (words?.categorise(name, categories, examples: examples) case final id?) return id;
     final smart = smartCategoriser;
-    if (smart != null) {
-      try {
-        if (await smart(name, categories, examples) case final id?) return id;
-      } on Object catch (e) {
-        debugPrint('Language model categoriser unavailable: $e');
-      }
+    if (smart == null) return null;
+    try {
+      return await smart(name, categories, examples);
+    } on Object catch (e) {
+      debugPrint('Language model categoriser unavailable: $e');
+      return null;
     }
-    return words?.categorise(name, categories, examples: examples);
   }
 
   void _onCategorised(_CategorisedEvent event, Emitter<TasksState> emit) {

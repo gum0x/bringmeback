@@ -168,28 +168,18 @@ class LfmCategoriser {
         if (nameOf[id] case final name?) (task, name)
     ];
     final sorted = [...starters, ...user];
-    final options = 'Which category is it? One of: ${nameOf.values.join(', ')}.';
     LlamaChatMessage say(LlamaChatRole role, String text) =>
         LlamaChatMessage.fromText(role: role, text: text);
-    switch (style) {
-      case PromptStyle.turns:
-      case PromptStyle.inline:
-      case PromptStyle.inlineAll:
-        String ask(String task, {required bool last}) => switch (style) {
-              PromptStyle.turns => task,
-              PromptStyle.inline when !last => 'Task: $task',
-              _ => 'Task: $task\n$options',
-            };
-        return [
+    return switch (style) {
+      PromptStyle.turns => [
           say(LlamaChatRole.system, instructions(categories)),
           for (final (task, name) in sorted) ...[
-            say(LlamaChatRole.user, ask(task, last: false)),
+            say(LlamaChatRole.user, task),
             say(LlamaChatRole.assistant, name),
           ],
-          say(LlamaChatRole.user, ask(text.trim(), last: true)),
-        ];
-      case PromptStyle.single:
-        return [
+          say(LlamaChatRole.user, text.trim()),
+        ],
+      PromptStyle.single => [
           say(LlamaChatRole.user, [
             instructions(categories),
             '',
@@ -197,10 +187,10 @@ class LfmCategoriser {
             for (final (task, name) in sorted) 'Task: $task\nCategory: $name',
             '',
             'Task: ${text.trim()}',
-            options,
+            'Which category is it? One of: ${nameOf.values.join(', ')}.',
           ].join('\n')),
-        ];
-    }
+        ],
+    };
   }
 
   /// How [chat] puts the question, to compare them on the real model.
@@ -271,12 +261,6 @@ class LfmCategoriser {
 enum PromptStyle {
   /// Sorted tasks as earlier turns, each just the task.
   turns,
-
-  /// Like [turns], with the options listed again after the task to sort.
-  inline,
-
-  /// Like [turns], with the options after every task.
-  inlineAll,
 
   /// Everything in one message, with the sorted tasks as a list.
   single,

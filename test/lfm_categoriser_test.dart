@@ -77,18 +77,25 @@ void main() {
       await bloc.close();
     });
 
-    test('when the model is unsure or unavailable, the word vectors decide', () async {
-      for (final smart in <SmartCategoriser>[
-        (text, categories, examples) async => null,
-        (text, categories, examples) async => throw StateError('not downloaded'),
-      ]) {
-        SharedPreferences.setMockInitialValues({});
-        final bloc = await newBloc(smart, words: _FixedCategoriser('housekeeping'));
-        bloc.add(AddTaskOnTopEvent(name: 'Clean the kitchen', id: const ValueKey('a')));
-        await settle();
-        expect(bloc.state.tasks.single.category, 'housekeeping');
-        await bloc.close();
-      }
+    test('the word vectors decide first; the model only places what they can\'t', () async {
+      var asked = 0;
+      final bloc = await newBloc((text, categories, examples) async {
+        asked++;
+        return 'leisure';
+      }, words: _FixedCategoriser('housekeeping'));
+      bloc.add(AddTaskOnTopEvent(name: 'Clean the kitchen', id: const ValueKey('a')));
+      await settle();
+      expect(bloc.state.tasks.single.category, 'housekeeping');
+      expect(asked, 0);
+      await bloc.close();
+    });
+
+    test('when the model fails, the task waits without a category', () async {
+      final bloc = await newBloc((text, categories, examples) async => throw StateError('gone'));
+      bloc.add(AddTaskOnTopEvent(name: 'Limpiar la cocina', id: const ValueKey('a')));
+      await settle();
+      expect(bloc.state.tasks.single.category, isNull);
+      await bloc.close();
     });
 
     test('a pick for a name the task no longer has is dropped', () async {
