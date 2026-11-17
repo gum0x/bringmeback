@@ -141,6 +141,7 @@ One scrolling page, grouped:
 
 - **Timer:** default countdown length (now fixed at 20 min), reminder interval (now fixed at 30 min).
 - **Sounds and alerts:** mute, which sounds, notifications on/off.
+- **Reminders:** a morning and an afternoon reminder, each on or off at its own time, per device.
 - **Appearance:** theme (system, light, dark).
 - **Logs and devices:** logs, paired devices, sharing (when sync lands).
 - **Data:** export and import, about, help (links to the usage guide).

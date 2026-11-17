@@ -13,6 +13,7 @@ described in [VIEWS.md](VIEWS.md).
 - Countdown with time's up alert, 30-minute reminder, mute.
 - Phone and desktop layouts, light and dark theme.
 - Sync-ready data model and the task list in a crdt_lf document (sync steps 1 and 2).
+- Morning and afternoon reminders, set per device in Settings.
 - Web app on GitHub Pages; builds for Linux, macOS and Windows; unit and end-to-end tests.
 
 ## Next
