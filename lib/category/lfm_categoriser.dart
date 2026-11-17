@@ -22,24 +22,23 @@ const lfmModelMegabytes = 230;
 
 /// Picks a category for a task with [lfmModel], on the device.
 ///
-/// The model reads the task and a lettered list of the categories, with their keywords and rules,
-/// and a few tasks the user filed by hand. It doesn't write an answer: the probability of each
-/// letter as the next token says how likely each category is, so one pass over the prompt
-/// decides, and the answer can only be one of the user's categories.
+/// The model reads the task and the list of categories, with their keywords and rules, and a few
+/// tasks the user filed by hand. It doesn't write an answer freely: each category's name is scored
+/// as the answer, token by token, so the answer can only be one of the user's categories, and how
+/// likely each name is says how sure the model is.
 class LfmCategoriser {
   /// How likely the best category has to be, from 0 to 1, for the task to be filed under it.
   static const threshold = 0.4;
 
-  /// At most this many categories are offered, one per letter.
-  static const maxCategories = 26;
+  /// At most this many categories are offered.
+  static const maxCategories = 40;
 
   /// At most this many hand-filed tasks are shown as examples, newest first.
   static const maxExamples = 12;
 
   final LlamaEngine _engine;
-  final List<int> _letters;
 
-  LfmCategoriser._(this._engine, this._letters);
+  LfmCategoriser._(this._engine);
 
   /// The backend the model runs on, such as Metal, Vulkan, CPU or WebGPU.
   Future<String> get backendName => _engine.getBackendName();
@@ -53,74 +52,95 @@ class LfmCategoriser {
       params: const ModelParams(contextSize: 2048),
       onProgress: onProgress,
     );
-    try {
-      if (!engine.supportsNextTokenScoring) {
-        throw LlamaUnsupportedException(
-            'This device\'s model runtime can\'t score answers, which categorising needs.');
-      }
-      final letters = [
-        for (var i = 0; i < maxCategories; i++)
-          (await engine.tokenize(String.fromCharCode(65 + i), addSpecial: false)).first,
-      ];
-      if (letters.toSet().length != letters.length) {
-        throw StateError('Two answer letters share a token in this model.');
-      }
-      return LfmCategoriser._(engine, letters);
-    } catch (_) {
+    if (!engine.supportsNextTokenScoring) {
       await engine.dispose();
-      rethrow;
+      throw LlamaUnsupportedException(
+          'This device\'s model runtime can\'t score answers, which categorising needs.');
     }
+    return LfmCategoriser._(engine);
   }
 
   /// The id of the category [text] belongs to, or null when the model isn't sure enough. Only the
   /// first [maxCategories] of [categories] are offered.
   Future<String?> categorise(String text, List<TaskCategory> categories,
       {List<CategoryExample> examples = const []}) async {
+    final scores = await this.scores(text, categories, examples: examples);
+    if (scores.isEmpty) return null;
+    final best = scores.entries.reduce((a, b) => b.value > a.value ? b : a);
+    return best.value >= threshold ? best.key : null;
+  }
+
+  /// How likely each category is as the answer for [text], from 0 to 1, adding up to 1.
+  Future<Map<String, double>> scores(String text, List<TaskCategory> categories,
+      {List<CategoryExample> examples = const []}) async {
     final offered = categories.take(maxCategories).toList();
-    if (text.trim().isEmpty || offered.isEmpty) return null;
+    if (text.trim().isEmpty || offered.isEmpty) return {};
     final prompt = (await _engine.chatTemplate([
       LlamaChatMessage.fromText(
           role: LlamaChatRole.system, text: instructions(offered, examples: examples)),
       LlamaChatMessage.fromText(role: LlamaChatRole.user, text: text.trim()),
     ], enableThinking: false))
         .prompt;
-    final scores = await _engine.scoreNextToken(prompt,
-        candidates: _letters.sublist(0, offered.length));
-    final probabilities = softmax([for (final c in scores.candidates) c.logprob]);
-    var best = 0;
-    for (var i = 1; i < probabilities.length; i++) {
-      if (probabilities[i] > probabilities[best]) best = i;
+
+    // Each name's probability is that of its tokens one after the other. Names that start alike
+    // share the scoring of their common start, and each step reuses the prompt already read.
+    final names = [
+      for (final c in offered) await _engine.tokenize(c.name.trim(), addSpecial: false),
+    ];
+    final next = <String, Set<int>>{};
+    for (final tokens in names) {
+      for (var i = 0; i < tokens.length; i++) {
+        (next[tokens.take(i).join(',')] ??= {}).add(tokens[i]);
+      }
     }
-    return probabilities[best] >= threshold ? offered[best].id : null;
+    final logprob = <String, Map<int, double>>{};
+    for (final MapEntry(key: prefix, value: candidates) in next.entries) {
+      final said = prefix.isEmpty
+          ? ''
+          : await _engine.detokenize([for (final t in prefix.split(',')) int.parse(t)]);
+      final scored = await _engine.scoreNextToken('$prompt$said', candidates: candidates.toList());
+      logprob[prefix] = {for (final c in scored.candidates) c.token: c.logprob};
+    }
+    final total = [
+      for (final tokens in names)
+        tokens.isEmpty
+            ? double.negativeInfinity
+            : [
+                for (var i = 0; i < tokens.length; i++)
+                  logprob[tokens.take(i).join(',')]![tokens[i]]!
+              ].reduce((a, b) => a + b),
+    ];
+    final probabilities = softmax(total);
+    return {for (final (i, c) in offered.indexed) c.id: probabilities[i]};
   }
 
   Future<void> dispose() => _engine.dispose();
 
-  /// The system prompt: the categories by letter, with what goes in each, and examples.
+  /// The system prompt: the categories, with what goes in each, and examples.
   @visibleForTesting
   static String instructions(List<TaskCategory> categories,
       {List<CategoryExample> examples = const []}) {
-    String letter(int i) => String.fromCharCode(65 + i);
-    final letterOf = {for (final (i, c) in categories.indexed) c.id: letter(i)};
+    final nameOf = {for (final c in categories) c.id: c.name.trim()};
     final shown = [
       for (final e in examples)
-        if (letterOf[e.category] case final l?) (e.text, l)
+        if (nameOf[e.category] case final name?) (e.text, name)
     ].take(maxExamples);
     return [
-      'You file the tasks of a personal to-do list under categories. The user sends one task. '
-          'Reply with the letter of the one category it belongs to, and nothing else.',
+      'You sort the tasks of a personal to-do list into categories. The user sends one task. '
+          'Reply with the name of the one category it belongs to, exactly as written below, '
+          'and nothing else.',
       '',
       'Categories:',
-      for (final (i, c) in categories.indexed)
+      for (final c in categories)
         [
-          '${letter(i)}) ${c.name}',
-          if (c.keywords.isNotEmpty) ': ${c.keywords}',
+          '- ${c.name.trim()}',
+          if (c.keywords.isNotEmpty) ' (for example: ${c.keywords.trim().split(RegExp(r'\s+')).join(', ')})',
           if (c.rulePhrases.isNotEmpty) '. Always for tasks that mention: ${c.rulePhrases.join(', ')}',
         ].join(),
       if (shown.isNotEmpty) ...[
         '',
-        'Tasks the user filed before:',
-        for (final (text, l) in shown) '$text => $l',
+        'Tasks the user sorted before:',
+        for (final (text, name) in shown) '$text => $name',
       ],
     ].join('\n');
   }

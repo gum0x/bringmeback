@@ -12,7 +12,7 @@ Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 20));
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('the prompt letters each category, with its keywords, rules and examples', () {
+  test('the prompt lists each category, with its keywords, rules and examples', () {
     final text = LfmCategoriser.instructions(const [
       TaskCategory(id: 'w', name: 'Work planning', keywords: 'email plan'),
       TaskCategory(id: 'p', name: 'Personal projects', rules: 'bringmeback, BMB'),
@@ -20,9 +20,9 @@ void main() {
       (text: 'backlog grooming', category: 'w'),
       (text: 'gone', category: 'deleted'),
     ]);
-    expect(text, contains('A) Work planning: email plan'));
-    expect(text, contains('B) Personal projects. Always for tasks that mention: bringmeback, bmb'));
-    expect(text, contains('backlog grooming => A'));
+    expect(text, contains('- Work planning (for example: email, plan)'));
+    expect(text, contains('- Personal projects. Always for tasks that mention: bringmeback, bmb'));
+    expect(text, contains('backlog grooming => Work planning'));
     expect(text, isNot(contains('gone')));
   });
 

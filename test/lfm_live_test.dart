@@ -40,10 +40,13 @@ void main() {
     var right = 0;
     final watch = Stopwatch()..start();
     for (final MapEntry(key: task, value: expected) in tasks.entries) {
+      final scores = await lfm.scores(task, categories);
+      final ranked = scores.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
       final got = await lfm.categorise(task, categories);
       if (got == expected) right++;
       // ignore: avoid_print
-      print('${got == expected ? 'ok  ' : 'MISS'} $task => $got (expected $expected)');
+      print('${got == expected ? 'ok  ' : 'MISS'} $task => $got (expected $expected; '
+          '${ranked.take(3).map((e) => '${e.key} ${(e.value * 100).round()}%').join(', ')})');
     }
     // ignore: avoid_print
     print('$right of ${tasks.length} right, '
