@@ -167,15 +167,45 @@ class LfmCategoriser {
       for (final MapEntry(key: id, value: task) in starterExamples.entries)
         if (nameOf[id] case final name?) (task, name)
     ];
-    return [
-      LlamaChatMessage.fromText(role: LlamaChatRole.system, text: instructions(categories)),
-      for (final (task, name) in [...starters, ...user]) ...[
-        LlamaChatMessage.fromText(role: LlamaChatRole.user, text: task),
-        LlamaChatMessage.fromText(role: LlamaChatRole.assistant, text: name),
-      ],
-      LlamaChatMessage.fromText(role: LlamaChatRole.user, text: text.trim()),
-    ];
+    final sorted = [...starters, ...user];
+    final options = 'Which category is it? One of: ${nameOf.values.join(', ')}.';
+    LlamaChatMessage say(LlamaChatRole role, String text) =>
+        LlamaChatMessage.fromText(role: role, text: text);
+    switch (style) {
+      case PromptStyle.turns:
+      case PromptStyle.inline:
+      case PromptStyle.inlineAll:
+        String ask(String task, {required bool last}) => switch (style) {
+              PromptStyle.turns => task,
+              PromptStyle.inline when !last => 'Task: $task',
+              _ => 'Task: $task\n$options',
+            };
+        return [
+          say(LlamaChatRole.system, instructions(categories)),
+          for (final (task, name) in sorted) ...[
+            say(LlamaChatRole.user, ask(task, last: false)),
+            say(LlamaChatRole.assistant, name),
+          ],
+          say(LlamaChatRole.user, ask(text.trim(), last: true)),
+        ];
+      case PromptStyle.single:
+        return [
+          say(LlamaChatRole.user, [
+            instructions(categories),
+            '',
+            'Examples:',
+            for (final (task, name) in sorted) 'Task: $task\nCategory: $name',
+            '',
+            'Task: ${text.trim()}',
+            options,
+          ].join('\n')),
+        ];
+    }
   }
+
+  /// How [chat] puts the question, to compare them on the real model.
+  @visibleForTesting
+  static PromptStyle style = PromptStyle.turns;
 
   /// One task for each default category, so the model sees how sorting goes.
   @visibleForTesting
@@ -234,4 +264,20 @@ class LfmCategoriser {
       debugPrint('No LFM download to delete: $e');
     }
   }
+}
+
+/// Ways [LfmCategoriser.chat] can put the question.
+@visibleForTesting
+enum PromptStyle {
+  /// Sorted tasks as earlier turns, each just the task.
+  turns,
+
+  /// Like [turns], with the options listed again after the task to sort.
+  inline,
+
+  /// Like [turns], with the options after every task.
+  inlineAll,
+
+  /// Everything in one message, with the sorted tasks as a list.
+  single,
 }
