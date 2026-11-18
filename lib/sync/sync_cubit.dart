@@ -9,6 +9,7 @@ import 'package:symbolon_flutter/symbolon_flutter.dart';
 
 import '../version/build_info.dart';
 import 'doc_sync.dart';
+import 'network_watch.dart';
 import 'pairing.dart';
 import 'peer.dart';
 import 'signalling.dart';
@@ -198,24 +199,43 @@ class SyncCubit extends Cubit<SyncState> {
   final _heardAt = <String, DateTime>{};
 
   /// How many automatic rounds an online device that isn't connected may stay silent before it no
-  /// longer counts as online. Longer than the longest gap between announces ([_maxAnnounceGap]).
+  /// longer counts as online (6 minutes). A device that is still there is heard sooner: it announces
+  /// every [_safetyAnnounceSeen] rounds while it isn't connected.
   static const _forgetAfter = 12;
 
-  /// Periodic announces back off while nothing changes: after 1 round, then 2, 4, 8, and at most
-  /// [_maxAnnounceGap] rounds (5 minutes with 30 s rounds). Public relays rate-limit busy senders
-  /// (2026-11-18: relay.damus.io answered "rate-limited: you are noting too much"), and a relay
-  /// that throttles stops passing announces on. Answers to another device's announce and the
-  /// announce on each relay connect are never delayed, so a device that opens is found at once.
-  static const _maxAnnounceGap = 10;
-  int _announceGap = 1;
-  int _roundsToAnnounce = 1;
+  /// When this device announces itself. Public relays rate-limit busy senders (2026-11-18:
+  /// relay.damus.io answered "rate-limited: you are noting too much" and stopped passing messages
+  /// on), so it announces on events rather than every round:
+  /// - on each relay (re)connect ([Signalling] does that): the app opens, comes back after a while
+  ///   hidden, wakes from sleep ([_autoSyncTick]), its network comes back ([networkChanged]), or a
+  ///   relay socket is found dead;
+  /// - when the app comes to the front and a device is missing, and on Sync now; on the next round
+  ///   after a link drops;
+  /// - in answer to another device's announce, once per round.
+  /// After each event, once more on the next round, in case a relay dropped that one. Then, only
+  /// while a device is missing, a safety announce: every [_safetyAnnounce] rounds (10 minutes) with
+  /// no other device online, every [_safetyAnnounceSeen] rounds (5 minutes) while one is online but
+  /// not connected, so it keeps hearing this device within [_forgetAfter] rounds.
+  static const _safetyAnnounce = 20;
+  static const _safetyAnnounceSeen = 10;
+  int _roundsSinceAnnounce = 0;
+  bool _announceAgain = false;
 
-  /// Announces on the next round again, and backs off from there: the app came to the front,
-  /// Sync now was pressed, or a link came up or went down.
-  void _announceSoon() {
-    _announceGap = 1;
-    _roundsToAnnounce = 1;
+  /// Whether a device is missing: none is online, or one is online but not connected.
+  bool get _missing => state.online.isEmpty || !state.connected.containsAll(state.online);
+
+  /// Announces this device now, and once more on the next round.
+  void _announce() {
+    _signalling?.send(SignalKind.announce);
+    _roundsSinceAnnounce = 0;
+    _announceAgain = true;
   }
+
+  /// When the last round ran, to notice the computer slept in between.
+  DateTime? _lastTick;
+
+  /// Stops watching for network changes.
+  void Function()? _unwatchNetwork;
 
   /// Links by device id, and the devices whose link is being set up.
   final _links = <String, PeerLink>{};
@@ -288,12 +308,10 @@ class SyncCubit extends Cubit<SyncState> {
     if (DateTime.now().difference(hiddenAt) < _staleAfter) {
       // The links are trusted to be up: just compare again, in case a change got lost meanwhile.
       _sync?.resync();
-      _announceSoon();
+      if (_missing) _announce();
       return;
     }
-    if (state.device == null) return;
-    _emit(state.copyWith(online: const {}));
-    await _restartSignalling();
+    await _startOver();
   }
 
   static PeerTransportFactory _webRtc(SyncConfig config) =>
@@ -363,7 +381,10 @@ class SyncCubit extends Cubit<SyncState> {
 
   Future<void> _restartSignalling() async {
     await _stopSignalling();
-    _announceSoon();
+    // Each relay connect announces; this is the one more on the next round.
+    _announceAgain = true;
+    _roundsSinceAnnounce = 0;
+    _lastTick = DateTime.now();
     if (!state.paired || !state.live) return;
     final signalling = Signalling(
         group: state.keys!.inner,
@@ -394,16 +415,26 @@ class SyncCubit extends Cubit<SyncState> {
   /// Keeps devices that are both online in sync without anyone pressing anything:
   /// - connected devices compare their changes again, so a change lost on the way (or one made while
   ///   a message was in flight) is sent again;
-  /// - this device announces itself again while it sees no other device, or sees one it isn't
-  ///   connected to, and answers the others' announces again, so two devices that missed each
-  ///   other's announce still find each other.
-  ///   Answers are limited to one per device per tick, so two devices that can't connect don't
-  ///   flood the relays.
+  /// - while a device is missing, this device announces itself once more after each event, and
+  ///   then every [_safetyAnnounce] rounds (see [_announce]). Answers to the others' announces are
+  ///   limited to one per device per round, so two devices that can't connect don't flood the
+  ///   relays.
+  /// - a round that comes far too late means the computer slept: it reconnects at once;
   /// - relays that stopped answering are connected again ([Signalling.checkRelays]);
   /// - a device not connected and not heard from for [_forgetAfter] ticks no longer counts as online:
   ///   a phone that went to the background never says bye, and its old session would otherwise keep
   ///   this device from announcing itself again.
   void _autoSyncTick() {
+    final now = DateTime.now();
+    final last = _lastTick;
+    _lastTick = now;
+    // A round that comes much later than due means the computer slept (or the browser froze the
+    // page) in between: its relay sockets are likely dead without a close, so start over at once
+    // rather than wait for the relay check to find out. A hidden app is handled by [resumed].
+    if (last != null && _hiddenAt == null && now.difference(last) > _autoSyncEvery * 3) {
+      unawaited(_startOver());
+      return;
+    }
     _sync?.resync();
     _signalling?.checkRelays();
     _answered.clear();
@@ -421,18 +452,37 @@ class SyncCubit extends Cubit<SyncState> {
           online: state.online.difference(gone),
           problems: {...state.problems}..removeWhere((id, _) => gone.contains(id))));
     }
-    // Announce while any device is missing (none is online, or one is online but not connected),
-    // less and less often while that stays so.
-    if (state.online.isEmpty || !state.connected.containsAll(state.online)) {
-      if (--_roundsToAnnounce <= 0) {
-        _signalling?.send(SignalKind.announce);
-        _announceGap =
-            _announceGap * 2 > _maxAnnounceGap ? _maxAnnounceGap : _announceGap * 2;
-        _roundsToAnnounce = _announceGap;
+    if (_missing) {
+      _roundsSinceAnnounce++;
+      final every = state.online.isEmpty ? _safetyAnnounce : _safetyAnnounceSeen;
+      if (_announceAgain || _roundsSinceAnnounce >= every) {
+        _announce();
+        _announceAgain = false;
       }
     } else {
-      _announceSoon();
+      _announceAgain = false;
+      _roundsSinceAnnounce = 0;
     }
+  }
+
+  /// Reconnects to the relays and announces again, after sleep, a long break or a network change.
+  Future<void> _startOver() async {
+    if (isClosed || state.device == null) return;
+    _emit(state.copyWith(online: const {}));
+    await _restartSignalling();
+  }
+
+  /// The device's network came back, possibly a different one: relay sockets and direct links
+  /// on the old one are dead, so reconnect and announce at once.
+  Future<void> networkChanged() async {
+    if (!state.paired || !state.live || _hiddenAt != null) return;
+    await _startOver();
+  }
+
+  /// Watches the device's network, and reconnects when it comes back ([networkChanged]).
+  void watchNetworkChanges() {
+    _unwatchNetwork?.call();
+    _unwatchNetwork = watchNetwork(() => unawaited(networkChanged()));
   }
 
   /// Drops what this device knows of the online device [id], which isn't connected.
@@ -454,7 +504,6 @@ class SyncCubit extends Cubit<SyncState> {
   /// Pressing it again while a sync is under way is harmless: changes are only applied once.
   Future<SyncNowResult> syncNow() async {
     if (isClosed || !state.paired || !state.live) return SyncNowResult.off;
-    _announceSoon();
     if (state.online.isEmpty && state.connected.isEmpty) {
       await _restartSignalling();
       return SyncNowResult.looking;
@@ -469,7 +518,7 @@ class SyncCubit extends Cubit<SyncState> {
     // Every device that hears this announce and is the one to make offers offers again at once,
     // and this device answers theirs again.
     _answered.clear();
-    _signalling?.send(SignalKind.announce);
+    _announce();
     for (final id in waiting) {
       if (_announces[id] case final announce? when _initiates(announce.device)) {
         unawaited(_link(announce, initiator: true));
@@ -574,7 +623,9 @@ class SyncCubit extends Cubit<SyncState> {
     link.closed.then((_) {
       if (_links[id] != link) return;
       _links.remove(id);
-      _announceSoon();
+      // The initiator retries; announce once on the next round too, in case the other device lost
+      // track of this one (a network change, a relay that dropped it).
+      _announceAgain = true;
       final failure = link.failure;
       final build = link.remoteBuild;
       _emit(state.copyWith(
@@ -633,6 +684,7 @@ class SyncCubit extends Cubit<SyncState> {
 
   @override
   Future<void> close() async {
+    _unwatchNetwork?.call();
     await _stopSignalling();
     await _sync?.close();
     return super.close();

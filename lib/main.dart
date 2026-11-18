@@ -78,6 +78,7 @@ class _AppLifecycleState extends State<_AppLifecycle> {
     super.initState();
     final sync = context.read<SyncCubit>();
     final updates = context.read<UpdateCubit>();
+    sync.watchNetworkChanges();
     _listener = AppLifecycleListener(
       onHide: sync.paused,
       onShow: () {
