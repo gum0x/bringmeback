@@ -151,6 +151,9 @@ class SyncPage extends StatelessWidget {
                   : relay.delivers
                       ? 'Connected, passes on messages'
                       : 'Connected, but hasn\'t passed on this device\'s messages yet',
+              if (relay.connected)
+                'Your messages came back ${_ago(relay.lastEcho)} · '
+                    'from your other devices: ${_ago(relay.lastFromGroup)}',
               if (relay.problem case final problem?) 'Relay says: $problem',
             ].join('\n')),
           ),
@@ -176,6 +179,15 @@ class SyncPage extends StatelessWidget {
     if (mine.isOlderThan(other)) return 'Newer than this device. Reload or update this one.';
     if (other.isOlderThan(mine)) return 'Older than this device. Reload or update it.';
     return 'A different build from this device.';
+  }
+
+  /// "12 s ago", "3 min ago", or "never".
+  static String _ago(DateTime? at) {
+    if (at == null) return 'never';
+    final d = DateTime.now().difference(at);
+    if (d.inSeconds < 60) return '${d.inSeconds} s ago';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    return '${d.inHours} h ago';
   }
 
   static String _shortId(String id) => id.length > 6 ? id.substring(0, 6) : id;

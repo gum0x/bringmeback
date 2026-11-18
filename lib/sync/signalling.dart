@@ -18,7 +18,18 @@ class RelayStatus {
   /// The last reason the relay gave for refusing a message or a subscription, if any.
   final String? problem;
 
-  const RelayStatus(this.url, {this.connected = false, this.delivers = false, this.problem});
+  /// When the relay last passed on one of this device's own messages, in this connection.
+  final DateTime? lastEcho;
+
+  /// When the relay last passed on a message from another device of the group, in this run.
+  final DateTime? lastFromGroup;
+
+  const RelayStatus(this.url,
+      {this.connected = false,
+      this.delivers = false,
+      this.problem,
+      this.lastEcho,
+      this.lastFromGroup});
 }
 
 /// Finds this group's other devices through Nostr relays, so they can set up a direct connection.
@@ -79,7 +90,12 @@ class Signalling {
   /// Each relay's state, in the order they were given.
   List<RelayStatus> get relayStatus => [
         for (final r in _relays)
-          RelayStatus(r.url, connected: r._open, delivers: r._delivers, problem: r._problem)
+          RelayStatus(r.url,
+              connected: r._open,
+              delivers: r._delivers,
+              problem: r._problem,
+              lastEcho: r._lastEcho,
+              lastFromGroup: r._lastFromGroup)
       ];
 
   /// [relaysConnected], each time it changes.
@@ -192,15 +208,15 @@ class Signalling {
     if (eventId is! String || content is! String) return;
     if (_mine.contains(eventId)) {
       // The relay passed on this device's own message: it carries the group's messages.
-      if (!relay._delivers) {
-        relay._delivers = true;
-        relay._problem = null;
-        _relayChanged();
-      }
+      relay._lastEcho = DateTime.now();
+      if (!relay._delivers) relay._problem = null;
+      relay._delivers = true;
+      _relayChanged();
       return;
     }
-    // The same event arrives once from every relay.
-    if (!_seen.add(eventId)) return;
+    // The same event arrives once from every relay: it is passed on once, but each relay that
+    // carried it is noted, for the Devices page.
+    final fresh = _seen.add(eventId);
     if (_seen.length > _seenLimit) _seen.remove(_seen.first);
     final SymbolonSignal signal;
     try {
@@ -209,6 +225,9 @@ class Signalling {
       return;
     }
     if (_same(signal.from, session)) return;
+    relay._lastFromGroup = DateTime.now();
+    _relayChanged();
+    if (!fresh) return;
     if (!_same(signal.to, session) && signal.to.any((b) => b != 0)) return;
     if (!_incoming.isClosed) _incoming.add(signal);
   }
@@ -270,6 +289,8 @@ class _Relay {
   bool _open = false;
   String? _subscriptionId;
   bool _delivers = false;
+  DateTime? _lastEcho;
+  DateTime? _lastFromGroup;
   String? _problem;
 
   /// True from a liveness probe until the relay sends anything.
@@ -331,6 +352,7 @@ class _Relay {
     if (!_open && _retry?.isActive == true) return;
     _open = false;
     _delivers = false;
+    _lastEcho = null;
     _subscriptionId = null;
     owner._relayChanged();
     _listening?.cancel();

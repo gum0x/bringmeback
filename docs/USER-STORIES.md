@@ -43,7 +43,7 @@ phone said "No other device online" while the desktop was open.)
 | Case | Expected | Status |
 | --- | --- | --- |
 | D2.1 A relay socket dies without closing (sleep, network change) | Found within about a minute; the relay is reconnected and the device announces again | covered: `signalling_test › a relay that went silent without closing is connected again, and announces again`, `sync_cubit_test › a device whose relay socket died silently is found again…` |
-| D2.2 The phone goes to the background without a bye | It stops counting as online after three rounds (about 90 s); until then the desktop keeps announcing | covered: `sync_cubit_test › a device that left without a bye stops counting as online after a few rounds` |
+| D2.2 The phone goes to the background without a bye | It stops counting as online after three rounds (about 90 s), and its "isn't syncing" warning goes with it; until then the desktop keeps announcing | covered: `sync_cubit_test › a device that left without a bye stops counting as online after a few rounds` |
 | D2.3 The phone comes back after 20 s or more hidden | It reconnects to the relays at once | covered: `sync_problems_test › coming back after a long break reconnects at once` |
 | D2.4 Back after less than 20 s | Only compares changes again, keeps its links | covered: same test |
 
@@ -53,7 +53,7 @@ phone said "No other device online" while the desktop was open.)
 | --- | --- | --- |
 | D3.1 One relay drops the connection | Reconnected with backoff (1 s, doubling, up to 1 min) and announces again | covered: `signalling_test › reconnects after the relay drops and announces again` |
 | D3.2 No relay reachable | "Can't reach the relays" after 10 s | covered: `sync_problems_test › no relay reachable is reported after the grace period` |
-| D3.3 A relay accepts the connection but refuses or drops our messages | The Devices page lists each relay: not connected, passes messages on, or not passing them on, plus the reason the relay gave | covered: `signalling_test › shows which relays pass messages on, and why one refuses them` |
+| D3.3 A relay accepts the connection but refuses or drops our messages | The Devices page lists each relay: not connected, passes messages on, or not passing them on, plus the reason the relay gave, when this device's own messages last came back and when a message from another device last arrived through it | covered: `signalling_test › shows which relays pass messages on, and why one refuses them`, `signalling_test › notes when each relay last carried a message from another device` |
 | D3.4 A relay sends junk, duplicates or replays | Dropped without a reply | covered: `signalling_test › ignores other groups, junk, duplicates and old messages` |
 
 **D5. My devices' clocks don't agree.**

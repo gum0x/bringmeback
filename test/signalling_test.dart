@@ -198,4 +198,28 @@ void main() {
     await a.stop();
     await late.stop();
   });
+
+  test('notes when each relay last carried a message from another device', () async {
+    final good = FakeRelay();
+    final deaf = FakeRelay();
+    Signalling node2() => Signalling(
+        group: group('bringmeback/v1'),
+        device: device(),
+        relays: [Uri.parse('wss://good.test'), Uri.parse('wss://deaf.test')],
+        connect: (url) => url.host == 'good.test' ? good.connect(url) : deaf.connect(url));
+    final a = node2()..start();
+    await pumpEventQueue();
+    // The deaf relay passes nothing on between connections; the good one does.
+    for (final c in deaf.connections) {
+      c.dead = true;
+    }
+    final b = node2()..start();
+    await pumpEventQueue();
+    final [g, d] = a.relayStatus;
+    expect(g.lastEcho, isNotNull);
+    expect(g.lastFromGroup, isNotNull, reason: "B's announce came through the good relay");
+    expect(d.lastFromGroup, isNull);
+    await a.stop();
+    await b.stop();
+  });
 }
