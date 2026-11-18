@@ -40,6 +40,9 @@ The app is laid out in portrait, like a phone, and keeps that shape in a wide de
   done by ~14:45". The finish is rounded up to the quarter hour, so it doesn't tick like another
   clock. A note holds 8 hours by default; when you commit more, the time turns red. Change it in
   **Settings → Time per note**.
+- **The screen stays on while a timer runs**: a task's timer or a focus session, breaks included,
+  so the clock stays in view. It works in the browser, on desktop and on phones, while the app is in
+  front. Turn it off in **Settings › Screen › Keep the screen on**; it uses more battery.
 
 ## A new day
 

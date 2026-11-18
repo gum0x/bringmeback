@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/tasks_bloc.dart';
+import '../settings/keep_screen_on.dart';
 import '../timer.dart';
 import 'pomodoro.dart';
 
@@ -77,6 +78,10 @@ class _FocusPageState extends State<FocusPage> {
   StreamSubscription<TasksState>? _remote;
   late final TasksBloc _tasks;
   late final PomodoroCubit _pomodoro;
+  // Keeps the screen on while the clock runs, breaks included. Pages opened on their own, as in
+  // tests, may have none.
+  KeepScreenOnCubit? _screen;
+  StreamSubscription<PomodoroState>? _awake;
   // What the task's record last said, written here or read from another device.
   String? _lastKey;
   // Records this view wrote, recent ones first. The task list catches up with them a moment later,
@@ -98,6 +103,13 @@ class _FocusPageState extends State<FocusPage> {
     _lastKey = PomodoroRecord.decode(_task(tasks.state)?.pomodoro)?.key;
     _keep(pomodoro.state);
     _saves = pomodoro.stream.listen(_keep);
+    try {
+      _screen = context.read<KeepScreenOnCubit>();
+    } on ProviderNotFoundException {
+      _screen = null;
+    }
+    _screen?.setFocusRunning(pomodoro.state.running);
+    _awake = pomodoro.stream.listen((s) => _screen?.setFocusRunning(s.running));
     _remote = tasks.stream.listen(_onTasks);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || pomodoro.isClosed) return;
@@ -124,6 +136,8 @@ class _FocusPageState extends State<FocusPage> {
   void dispose() {
     _saves?.cancel();
     _remote?.cancel();
+    _awake?.cancel();
+    _screen?.setFocusRunning(false);
     if (!_tasks.isClosed) {
       _tasks.add(SetFocusModeEvent());
       if (_finished) {

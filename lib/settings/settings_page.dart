@@ -8,6 +8,7 @@ import '../sync/peer.dart' show syncProtocol;
 import '../timer.dart';
 import '../version/build_info.dart';
 import '../version/update_cubit.dart';
+import 'keep_screen_on.dart';
 
 /// How the app behaves on this device. Settings are saved here and are not synced.
 class SettingsPage extends StatelessWidget {
@@ -26,6 +27,8 @@ class SettingsPage extends StatelessWidget {
               _Section('Today\'s note'),
               _TaskLimitTile(),
               _NoteMinutesTile(),
+              _Section('Screen'),
+              _KeepScreenOnSwitch(),
               _Section('Experimental'),
               _BacklogSwitch(),
               _Section('Pomodoro'),
@@ -116,6 +119,34 @@ class _StepperTile extends StatelessWidget {
             icon: const Icon(Icons.add),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Whether the screen stays on while a timer runs.
+class _KeepScreenOnSwitch extends StatelessWidget {
+  const _KeepScreenOnSwitch();
+
+  @override
+  Widget build(BuildContext context) {
+    // Pages opened on their own, as in tests, may have no keep-awake above them.
+    final KeepScreenOnCubit screen;
+    try {
+      screen = context.read<KeepScreenOnCubit>();
+    } on ProviderNotFoundException {
+      return const SizedBox.shrink();
+    }
+    return BlocBuilder<KeepScreenOnCubit, KeepScreenOnState>(
+      bloc: screen,
+      buildWhen: (a, b) => a.enabled != b.enabled,
+      builder: (context, state) => SwitchListTile(
+        key: const Key('keepScreenOn'),
+        title: const Text('Keep the screen on'),
+        subtitle: const Text('While a task\'s timer or a focus session runs, the screen doesn\'t '
+            'dim or lock, so the clock stays in view. Uses more battery.'),
+        value: state.enabled,
+        onChanged: screen.setEnabled,
       ),
     );
   }
