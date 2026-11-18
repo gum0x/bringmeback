@@ -29,17 +29,22 @@ With **Find my devices online** on, devices that are both open sync without anyo
 - They find each other through the Nostr relays and connect directly. Every edit is sent at once.
 - Every 30 seconds, connected devices compare their vectors again, so anything that didn't make it
   across is sent again.
-- Every 30 seconds, a device that sees no other device announces itself again, and devices answer
-  each other's announces again. Two devices that missed each other's announce (a relay dropped it, or
-  one came online while the other's relay was reconnecting) still find each other.
+- A device that sees no other device announces itself again, and devices answer each other's
+  announces. Two devices that missed each other's announce (a relay dropped it, or one came online
+  while the other's relay was reconnecting) still find each other. The announces back off while
+  nothing answers: after 30 s, then 1, 2 and 4 minutes, and then every 5 minutes. Public relays
+  rate-limit busy senders ("rate-limited: you are noting too much" from damus, 2026-11-18), and a
+  steady announce every 30 s from an idle app was enough to get there. Announcing goes back to quick
+  when the app comes to the front, Sync now is pressed, a link drops or the relays reconnect.
 - Every 30 seconds, each relay is asked to answer (the subscription is sent again, and a relay replies
   at once). A relay that answered nothing since the last round is connected again, which also
   announces the device on it. A relay socket can die without closing, after the computer sleeps or
   changes network; before this check, such a device still showed its relays as connected but heard
   and reached no one, so other devices saw "No other device online".
-- A device that was seen online but isn't connected keeps announcing every 30 seconds, and stops
-  counting as online when nothing is heard from it for three rounds. A phone sent to the background
-  never says bye, and its old session used to keep the other device from announcing again.
+- A device that was seen online but isn't connected keeps announcing (with the same back-off), and
+  stops counting as online when nothing is heard from it for twelve rounds (about 6 minutes, so it
+  has had a chance to answer a backed-off announce). A phone sent to the background never says bye,
+  and its old session used to keep the other device from announcing again.
 - When the app comes back to the front, connected devices compare again; after 20 seconds or more
   hidden, it reconnects to the relays first.
 - A link that drops is tried again after 5 s, then waiting twice as long each time, up to 5 minutes.

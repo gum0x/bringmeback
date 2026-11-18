@@ -198,8 +198,24 @@ class SyncCubit extends Cubit<SyncState> {
   final _heardAt = <String, DateTime>{};
 
   /// How many automatic rounds an online device that isn't connected may stay silent before it no
-  /// longer counts as online. Devices that aren't connected announce on every round.
-  static const _forgetAfter = 3;
+  /// longer counts as online. Longer than the longest gap between announces ([_maxAnnounceGap]).
+  static const _forgetAfter = 12;
+
+  /// Periodic announces back off while nothing changes: after 1 round, then 2, 4, 8, and at most
+  /// [_maxAnnounceGap] rounds (5 minutes with 30 s rounds). Public relays rate-limit busy senders
+  /// (2026-11-18: relay.damus.io answered "rate-limited: you are noting too much"), and a relay
+  /// that throttles stops passing announces on. Answers to another device's announce and the
+  /// announce on each relay connect are never delayed, so a device that opens is found at once.
+  static const _maxAnnounceGap = 10;
+  int _announceGap = 1;
+  int _roundsToAnnounce = 1;
+
+  /// Announces on the next round again, and backs off from there: the app came to the front,
+  /// Sync now was pressed, or a link came up or went down.
+  void _announceSoon() {
+    _announceGap = 1;
+    _roundsToAnnounce = 1;
+  }
 
   /// Links by device id, and the devices whose link is being set up.
   final _links = <String, PeerLink>{};
@@ -272,6 +288,7 @@ class SyncCubit extends Cubit<SyncState> {
     if (DateTime.now().difference(hiddenAt) < _staleAfter) {
       // The links are trusted to be up: just compare again, in case a change got lost meanwhile.
       _sync?.resync();
+      _announceSoon();
       return;
     }
     if (state.device == null) return;
@@ -346,6 +363,7 @@ class SyncCubit extends Cubit<SyncState> {
 
   Future<void> _restartSignalling() async {
     await _stopSignalling();
+    _announceSoon();
     if (!state.paired || !state.live) return;
     final signalling = Signalling(
         group: state.keys!.inner,
@@ -403,9 +421,17 @@ class SyncCubit extends Cubit<SyncState> {
           online: state.online.difference(gone),
           problems: {...state.problems}..removeWhere((id, _) => gone.contains(id))));
     }
-    // Announce while any device is missing: none is online, or one is online but not connected.
+    // Announce while any device is missing (none is online, or one is online but not connected),
+    // less and less often while that stays so.
     if (state.online.isEmpty || !state.connected.containsAll(state.online)) {
-      _signalling?.send(SignalKind.announce);
+      if (--_roundsToAnnounce <= 0) {
+        _signalling?.send(SignalKind.announce);
+        _announceGap =
+            _announceGap * 2 > _maxAnnounceGap ? _maxAnnounceGap : _announceGap * 2;
+        _roundsToAnnounce = _announceGap;
+      }
+    } else {
+      _announceSoon();
     }
   }
 
@@ -428,6 +454,7 @@ class SyncCubit extends Cubit<SyncState> {
   /// Pressing it again while a sync is under way is harmless: changes are only applied once.
   Future<SyncNowResult> syncNow() async {
     if (isClosed || !state.paired || !state.live) return SyncNowResult.off;
+    _announceSoon();
     if (state.online.isEmpty && state.connected.isEmpty) {
       await _restartSignalling();
       return SyncNowResult.looking;
@@ -547,6 +574,7 @@ class SyncCubit extends Cubit<SyncState> {
     link.closed.then((_) {
       if (_links[id] != link) return;
       _links.remove(id);
+      _announceSoon();
       final failure = link.failure;
       final build = link.remoteBuild;
       _emit(state.copyWith(

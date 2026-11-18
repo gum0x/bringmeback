@@ -43,7 +43,7 @@ phone said "No other device online" while the desktop was open.)
 | Case | Expected | Status |
 | --- | --- | --- |
 | D2.1 A relay socket dies without closing (sleep, network change) | Found within about a minute; the relay is reconnected and the device announces again | covered: `signalling_test › a relay that went silent without closing is connected again, and announces again`, `sync_cubit_test › a device whose relay socket died silently is found again…` |
-| D2.2 The phone goes to the background without a bye | It stops counting as online after three rounds (about 90 s), and its "isn't syncing" warning goes with it; until then the desktop keeps announcing | covered: `sync_cubit_test › a device that left without a bye stops counting as online after a few rounds` |
+| D2.2 The phone goes to the background without a bye | It stops counting as online after twelve rounds (about 6 minutes), and its "isn't syncing" warning goes with it; until then the desktop keeps announcing, backing off | covered: `sync_cubit_test › a device that left without a bye stops counting as online after a few rounds` |
 | D2.3 The phone comes back after 20 s or more hidden | It reconnects to the relays at once | covered: `sync_problems_test › coming back after a long break reconnects at once` |
 | D2.4 Back after less than 20 s | Only compares changes again, keeps its links | covered: same test |
 
@@ -55,6 +55,7 @@ phone said "No other device online" while the desktop was open.)
 | D3.2 No relay reachable | "Can't reach the relays" after 10 s | covered: `sync_problems_test › no relay reachable is reported after the grace period` |
 | D3.3 A relay accepts the connection but refuses or drops our messages | The Devices page lists each relay: not connected, passes messages on, or not passing them on, plus the reason the relay gave, when this device's own messages last came back and when a message from another device last arrived through it | covered: `signalling_test › shows which relays pass messages on, and why one refuses them`, `signalling_test › notes when each relay last carried a message from another device` |
 | D3.5 A relay's spam filter stops passing on a key's events to others after many of them (suspected on 2026-11-18: each device saw its own messages come back but not the other's) | Events are signed with a new throwaway key every 30 s round, so no key lasts long | covered: `signalling_test › signs with a new throwaway key on every relay check` (the relay behaviour itself is unconfirmed) |
+| D3.6 A relay rate-limits us (2026-11-18: damus answered "rate-limited: you are noting too much" and stopped passing the desktop's messages on) | While no other device answers, announces back off: 30 s, 1, 2, 4, then every 5 min. Quick again on Sync now, coming to the front, a dropped link or reconnected relays | covered: `sync_cubit_test › announces back off while no device answers, and come quickly again after Sync now` (the relay's actual limits are unknown) |
 | D3.4 A relay sends junk, duplicates or replays | Dropped without a reply | covered: `signalling_test › ignores other groups, junk, duplicates and old messages` |
 
 **D5. My devices' clocks don't agree.**
