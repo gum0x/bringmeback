@@ -53,7 +53,10 @@ class Signalling {
   final Uint8List _device;
   final RelayConnector _connect;
   final int Function() _now;
-  final SymbolonEventSigner _signer = symbolon.eventSigner();
+  /// The throwaway key events are signed with. A new one on every [checkRelays] round, so a relay
+  /// can't link a device's events over time, and a relay's spam filter, which may stop passing on
+  /// a key's events to others after many of them, never sees one key for long.
+  SymbolonEventSigner _signer = symbolon.eventSigner();
   final List<_Relay> _relays = [];
   final _incoming = StreamController<SymbolonSignal>.broadcast();
   final _relaysUp = StreamController<int>.broadcast();
@@ -154,6 +157,7 @@ class Signalling {
   /// nothing at all since the previous check is taken as dead and connected again, which also
   /// announces this device on it.
   void checkRelays() {
+    _signer = symbolon.eventSigner();
     for (final relay in _relays) {
       relay.check();
     }

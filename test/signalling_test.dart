@@ -222,4 +222,18 @@ void main() {
     await a.stop();
     await b.stop();
   });
+
+  test('signs with a new throwaway key on every relay check', () async {
+    final relay = FakeRelay();
+    final a = node(relay)..start();
+    await pumpEventQueue();
+    String pubkey() => ((jsonDecode(relay.published.last) as List)[1] as Map)['pubkey'] as String;
+    final first = pubkey();
+    a.send(SignalKind.announce);
+    expect(pubkey(), first);
+    a.checkRelays();
+    a.send(SignalKind.announce);
+    expect(pubkey(), isNot(first));
+    await a.stop();
+  });
 }

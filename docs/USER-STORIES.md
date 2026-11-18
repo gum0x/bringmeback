@@ -54,6 +54,7 @@ phone said "No other device online" while the desktop was open.)
 | D3.1 One relay drops the connection | Reconnected with backoff (1 s, doubling, up to 1 min) and announces again | covered: `signalling_test › reconnects after the relay drops and announces again` |
 | D3.2 No relay reachable | "Can't reach the relays" after 10 s | covered: `sync_problems_test › no relay reachable is reported after the grace period` |
 | D3.3 A relay accepts the connection but refuses or drops our messages | The Devices page lists each relay: not connected, passes messages on, or not passing them on, plus the reason the relay gave, when this device's own messages last came back and when a message from another device last arrived through it | covered: `signalling_test › shows which relays pass messages on, and why one refuses them`, `signalling_test › notes when each relay last carried a message from another device` |
+| D3.5 A relay's spam filter stops passing on a key's events to others after many of them (suspected on 2026-11-18: each device saw its own messages come back but not the other's) | Events are signed with a new throwaway key every 30 s round, so no key lasts long | covered: `signalling_test › signs with a new throwaway key on every relay check` (the relay behaviour itself is unconfirmed) |
 | D3.4 A relay sends junk, duplicates or replays | Dropped without a reply | covered: `signalling_test › ignores other groups, junk, duplicates and old messages` |
 
 **D5. My devices' clocks don't agree.**
