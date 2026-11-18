@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:bringmeback/sync/signalling.dart';
 import 'package:bringmeback/sync/sync_cubit.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,6 +8,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'fake_relay.dart';
 import 'fake_transport.dart';
 import 'symbolon_native.dart';
+
+
+/// Connects through [relay] until [vanish], after which this device's connections are dead and it
+/// can't reconnect: a phone frozen in the background, without a bye.
+class _Vanishing {
+  final FakeRelay relay;
+  final mine = <FakeConnection>[];
+  bool gone = false;
+  _Vanishing(this.relay);
+
+  RelayConnection connect(Uri url) {
+    if (gone) throw StateError('frozen');
+    final c = relay.connect(url) as FakeConnection;
+    mine.add(c);
+    return c;
+  }
+
+  void vanish() {
+    gone = true;
+    for (final c in mine) {
+      c.dead = true;
+    }
+  }
+}
 
 void main() {
   setUpAll(loadSymbolonForTests);
@@ -135,8 +162,9 @@ void main() {
     await a.setLive(true);
     SharedPreferences.setMockInitialValues({});
     // B can't connect directly (no transport), so it is online but never connected.
+    final bRelay = _Vanishing(relay);
     final b = SyncCubit(
-        connect: relay.connect,
+        connect: bRelay.connect,
         transport: () => Future.error(StateError('no WebRTC')),
         autoSyncEvery: tick);
     await b.load();
@@ -146,16 +174,138 @@ void main() {
     expect(a.state.online, {b.state.device!.id});
 
     // While B is there, it keeps announcing, so A keeps it online.
-    await Future<void>.delayed(tick * 6);
+    await Future<void>.delayed(tick * 14);
     expect(a.state.online, {b.state.device!.id});
 
     // B vanishes without a bye.
-    for (final c in relay.connections) {
-      if (c != relay.connections.first) c.dead = true;
-    }
-    await Future<void>.delayed(tick * 6);
+    bRelay.vanish();
+    await Future<void>.delayed(tick * 16);
     await pumpEventQueue();
     expect(a.state.online, isEmpty);
+    expect(a.state.problems, isEmpty, reason: 'No warning left for a device that is gone');
+    await a.close();
+    await b.close();
+  });
+
+  test('a device that lost its link and then left stops showing as not syncing', () async {
+    // 2026-11-18: the phone said "Device … isn't syncing" next to "No other device online".
+    const tick = Duration(milliseconds: 100);
+    final relay = FakeRelay();
+    final net = FakeNetwork();
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    SharedPreferences.setMockInitialValues({});
+    final bRelay = _Vanishing(relay);
+    final b = SyncCubit(connect: bRelay.connect, transport: net.create, autoSyncEvery: tick);
+    await b.load();
+    await b.joinGroup(a.state.code!);
+    await b.setLive(true);
+    await pumpEventQueue();
+    final bId = b.state.device!.id;
+    expect(a.state.connected, {bId});
+
+    // B is frozen: its link drops and it falls silent on the relay, without a bye.
+    bRelay.vanish();
+    for (final t in net.transports) {
+      await t.close();
+    }
+    await pumpEventQueue();
+    expect(a.state.problems.keys, contains(bId));
+
+    await Future<void>.delayed(tick * 16);
+    await pumpEventQueue();
+    expect(a.state.online, isEmpty);
+    expect(a.state.problems, isEmpty);
+    await a.close();
+    await b.close();
+  });
+
+  test('announces on events, not every round, and again at once after Sync now', () async {
+    // 2026-11-18: relay.damus.io answered "rate-limited: you are noting too much" to a desktop that
+    // announced itself every 30 s while alone.
+    const tick = Duration(milliseconds: 50);
+    final relay = FakeRelay();
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: relay.connect, transport: FakeNetwork().create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    await pumpEventQueue();
+    final atStart = relay.published.length;
+
+    // Alone for 40 rounds: once more on the first round, then one safety announce after 20.
+    await Future<void>.delayed(tick * 40 + tick ~/ 2);
+    // Each announce goes to the 3 default relays, all played by the fake relay here.
+    final announced = (relay.published.length - atStart) ~/ 3;
+    expect(announced, inInclusiveRange(2, 3));
+
+    // Sync now looks again at once: it reconnects, which announces, and once more next round.
+    final before = relay.published.length;
+    expect(await a.syncNow(), SyncNowResult.looking);
+    await pumpEventQueue();
+    final restarted = relay.published.length;
+    expect(restarted - before, 6, reason: 'A bye from the old session, an announce from the new');
+    await Future<void>.delayed(tick * 2 + tick ~/ 2);
+    expect(relay.published.length - restarted, 3, reason: 'And once more on the next round');
+    await a.close();
+  });
+
+  test('a computer that wakes from sleep reconnects and announces at once', () async {
+    // While the computer sleeps, timers don't run and relay sockets die without a close. The first
+    // round after waking comes far later than due.
+    const tick = Duration(milliseconds: 50);
+    final relay = FakeRelay();
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: relay.connect, transport: FakeNetwork().create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    await Future<void>.delayed(tick * 3);
+    final connections = relay.connections.length;
+    for (final c in relay.connections) {
+      c.dead = true;
+    }
+    final before = relay.published.length;
+
+    sleep(tick * 5);
+    await Future<void>.delayed(tick + tick ~/ 2);
+    await pumpEventQueue();
+    expect(relay.connections.length, connections + 3, reason: 'New sockets to each relay');
+    expect(relay.published.length - before, greaterThanOrEqualTo(3), reason: 'Announced on them');
+    await a.close();
+  });
+
+  test('a device whose network comes back reconnects and finds the other at once', () async {
+    const tick = Duration(seconds: 30);
+    final relay = FakeRelay();
+    final net = FakeNetwork();
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    SharedPreferences.setMockInitialValues({});
+    final b = SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await b.load();
+    await b.joinGroup(a.state.code!);
+    await b.setLive(true);
+    await pumpEventQueue();
+    final bId = b.state.device!.id;
+    expect(a.state.connected, {bId});
+
+    // A's network goes away: its sockets and its link die without a close or a bye.
+    // A connected first: its sockets are the first three.
+    for (final c in relay.connections.take(3)) {
+      c.dead = true;
+    }
+    // Then it comes back, long before any round would notice.
+    await a.networkChanged();
+    await pumpEventQueue();
+    expect(a.state.online, {bId});
+    expect(a.state.connected, {bId});
     await a.close();
     await b.close();
   });
