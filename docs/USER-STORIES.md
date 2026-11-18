@@ -118,6 +118,24 @@ Not covered yet:
 - No warning on the device that is out of sync before it shows "A new day". A gap: needs the
   stored version signal (see the Signal CRDT version over Nostr design).
 
+## W · The web app in several tabs
+
+**W1. I open bringmeback in a second tab of the same browser.** (Found 2026-11-17.) Tabs share
+localStorage, so they are one device with one identity, but each would hold its own copy of the
+tasks. Before the fix: an edit made in one tab could be taken by the other devices as already
+received, and never reach them; tabs overwrote each other's saved copy; and each tab saw the other
+as an online device it could never connect to.
+
+| Case | Expected | Status |
+| --- | --- | --- |
+| W1.1 A second tab opens | It shows "bringmeback is open in another tab" with **Use here**, and runs nothing | covered by hand: two tabs in Chromium (screenshots in the PR) |
+| W1.2 **Use here** in the second tab | The app moves there; the first tab reloads into the same message, so it never writes again | covered by hand: same check |
+| W1.3 A browser without Web Locks, or a page not on https or localhost | The app runs in every tab, as before (the old problems remain there) | known limit |
+
+Not covered yet:
+- No automated test: Web Locks don't exist under `flutter test`. A gap: an integration test in
+  `integration_test/` with two browser tabs would cover W1.1 and W1.2.
+
 ## S · Security and privacy
 
 | Case | Expected | Status |
