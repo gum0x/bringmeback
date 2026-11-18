@@ -114,6 +114,32 @@ Not covered yet:
 - No warning on the device that is out of sync before it shows "A new day". A gap: needs the
   stored version signal (see the Signal CRDT version over Nostr design).
 
+## K · Keeping the screen on
+
+**K1. I start a task's timer and put the device down; the screen stays on so I can see the clock.**
+On by default; **Settings › Screen › Keep the screen on** turns it off. The setting is per device,
+not synced. Web uses the browser's wake lock, iOS the idle timer, Android the window flag, desktop the
+system's sleep inhibitor (through `wakelock_plus`).
+
+| Case | Expected | Status |
+| --- | --- | --- |
+| K1.1 A task timer runs, then pauses | Screen held on while it runs, let go when it pauses or the app closes | covered: `keep_screen_on_test › K1.1 …` |
+| K1.2 Turned off in Settings, with a timer running | Let go at once; stays off after a restart; back on when turned on again | covered: `keep_screen_on_test › K1.2 …` |
+| K1.3 A Pomodoro break (no task timer runs) | Still held on while the break clock counts down; let go when paused or the focus view is left | covered: `keep_screen_on_test › K1.3 …` |
+| K1.4 Devices apart: the timer is started on the desktop | The phone, with the app open, keeps its screen on too once the change arrives, and lets go when the desktop pauses it | covered: `keep_screen_on_test › K1.4 …` (known limit: by design, both screens stay on) |
+| K1.5 A platform or browser without a wake lock | The app works as before; the screen sleeps as usual | covered: `keep_screen_on_test › K1.5 …` |
+| K1.6 The app goes to the background and comes back | The system drops the hold in the background; it is asked again on coming back | covered in part: `keep_screen_on_test › K1.5 …` checks that `reapply` asks again; the call from the app's lifecycle listener in `main.dart` has no test |
+
+Not covered yet:
+- Not checked on a real iPhone, Android phone, Safari or Firefox: the tests use a fake for the
+  platform call. A gap until tried by hand.
+- Devices apart, the timer paused on the desktop: the phone keeps its screen on until the change
+  arrives (or forever, if they never sync again while the app is open). A known limit.
+- A device on an older version doesn't keep its screen on: nothing to sync, it just lacks the
+  feature. A known limit.
+- A browser that loses the wake lock while the tab stays visible (low battery mode) isn't asked
+  again until the tab is hidden and shown. A known limit.
+
 ## S · Security and privacy
 
 | Case | Expected | Status |

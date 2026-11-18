@@ -7,6 +7,7 @@ import 'focus/pomodoro.dart';
 import 'history/history_page.dart';
 import 'note/note_view.dart';
 import 'note/task_line.dart';
+import 'settings/keep_screen_on.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
 import 'sync/sync_status.dart';
@@ -38,6 +39,11 @@ class App extends StatelessWidget {
                   SyncCubit(document: context.read<TasksBloc>().document)
                     ..load()),
           BlocProvider(lazy: false, create: (_) => UpdateCubit()..load()),
+          // Not lazy: it watches the task timers from the start.
+          BlocProvider(
+              lazy: false,
+              create: (context) =>
+                  KeepScreenOnCubit(tasks: context.read<TasksBloc>())..load()),
         ],
         child: _AppLifecycle(
             child: MaterialApp(
@@ -78,11 +84,13 @@ class _AppLifecycleState extends State<_AppLifecycle> {
     super.initState();
     final sync = context.read<SyncCubit>();
     final updates = context.read<UpdateCubit>();
+    final screen = context.read<KeepScreenOnCubit>();
     _listener = AppLifecycleListener(
       onHide: sync.paused,
       onShow: () {
         sync.resumed();
         updates.check();
+        screen.reapply();
       },
     );
   }
