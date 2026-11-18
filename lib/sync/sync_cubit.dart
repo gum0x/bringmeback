@@ -398,7 +398,10 @@ class SyncCubit extends Cubit<SyncState> {
       for (final id in gone) {
         _forget(id);
       }
-      _emit(state.copyWith(online: state.online.difference(gone)));
+      // Its link problem goes too: "isn't syncing" next to "No other device online" only confuses.
+      _emit(state.copyWith(
+          online: state.online.difference(gone),
+          problems: {...state.problems}..removeWhere((id, _) => gone.contains(id))));
     }
     // Announce while any device is missing: none is online, or one is online but not connected.
     if (state.online.isEmpty || !state.connected.containsAll(state.online)) {

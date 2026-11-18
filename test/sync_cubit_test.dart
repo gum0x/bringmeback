@@ -156,6 +156,44 @@ void main() {
     await Future<void>.delayed(tick * 6);
     await pumpEventQueue();
     expect(a.state.online, isEmpty);
+    expect(a.state.problems, isEmpty, reason: 'No warning left for a device that is gone');
+    await a.close();
+    await b.close();
+  });
+
+  test('a device that lost its link and then left stops showing as not syncing', () async {
+    // 2026-11-18: the phone said "Device … isn't syncing" next to "No other device online".
+    const tick = Duration(milliseconds: 100);
+    final relay = FakeRelay();
+    final net = FakeNetwork();
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    SharedPreferences.setMockInitialValues({});
+    final b = SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await b.load();
+    await b.joinGroup(a.state.code!);
+    await b.setLive(true);
+    await pumpEventQueue();
+    final bId = b.state.device!.id;
+    expect(a.state.connected, {bId});
+
+    // B is frozen: its link drops and it falls silent on the relay, without a bye.
+    for (final c in relay.connections.skip(1)) {
+      c.dead = true;
+    }
+    for (final t in net.transports) {
+      await t.close();
+    }
+    await pumpEventQueue();
+    expect(a.state.problems.keys, contains(bId));
+
+    await Future<void>.delayed(tick * 6);
+    await pumpEventQueue();
+    expect(a.state.online, isEmpty);
+    expect(a.state.problems, isEmpty);
     await a.close();
     await b.close();
   });
