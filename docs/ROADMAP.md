@@ -43,6 +43,10 @@ described in [VIEWS.md](VIEWS.md).
 - Phone home-screen widget or persistent notification showing the current task.
 - Installable web app (PWA) with offline caching.
 - Android store build. (iOS release and TestFlight are in review in #10.)
+- **Distraction counter.** A button to count each time you got distracted during a session, so
+  distractions are visible and weigh in the session's history.
+- **Off-plan metric.** Count how many times a task that was not at the top got marked done, to see how
+  often you left the plan.
 
 ## Not planned
 
