@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:symbolon_flutter/symbolon_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'sync_log.dart';
+
 /// How one relay is doing, for the Devices page.
 class RelayStatus {
   final Uri url;
@@ -101,6 +103,10 @@ class Signalling {
               lastFromGroup: r._lastFromGroup)
       ];
 
+  /// A short label of a relay's state, for the log.
+  @visibleForTesting
+  List<String> get relayStates => [for (final r in _relays) r._state];
+
   /// [relaysConnected], each time it changes.
   Stream<int> get relayChanges => _relaysUp.stream;
 
@@ -113,6 +119,8 @@ class Signalling {
 
   /// Connects to every relay, subscribes to the group's topic and announces this device.
   void start() {
+    syncLog('signalling: start, session ${shortHex(session)}, device ${deviceShort(_device)}, '
+        '${_relays.length} relays: ${_relays.map((r) => r.url.host).join(', ')}');
     for (final relay in _relays) {
       relay.connect();
     }
@@ -121,10 +129,16 @@ class Signalling {
   /// Sends a signal through every connected relay. Leave out `to` for announce and bye.
   void send(SignalKind kind, {Uint8List? to, List<int> body = const []}) {
     final message = _event(kind, to: to, body: body);
-    for (final relay in _relays) {
-      relay.send(message);
-    }
+    final through = [
+      for (final relay in _relays)
+        if (relay.send(message)) relay.url.host
+    ];
+    syncLog('publish ${kind.name}${to == null ? '' : ' to session ${shortHex(to)}'} '
+        'event ${_lastId ?? '?'} via ${through.isEmpty ? 'no relay (none connected)' : through.join(', ')}');
   }
+
+  /// The short id of the latest event made, for the log.
+  String? _lastId;
 
   /// The relay message [send] would publish, for tests that play the relay.
   @visibleForTesting
@@ -138,6 +152,7 @@ class Signalling {
     try {
       final id = (jsonDecode(event) as Map)['id'];
       if (id is String) {
+        _lastId = id.length > 8 ? id.substring(0, 8) : id;
         _mine.add(id);
         if (_mine.length > 64) _mine.remove(_mine.first);
       }
@@ -157,6 +172,7 @@ class Signalling {
   /// nothing at all since the previous check is taken as dead and connected again, which also
   /// announces this device on it.
   void checkRelays() {
+    syncLog('relay check: ${_relays.map((r) => '${r.url.host}=${r._state}').join(', ')}');
     _signer = symbolon.eventSigner();
     for (final relay in _relays) {
       relay.check();
@@ -165,6 +181,7 @@ class Signalling {
 
   /// Says goodbye and disconnects from every relay.
   Future<void> stop() async {
+    syncLog('signalling: stop, session ${shortHex(session)}');
     send(SignalKind.bye);
     await Future.wait(_relays.map((r) => r.close()));
     await _incoming.close();
@@ -199,6 +216,7 @@ class Signalling {
       _ => null,
     };
     if (problem != null) {
+      syncLog('relay ${relay.url.host} says: $problem');
       relay._problem = problem.length > 200 ? problem.substring(0, 200) : problem;
       _relayChanged();
       return;
@@ -212,6 +230,7 @@ class Signalling {
     if (eventId is! String || content is! String) return;
     if (_mine.contains(eventId)) {
       // The relay passed on this device's own message: it carries the group's messages.
+      syncLog('relay ${relay.url.host} echoed own event ${eventId.length > 8 ? eventId.substring(0, 8) : eventId}');
       relay._lastEcho = DateTime.now();
       if (!relay._delivers) relay._problem = null;
       relay._delivers = true;
@@ -225,14 +244,22 @@ class Signalling {
     final SymbolonSignal signal;
     try {
       signal = _box.open(content, _now());
-    } on Object {
+    } on Object catch (e) {
+      // Wrong group, a clock more than two minutes off, a replay, or junk.
+      if (fresh) syncLog('relay ${relay.url.host}: dropped an event that did not open ($e)');
       return;
     }
     if (_same(signal.from, session)) return;
     relay._lastFromGroup = DateTime.now();
     _relayChanged();
+    final toMe = _same(signal.to, session);
+    final toAll = !signal.to.any((b) => b != 0);
+    syncLog('heard ${signal.kind.name} from device ${deviceShort(signal.device)} '
+        'session ${shortHex(signal.from)} via ${relay.url.host}'
+        '${toAll ? '' : toMe ? ' (to this session)' : ' (to another session ${shortHex(signal.to)}, ignored)'}'
+        '${fresh ? '' : ' (duplicate)'} age ${_now() - signal.createdAt} s');
     if (!fresh) return;
-    if (!_same(signal.to, session) && signal.to.any((b) => b != 0)) return;
+    if (!toMe && !toAll) return;
     if (!_incoming.isClosed) _incoming.add(signal);
   }
 }
@@ -302,22 +329,38 @@ class _Relay {
 
   _Relay(this.url, this.owner);
 
+  /// What this relay is doing, for the log.
+  String get _state => _closed
+      ? 'closed'
+      : _open
+          ? (_awaitingReply ? 'probing' : 'open')
+          : _retry?.isActive == true
+              ? 'retry'
+              : 'connecting';
+
   Future<void> connect() async {
     if (_closed) return;
     final id = _randomId();
     final RelayConnection channel;
+    syncLog('relay ${url.host}: connecting');
     try {
       channel = owner._connect(url);
       _channel = channel;
       await channel.ready;
-    } on Object {
+    } on Object catch (e) {
+      syncLog('relay ${url.host}: connect failed ($e), retry in ${_backoff.inSeconds} s');
+      // A connection that never opened is let go at once: closing it must never be waited for
+      // (see [_closeQuietly]).
+      _closeQuietly(_channel);
+      _channel = null;
       _scheduleRetry();
       return;
     }
     if (_closed) {
-      await channel.close();
+      _closeQuietly(channel);
       return;
     }
+    syncLog('relay ${url.host}: connected, subscribing as $id and announcing');
     _open = true;
     _subscriptionId = id;
     _awaitingReply = false;
@@ -326,14 +369,30 @@ class _Relay {
     _listening = channel.messages.listen((m) {
       _awaitingReply = false;
       owner._receive(this, m);
-    }, onDone: _dropped, onError: (Object _) => _dropped(), cancelOnError: true);
+    }, onDone: () {
+      syncLog('relay ${url.host}: connection closed by the relay or the network');
+      _dropped();
+    }, onError: (Object e) {
+      syncLog('relay ${url.host}: connection error ($e)');
+      _dropped();
+    }, cancelOnError: true);
     channel.add(owner._subscription(id));
     // Announce on every (re)connect, so devices that came online meanwhile find this one.
     channel.add(owner._event(SignalKind.announce));
   }
 
-  void send(String message) {
-    if (_open) _channel?.add(message);
+  /// Sends [message] if connected; returns whether it was.
+  bool send(String message) {
+    final channel = _channel;
+    if (!_open || channel == null) return false;
+    try {
+      channel.add(message);
+      return true;
+    } on Object catch (e) {
+      // A socket that closed under us: a reconnect follows when its close arrives.
+      syncLog('relay ${url.host}: send failed ($e)');
+      return false;
+    }
   }
 
   /// See [Signalling.checkRelays].
@@ -342,14 +401,15 @@ class _Relay {
     if (_closed || !_open || id == null) return;
     if (_awaitingReply) {
       // Silent since the last probe: the socket is dead even though it never closed.
+      syncLog('relay ${url.host}: silent since the last check, reconnecting');
       final channel = _channel;
       _dropped();
       _channel = null;
-      unawaited(channel?.close().catchError((Object _) {}));
+      _closeQuietly(channel);
       return;
     }
     _awaitingReply = true;
-    _channel?.add(owner._subscription(id));
+    send(owner._subscription(id));
   }
 
   void _dropped() {
@@ -370,12 +430,32 @@ class _Relay {
     _backoff = _backoff * 2 > _maxBackoff ? _maxBackoff : _backoff * 2;
   }
 
+  /// Stops for good. Returns without waiting for the sockets to finish closing: see [_closeQuietly].
   Future<void> close() async {
     _closed = true;
     _open = false;
     _retry?.cancel();
-    await _listening?.cancel();
-    await _channel?.close();
+    final listening = _listening;
+    _listening = null;
+    if (listening != null) unawaited(listening.cancel().catchError((Object _) {}));
+    _closeQuietly(_channel);
+    _channel = null;
+  }
+}
+
+/// Closes [channel] without waiting for it to finish.
+///
+/// Closing a connection can take forever: web_socket_channel's close only completes once its
+/// socket has been listened to, so for one that never connected (a relay that was unreachable) it
+/// never does, and a dead socket can wait a long time for the relay's goodbye. Waited for, it held
+/// up `Signalling.stop`, and with it every reconnect after sleep, a network change or coming back
+/// to the front: the app then stayed off the relays until it was reloaded (2026-11-20).
+void _closeQuietly(RelayConnection? channel) {
+  if (channel == null) return;
+  try {
+    unawaited(channel.close().catchError((Object _) {}));
+  } on Object {
+    // Already closed or broken: nothing more to do.
   }
 }
 
