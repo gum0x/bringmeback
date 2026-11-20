@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../version/build_info.dart';
 import 'sync_cubit.dart';
 import 'sync_page.dart';
 
@@ -67,6 +68,34 @@ class SyncStatus {
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
 
+/// Which step sync is at, in a sentence, for the Devices page and the dev builds' status tooltip.
+/// A step that stays the same for long shows where sync stopped.
+String syncStep(SyncState state, {DateTime? now}) {
+  String short(String id) => id.length > 6 ? id.substring(0, 6) : id;
+  final at = now ?? DateTime.now();
+  if (!state.supported) return 'Off: the encryption library did not load';
+  if (!state.paired) return 'Off: not in a group';
+  if (!state.live) return 'Off: finding devices online is turned off';
+  if (state.restartingSince case final since?) {
+    return '1/5 Closing the old relay connections (for ${at.difference(since).inSeconds} s)';
+  }
+  if (state.relaysUp == 0) {
+    return state.relaysUnreachable
+        ? '2/5 Connecting to the relays: none answers'
+        : '2/5 Connecting to the relays';
+  }
+  final relays = '${state.relaysUp} of ${state.relayCount} relays';
+  if (state.online.isEmpty && state.connected.isEmpty) {
+    return '3/5 Waiting for another device to announce itself ($relays)';
+  }
+  final waiting = state.online.difference(state.connected);
+  if (waiting.isNotEmpty) {
+    return '4/5 Setting up a direct link with device ${waiting.map(short).join(', ')} ($relays)';
+  }
+  if (!state.allInSync) return '5/5 Linked, exchanging changes';
+  return '5/5 In sync with device ${state.connected.map(short).join(', ')}';
+}
+
 /// The Devices button in the task view, showing at a glance whether the other devices are
 /// connected and in sync. Its tooltip says more, and it opens the Devices page.
 class SyncStatusButton extends StatefulWidget {
@@ -127,8 +156,11 @@ class _SyncStatusButtonState extends State<SyncStatusButton> {
         SyncHealth.syncing => (Icons.cloud_sync, colors.tertiary),
         SyncHealth.inSync => (Icons.cloud_done, Colors.green),
       };
+      // Builds that aren't releases also say which step sync is at.
+      final tooltip =
+          BuildInfo.current.isRelease ? status.label : '${status.label}\n${syncStep(state)}';
       return IconButton(
-        tooltip: status.label,
+        tooltip: tooltip,
         icon: Icon(icon, color: color, semanticLabel: status.label),
         onPressed: () =>
             Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SyncPage())),

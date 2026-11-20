@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -8,6 +10,7 @@ import '../version/build_info.dart';
 import 'pairing.dart';
 import 'peer.dart' show syncProtocol;
 import 'sync_cubit.dart';
+import 'sync_log.dart';
 import 'sync_status.dart';
 
 /// Pairs this device with others. Every device in a group shares the same group secret.
@@ -91,6 +94,12 @@ class SyncPage extends StatelessWidget {
           value: state.live,
           onChanged: (on) => context.read<SyncCubit>().setLive(on),
         ),
+        ListTile(
+          dense: true,
+          leading: const Icon(Icons.timeline, size: 20),
+          title: const Text('Sync step'),
+          subtitle: Text(syncStep(state)),
+        ),
         if (state.live) ..._status(context, state),
         if (state.live)
           ListTile(
@@ -106,6 +115,8 @@ class SyncPage extends StatelessWidget {
                     : '${state.connected.length} of ${state.online.length} connected directly. '
                         'Devices connect only when they are on the same network.'),
           ),
+        const SizedBox(height: 8),
+        _LogView(header: () => _logHeader(state)),
         const SizedBox(height: 16),
         OutlinedButton(
             onPressed: () => _confirmLeave(context),
@@ -189,6 +200,20 @@ class SyncPage extends StatelessWidget {
     if (d.inMinutes < 60) return '${d.inMinutes} min ago';
     return '${d.inHours} h ago';
   }
+
+  static String _logHeader(SyncState state) => [
+        'bringmeback sync log, copied ${SyncLog.stamp(DateTime.now())}',
+        'Device ${_shortId(state.device!.id)}, version ${BuildInfo.current.label}, '
+            'sync version $syncProtocol',
+        if (state.keys case final keys?) 'Group ${keys.fingerprint}',
+        'Step: ${syncStep(state)}',
+        'Relays: ${state.relays.map((r) => '${r.url.host} '
+            '${r.connected ? (r.delivers ? 'passes messages' : 'connected') : 'not connected'}'
+            '${r.problem == null ? '' : ' (says: ${r.problem})'}').join('; ')}',
+        'Online: ${state.online.map(_shortId).join(', ')}; '
+            'connected: ${state.connected.map(_shortId).join(', ')}',
+        '---',
+      ].join('\n');
 
   static String _shortId(String id) => id.length > 6 ? id.substring(0, 6) : id;
 
@@ -294,6 +319,80 @@ class _JoinFormState extends State<_JoinForm> {
           onChanged: (on) => setState(() => _clearFirst = on ?? false),
         ),
         ElevatedButton(onPressed: _join, child: const Text('Join group')),
+      ],
+    );
+  }
+}
+
+/// The sync log's latest lines, with a button to copy all of it to share.
+class _LogView extends StatefulWidget {
+  final String Function() header;
+
+  const _LogView({required this.header});
+
+  @override
+  State<_LogView> createState() => _LogViewState();
+}
+
+class _LogViewState extends State<_LogView> {
+  static const _shown = 15;
+  StreamSubscription<void>? _changes;
+  Timer? _refresh;
+
+  @override
+  void initState() {
+    super.initState();
+    // At most a few redraws a second, however busy the log is.
+    _changes = SyncLog.instance.changes.listen((_) {
+      _refresh ??= Timer(const Duration(milliseconds: 300), () {
+        _refresh = null;
+        if (mounted) setState(() {});
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _changes?.cancel();
+    _refresh?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = SyncLog.instance.lines;
+    final latest = lines.length > _shown ? lines.sublist(lines.length - _shown) : lines;
+    return ExpansionTile(
+      tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+      title: const Text('Sync log'),
+      subtitle: Text('${lines.length} lines in this run. Copy it to share when devices '
+          'don\'t find each other. It has no tasks and no group code.'),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(spacing: 8, children: [
+            TextButton.icon(
+                onPressed: () {
+                  Clipboard.setData(
+                      ClipboardData(text: SyncLog.instance.export(widget.header())));
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(const SnackBar(content: Text('Sync log copied')));
+                },
+                icon: const Icon(Icons.copy),
+                label: const Text('Copy log')),
+            TextButton.icon(
+                onPressed: () => setState(SyncLog.instance.clear),
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Clear')),
+          ]),
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(8),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: SelectableText(latest.isEmpty ? 'Nothing yet.' : latest.join('\n'),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+        ),
       ],
     );
   }

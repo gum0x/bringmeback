@@ -66,9 +66,14 @@ class FakeConnection implements RelayConnection {
 
   FakeConnection(this.relay);
 
+  bool _opened = false;
+
   @override
-  Future<void> get ready =>
-      relay.reachable ? Future.value() : Future.error(StateError('unreachable'));
+  Future<void> get ready {
+    if (!relay.reachable) return Future.error(StateError('unreachable'));
+    _opened = true;
+    return Future.value();
+  }
 
   @override
   Stream<Object?> get messages => incoming.stream;
@@ -76,6 +81,8 @@ class FakeConnection implements RelayConnection {
   @override
   void add(String message) => relay.deliver(this, message);
 
+  /// Like web_socket_channel's, the close of a connection that never opened (its relay was
+  /// unreachable) never completes: nothing ever listened to its socket.
   @override
-  Future<void> close() => incoming.close();
+  Future<void> close() => _opened ? incoming.close() : Completer<void>().future;
 }

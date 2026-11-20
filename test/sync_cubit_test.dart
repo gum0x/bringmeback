@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:bringmeback/sync/signalling.dart';
 import 'package:bringmeback/sync/sync_cubit.dart';
+import 'package:bringmeback/sync/sync_log.dart';
+import 'package:bringmeback/sync/sync_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -276,6 +279,52 @@ void main() {
     expect(relay.connections.length, connections + 3, reason: 'New sockets to each relay');
     expect(relay.published.length - before, greaterThanOrEqualTo(3), reason: 'Announced on them');
     await a.close();
+  });
+
+  test('D3.7 a relay that was unreachable doesn\'t stop the reconnect after a network change',
+      () async {
+    // Reproduces 2026-11-20: the desktop couldn't reach nos.lol. After a reconnect (wake, network
+    // back, back to the front) it stayed off the relays until reloaded, still listing the other two
+    // as connected, while the phone said "No other device online".
+    const tick = Duration(seconds: 30);
+    final relay = FakeRelay();
+    final down = FakeRelay()..reachable = false;
+    final net = FakeNetwork();
+    RelayConnection desktopRelays(Uri url) =>
+        url.host == 'nos.lol' ? down.connect(url) : relay.connect(url);
+    SharedPreferences.setMockInitialValues({});
+    final a = SyncCubit(connect: desktopRelays, transport: net.create, autoSyncEvery: tick);
+    await a.load();
+    await a.createGroup();
+    await a.setLive(true);
+    await pumpEventQueue();
+    expect(a.state.relaysUp, 2);
+
+    // The desktop's sockets die without a close, then its network comes back.
+    for (final c in relay.connections) {
+      c.dead = true;
+    }
+    final before = relay.connections.length;
+    unawaited(a.networkChanged());
+    await pumpEventQueue();
+    expect(relay.connections.length, before + 2, reason: 'New sockets to the reachable relays');
+    // The Devices page says where sync is, and the log says what happened.
+    expect(syncStep(a.state), startsWith('3/5 Waiting for another device'));
+    final log = SyncLog.instance.lines.join('\n');
+    expect(log, contains('restart signalling: network back'));
+    expect(log, contains('relay nos.lol: connect failed'));
+
+    // The phone opens now, and the two find each other.
+    SharedPreferences.setMockInitialValues({});
+    final b = SyncCubit(connect: relay.connect, transport: net.create, autoSyncEvery: tick);
+    await b.load();
+    await b.joinGroup(a.state.code!);
+    await b.setLive(true);
+    await pumpEventQueue();
+    expect(a.state.connected, {b.state.device!.id});
+    expect(b.state.connected, {a.state.device!.id});
+    await a.close();
+    await b.close();
   });
 
   test('a device whose network comes back reconnects and finds the other at once', () async {

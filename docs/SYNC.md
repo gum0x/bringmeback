@@ -44,6 +44,12 @@ With **Find my devices online** on, devices that are both open sync without anyo
 - Network back: the web app listens for the browser's `online` event (after a switch of Wi-Fi or to
   mobile data) and reconnects at once. A change of address that drops the direct link is handled by
   the link retry below, which goes through the relays.
+- Reconnecting closes the old relay connections without waiting for them to finish: the close of
+  a WebSocket that never opened never completes, and waiting for it once kept a desktop off the
+  relays until it was reloaded (2026-11-20).
+- The Devices page shows the step sync is at and a sync log (also printed to the console as
+  `[bmb sync] …`) with relay connects, failures, drops, every event published and heard, links and
+  uncaught errors. It holds no tasks, keys or group code.
 - Every 30 seconds, each relay is asked to answer (the subscription is sent again, and a relay replies
   at once). A relay that answered nothing since the last round is connected again, which also
   announces the device on it. A relay socket can die without closing, after the computer sleeps or

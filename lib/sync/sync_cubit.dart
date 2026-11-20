@@ -14,6 +14,7 @@ import 'pairing.dart';
 import 'peer.dart';
 import 'signalling.dart';
 import 'sync_config.dart';
+import 'sync_log.dart';
 
 /// Why this device isn't syncing with one of the group's devices, for the Devices page.
 class SyncProblem {
@@ -108,6 +109,10 @@ class SyncState {
   /// When a connected device was last confirmed in sync, in this run of the app.
   final DateTime? lastSynced;
 
+  /// Set while the relay connections are being closed and opened again, from when that started.
+  /// It shows on the Devices page, so a restart that never finishes can be seen.
+  final DateTime? restartingSince;
+
   const SyncState(
       {this.device,
       this.pairing,
@@ -124,7 +129,8 @@ class SyncState {
       this.relays = const [],
       this.relaysUnreachable = false,
       this.inSync = const {},
-      this.lastSynced});
+      this.lastSynced,
+      this.restartingSince});
 
   bool get paired => pairing != null;
 
@@ -139,7 +145,8 @@ class SyncState {
           List<RelayStatus>? relays,
           bool? relaysUnreachable,
           Set<String>? inSync,
-          DateTime? lastSynced}) =>
+          DateTime? lastSynced,
+          Object? restartingSince = _keep}) =>
       SyncState(
           device: device,
           pairing: pairing,
@@ -156,7 +163,12 @@ class SyncState {
           relays: relays ?? this.relays,
           relaysUnreachable: relaysUnreachable ?? this.relaysUnreachable,
           inSync: inSync ?? this.inSync,
-          lastSynced: lastSynced ?? this.lastSynced);
+          lastSynced: lastSynced ?? this.lastSynced,
+          restartingSince: identical(restartingSince, _keep)
+              ? this.restartingSince
+              : restartingSince as DateTime?);
+
+  static const _keep = Object();
 
   /// Whether every connected device is in sync. False with none connected.
   bool get allInSync => connected.isNotEmpty && connected.every(inSync.contains);
@@ -297,7 +309,10 @@ class SyncCubit extends Cubit<SyncState> {
   }
 
   /// The app went to the background.
-  void paused() => _hiddenAt ??= DateTime.now();
+  void paused() {
+    if (_hiddenAt == null) syncLog('app hidden');
+    _hiddenAt ??= DateTime.now();
+  }
 
   /// The app is in front again. After a long enough break, reconnects at once instead of waiting
   /// for dead sockets to time out and for the retry backoff.
@@ -305,13 +320,15 @@ class SyncCubit extends Cubit<SyncState> {
     final hiddenAt = _hiddenAt;
     _hiddenAt = null;
     if (hiddenAt == null || isClosed) return;
-    if (DateTime.now().difference(hiddenAt) < _staleAfter) {
+    final away = DateTime.now().difference(hiddenAt);
+    syncLog('app shown after ${away.inSeconds} s hidden');
+    if (away < _staleAfter) {
       // The links are trusted to be up: just compare again, in case a change got lost meanwhile.
       _sync?.resync();
       if (_missing) _announce();
       return;
     }
-    await _startOver();
+    await _startOver('back to the front');
   }
 
   static PeerTransportFactory _webRtc(SyncConfig config) =>
@@ -322,6 +339,7 @@ class SyncCubit extends Cubit<SyncState> {
       await loadSymbolon();
     } on Object {
       // Without Symbolon there is no sync, but the rest of the app works.
+      syncLog('load: the encryption library did not load, sync is off');
       emit(const SyncState(supported: false));
       return;
     }
@@ -344,16 +362,22 @@ class SyncCubit extends Cubit<SyncState> {
       }
     }
     final live = prefs.getBool(_liveKey) ?? false;
-    emit((await _stateFor(device, pairing)).copyWith(live: live));
-    await _restartSignalling();
+    final loaded = (await _stateFor(device, pairing)).copyWith(live: live);
+    syncLog('load: device ${deviceShort(device.publicKey)}, build ${BuildInfo.current.label}, '
+        'sync version $syncProtocol, '
+        '${pairing == null ? 'not in a group' : 'group ${loaded.keys!.fingerprint}'}, '
+        'find devices online ${live ? 'on' : 'off'}');
+    emit(loaded);
+    await _restartSignalling('app start');
   }
 
   /// Turns looking for the group's other devices on or off.
   Future<void> setLive(bool live) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_liveKey, live);
+    syncLog('find devices online turned ${live ? 'on' : 'off'}');
     emit(state.copyWith(live: live, online: const {}));
-    await _restartSignalling();
+    await _restartSignalling('sync turned on or off');
   }
 
   Future<void> _stopSignalling() async {
@@ -362,7 +386,16 @@ class SyncCubit extends Cubit<SyncState> {
     _relayCheck?.cancel();
     _autoSync?.cancel();
     _autoSync = null;
-    await _signalling?.stop();
+    final old = _signalling;
+    if (old != null) {
+      // Stopping must never hold up the restart that follows: a relay whose close never completes
+      // once kept a desktop off the relays until it was reloaded (2026-11-20).
+      await old.stop().timeout(_stopTimeout, onTimeout: () {
+        syncLog('signalling: stop still not done after ${_stopTimeout.inSeconds} s, going on');
+      }).catchError((Object e) {
+        syncLog('signalling: stop failed ($e), going on');
+      });
+    }
     _signals = null;
     _relayChanges = null;
     _signalling = null;
@@ -379,8 +412,13 @@ class SyncCubit extends Cubit<SyncState> {
         relaysUnreachable: false));
   }
 
-  Future<void> _restartSignalling() async {
+  static const _stopTimeout = Duration(seconds: 3);
+
+  Future<void> _restartSignalling([String why = 'start']) async {
+    syncLog('restart signalling: $why');
+    _emit(state.copyWith(restartingSince: DateTime.now()));
     await _stopSignalling();
+    _emit(state.copyWith(restartingSince: null));
     // Each relay connect announces; this is the one more on the next round.
     _announceAgain = true;
     _roundsSinceAnnounce = 0;
@@ -432,7 +470,7 @@ class SyncCubit extends Cubit<SyncState> {
     // page) in between: its relay sockets are likely dead without a close, so start over at once
     // rather than wait for the relay check to find out. A hidden app is handled by [resumed].
     if (last != null && _hiddenAt == null && now.difference(last) > _autoSyncEvery * 3) {
-      unawaited(_startOver());
+      unawaited(_startOver('round came ${now.difference(last).inSeconds} s late (sleep or frozen page)'));
       return;
     }
     _sync?.resync();
@@ -445,6 +483,7 @@ class SyncCubit extends Cubit<SyncState> {
     };
     if (gone.isNotEmpty) {
       for (final id in gone) {
+        syncLog('device ${_short(id)} not heard for a while, no longer online');
         _forget(id);
       }
       // Its link problem goes too: "isn't syncing" next to "No other device online" only confuses.
@@ -456,6 +495,7 @@ class SyncCubit extends Cubit<SyncState> {
       _roundsSinceAnnounce++;
       final every = state.online.isEmpty ? _safetyAnnounce : _safetyAnnounceSeen;
       if (_announceAgain || _roundsSinceAnnounce >= every) {
+        syncLog(_announceAgain ? 'announce again after an event' : 'safety announce');
         _announce();
         _announceAgain = false;
       }
@@ -466,17 +506,18 @@ class SyncCubit extends Cubit<SyncState> {
   }
 
   /// Reconnects to the relays and announces again, after sleep, a long break or a network change.
-  Future<void> _startOver() async {
+  Future<void> _startOver(String why) async {
     if (isClosed || state.device == null) return;
     _emit(state.copyWith(online: const {}));
-    await _restartSignalling();
+    await _restartSignalling(why);
   }
 
   /// The device's network came back, possibly a different one: relay sockets and direct links
   /// on the old one are dead, so reconnect and announce at once.
   Future<void> networkChanged() async {
+    syncLog('network back online${_hiddenAt != null ? ' (app hidden, waits for the front)' : ''}');
     if (!state.paired || !state.live || _hiddenAt != null) return;
-    await _startOver();
+    await _startOver('network back');
   }
 
   /// Watches the device's network, and reconnects when it comes back ([networkChanged]).
@@ -504,8 +545,9 @@ class SyncCubit extends Cubit<SyncState> {
   /// Pressing it again while a sync is under way is harmless: changes are only applied once.
   Future<SyncNowResult> syncNow() async {
     if (isClosed || !state.paired || !state.live) return SyncNowResult.off;
+    syncLog('Sync now pressed');
     if (state.online.isEmpty && state.connected.isEmpty) {
-      await _restartSignalling();
+      await _restartSignalling('Sync now');
       return SyncNowResult.looking;
     }
     _sync?.resync();
@@ -608,10 +650,13 @@ class SyncCubit extends Cubit<SyncState> {
         prologue: [...utf8.encode(_prologue), ...signalling.topic],
         signal: (kind, body) => signalling.send(kind, to: signal.from, body: body));
     _links[id] = link;
+    syncLog('link to device ${_short(id)}: ${initiator ? 'sending offer' : 'answering offer'} '
+        '(session ${shortHex(signal.from)})');
     var wasConnected = false;
     link.connected.then((_) {
       _backoff.remove(id);
       if (_links[id] != link) return;
+      syncLog('link to device ${_short(id)}: connected, build ${link.remoteBuild?.label ?? '?'}');
       wasConnected = true;
       _sync?.attach(link);
       final build = link.remoteBuild;
@@ -623,6 +668,8 @@ class SyncCubit extends Cubit<SyncState> {
     link.closed.then((_) {
       if (_links[id] != link) return;
       _links.remove(id);
+      syncLog('link to device ${_short(id)}: closed'
+          '${link.failure == null ? '' : ' (${link.failure!.name})'}');
       // The initiator retries; announce once on the next round too, in case the other device lost
       // track of this one (a network change, a relay that dropped it).
       _announceAgain = true;
@@ -659,6 +706,7 @@ class SyncCubit extends Cubit<SyncState> {
     final id = _id(announce.device);
     final wait = _backoff[id] ?? _firstRetry;
     _backoff[id] = wait * 2 > _maxRetry ? _maxRetry : wait * 2;
+    syncLog('link to device ${_short(id)}: retry in ${wait.inSeconds} s');
     _retries[id]?.cancel();
     _retries[id] = Timer(wait, () {
       _retries.remove(id);
@@ -713,7 +761,7 @@ class SyncCubit extends Cubit<SyncState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pairingKey);
     emit(SyncState(device: state.device, live: state.live));
-    await _restartSignalling();
+    await _restartSignalling('left the group');
   }
 
   Future<void> _join(PairingCode pairing) async {
@@ -721,7 +769,7 @@ class SyncCubit extends Cubit<SyncState> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_pairingKey, next.code!);
     emit(next.copyWith(live: state.live));
-    await _restartSignalling();
+    await _restartSignalling('joined a group');
   }
 
   static Future<SyncState> _stateFor(DeviceIdentity device, PairingCode? pairing) async =>
@@ -735,6 +783,8 @@ class SyncCubit extends Cubit<SyncState> {
 }
 
 String _id(List<int> device) => base64Url.encode(device).replaceAll('=', '');
+
+String _short(String id) => id.length > 6 ? id.substring(0, 6) : id;
 
 bool _sameBytes(List<int> a, List<int> b) {
   if (a.length != b.length) return false;

@@ -9,6 +9,7 @@ import 'note/note_view.dart';
 import 'note/task_line.dart';
 import 'settings/settings_page.dart';
 import 'sync/sync_cubit.dart';
+import 'sync/sync_log.dart';
 import 'tab/tab_lock.dart';
 import 'sync/sync_status.dart';
 import 'version/build_info.dart';
@@ -21,7 +22,17 @@ export 'note/paper.dart' show StrikeText;
 export 'note/task_line.dart' show TaskLine, TaskClock;
 
 void main() {
-  runApp(const ActiveTab(child: App()));
+  // Errors nothing caught go to the sync log too, with their stack, so they can be shared from
+  // the Devices page; Flutter still reports them as before.
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    syncLog('uncaught Flutter error: ${details.exceptionAsString()}\n${details.stack}');
+    previous?.call(details);
+  };
+  runZonedGuarded(() => runApp(const ActiveTab(child: App())), (error, stack) {
+    syncLog('uncaught error: $error\n$stack');
+    Zone.root.print('Uncaught error: $error\n$stack');
+  });
 }
 
 /// Runs the app only in the browser tab that holds it (see `acquireTab`). Another tab shows that the
