@@ -12,12 +12,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Runs [body] on the app's task view, without sync, which needs native code.
 void noteTest(String description, Future<void> Function(WidgetTester tester, TasksBloc bloc) body,
-    {Size size = const Size(1000, 900)}) {
+    {Size size = const Size(1000, 900), List<String>? sounds}) {
   testWidgets(description, (tester) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final bloc = TasksBloc();
+    final bloc =
+        TasksBloc(playSound: sounds == null ? null : (asset) async => sounds.add(asset));
     await tester.pumpWidget(BlocProvider.value(
       value: bloc,
       child: const MaterialApp(home: TasksStack()),
@@ -451,6 +452,74 @@ void main() {
       ('Not needed', TaskStatus.letGo),
     ]);
   });
+
+  /// Tears off a note of [count] unfinished tasks named task 0, task 1, …
+  Future<void> tearOffTasks(WidgetTester tester, TasksBloc bloc, int count) async {
+    for (var i = 0; i < count; i++) {
+      bloc.add(InsertTaskEvent(index: i, name: 'task $i', id: ValueKey('t$i')));
+    }
+    bloc.add(TearOffNoteEvent());
+    await settle(tester);
+  }
+
+  final letGoAll = find.widgetWithText(OutlinedButton, 'Let go of all');
+  final writeAll = find.widgetWithText(FilledButton, 'Write all again');
+
+  final writeAllSounds = <String>[];
+  noteTest('T2.1 after three written again one by one, Write all again plays a wrong sound',
+      (tester, bloc) async {
+    writeAllSounds.clear();
+    await tearOffTasks(tester, bloc, 6);
+    final letGoAt = tester.getRect(letGoAll);
+    // Hidden, but its slot is kept: the row never moves.
+    expect(writeAll.hitTestable(), findsNothing);
+    final writeAllAt = tester.getRect(writeAll);
+
+    for (var i = 0; i < writeAllAfter; i++) {
+      expect(writeAll.hitTestable(), findsNothing, reason: 'not offered after $i');
+      await tester.tap(find.widgetWithText(FilledButton, 'Write again').first);
+      await settle(tester);
+      expect(tester.getRect(letGoAll), letGoAt,
+          reason: 'the row stays put as tasks leave the list');
+    }
+    expect(writeAll.hitTestable(), findsOneWidget);
+    expect(tester.getRect(writeAll), writeAllAt, reason: 'it appears in its kept slot');
+    expect(writeAllSounds, isEmpty);
+
+    await tester.tap(writeAll);
+    await settle(tester);
+    expect(writeAllSounds, ['wrong.mp3']);
+    expect(names(bloc), [for (var i = 0; i < 6; i++) 'task $i']);
+    expect(bloc.state.pending, isEmpty);
+    expect(find.textContaining('Choosing them one by one'), findsOneWidget);
+  }, sounds: writeAllSounds);
+
+  final mutedSounds = <String>[];
+  noteTest('T2.2 muted, Write all again still writes them all, silently', (tester, bloc) async {
+    mutedSounds.clear();
+    bloc.add(ToggleMuteEvent());
+    await tearOffTasks(tester, bloc, 5);
+    for (final task in bloc.state.pending.take(writeAllAfter).toList()) {
+      bloc.add(CarryTaskEvent(id: task.id.value));
+    }
+    await settle(tester);
+    await tester.tap(writeAll);
+    await settle(tester);
+    expect(mutedSounds, isEmpty);
+    expect(bloc.state.pending, isEmpty);
+    expect(names(bloc), hasLength(5));
+  }, sounds: mutedSounds);
+
+  noteTest('T2.3 the buttons sit side by side, and stay put on a phone', (tester, bloc) async {
+    await tearOffTasks(tester, bloc, 2);
+    expect(tester.getRect(letGoAll).top, tester.getRect(writeAll).top);
+    expect(tester.getRect(letGoAll).right, lessThan(tester.getRect(writeAll).left));
+    // With one task left, the row is still there.
+    bloc.add(CarryTaskEvent(id: bloc.state.pending.first.id.value));
+    await settle(tester);
+    expect(letGoAll, findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, size: const Size(390, 844));
 
   noteTest('a note from an earlier day has to be torn off first', (tester, bloc) async {
     bloc.add(InsertTaskEvent(index: 0, name: 'Yesterday', id: const ValueKey('y')));

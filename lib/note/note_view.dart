@@ -28,7 +28,8 @@ class NoteView extends StatelessWidget {
                   CarryOverPanel(
                       pending: state.pending,
                       atLimit: state.atLimit,
-                      backlogEnabled: state.backlogEnabled),
+                      backlogEnabled: state.backlogEnabled,
+                      offersWriteAll: state.offersWriteAll),
                   const SizedBox(height: 24),
                 ],
                 _TodayNote(state: state),
@@ -369,8 +370,15 @@ class CarryOverPanel extends StatelessWidget {
   final bool atLimit;
   final bool backlogEnabled;
 
+  /// Whether to show "Write all again": only after a few were written again one by one.
+  final bool offersWriteAll;
+
   const CarryOverPanel(
-      {super.key, required this.pending, required this.atLimit, this.backlogEnabled = false});
+      {super.key,
+      required this.pending,
+      required this.atLimit,
+      this.backlogEnabled = false,
+      this.offersWriteAll = false});
 
   Future<void> _writeAgain(BuildContext context, TaskState task) async {
     final bloc = context.read<TasksBloc>();
@@ -389,6 +397,16 @@ class CarryOverPanel extends StatelessWidget {
       }
     }
     bloc.add(CarryTaskEvent(id: task.id.value));
+  }
+
+  /// Writes everything waiting again at once. It works, but with a wrong sound and a word on why:
+  /// choosing what still matters, one by one, is what tearing off is for.
+  void _writeAllAgain(BuildContext context) {
+    context.read<TasksBloc>().add(CarryAllEvent());
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+          content: Text('All written again. Choosing them one by one keeps the note short.')));
   }
 
   @override
@@ -414,7 +432,38 @@ class CarryOverPanel extends StatelessWidget {
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
+            // Always the same row, in the same place: above the list, so it doesn't move as tasks
+            // leave it, and "Write all again" keeps its slot while hidden, so nothing shifts when
+            // it appears.
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => bloc.add(LetGoEvent()),
+                      child: const FittedBox(fit: BoxFit.scaleDown, child: Text('Let go of all')),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Visibility(
+                      visible: offersWriteAll,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: FilledButton.tonal(
+                        onPressed: offersWriteAll ? () => _writeAllAgain(context) : null,
+                        child:
+                            const FittedBox(fit: BoxFit.scaleDown, child: Text('Write all again')),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
             for (final task in pending)
               Padding(
                 key: task.id,
@@ -442,14 +491,6 @@ class CarryOverPanel extends StatelessWidget {
                       label: const Text('Write again'),
                     ),
                   ],
-                ),
-              ),
-            if (pending.length > 1)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => bloc.add(LetGoEvent()),
-                  child: const Text('Let go of all'),
                 ),
               ),
           ],

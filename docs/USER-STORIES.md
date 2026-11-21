@@ -120,6 +120,26 @@ Not covered yet:
 - No warning on the device that is out of sync before it shows "A new day". A gap: needs the
   stored version signal (see the Signal CRDT version over Nostr design).
 
+**T2. After tearing off, I write my unfinished tasks again, and after three I want the rest back at
+once.** (Asked 2026-11-21.) Choosing one by one is the point, so "Write all again" works but plays
+a wrong sound and says why. "Let go of all" and "Write all again" are buttons side by side in one
+row under the list, in the same place whatever happens: the slot for "Write all again" is kept
+empty until it appears.
+
+| Case | Expected | Status |
+| --- | --- | --- |
+| T2.1 Three written again one by one, then Write all again | Hidden until the third, then in its kept slot; pressing it plays the wrong sound, then writes them all; nothing in the row moves | covered: `note_test › T2.1 …` |
+| T2.2 Sounds are muted | No sound, the rest are still written again, with the note on why | covered: `note_test › T2.2 …` |
+| T2.3 On a phone, and down to one task waiting | The two buttons side by side, the row stays | covered: `note_test › T2.3 …` |
+| T2.4 Both devices write all again while apart | Each task once on today's note | covered: `task_document_test › T2.4 …` |
+| T2.5 The app reloaded, or the three were written on another device | Still offered: it counts the tasks on today's note that came from an earlier one, which sync and survive a reload | covered: `task_document_test › T2.4 …` checks both devices count the tasks written again |
+
+Not covered yet:
+- Whether the wrong sound plays on an iPhone: the sound comes right after a tap, so Safari should
+  allow it, but it is not checked on a real device. A known limit to check by hand.
+- Tasks written again and then deleted from today's note no longer count toward the three. A
+  known limit.
+
 ## W · The web app in several tabs
 
 **W1. I open bringmeback in a second tab of the same browser.** (Found 2026-11-17.) Tabs share

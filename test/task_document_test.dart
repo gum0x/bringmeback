@@ -193,4 +193,33 @@ void main() {
     }
     expect(desktop.ids, phone.ids);
   });
+
+  test('T2.4 writing all again on both devices while apart writes each task once', () {
+    final desktop = newDoc()..setNoteStartedAt(1000);
+    desktop
+      ..insert(0, 't1', name: 'one')
+      ..insert(1, 't2', name: 'two');
+    desktop.tearOff('n1', 2000);
+    final phone = newDoc();
+    exchange(desktop, phone);
+
+    for (final (d, side) in [(desktop, 'd'), (phone, 'p')]) {
+      for (final (i, id) in d.pendingIds.indexed) {
+        d.carry(id, '$side$i', d.ids.length);
+      }
+    }
+    exchange(desktop, phone);
+    for (final d in [desktop, phone]) {
+      d.mergeCarried();
+    }
+    exchange(desktop, phone);
+
+    for (final d in [desktop, phone]) {
+      expect([for (final t in d.tasks()) t.name], ['one', 'two']);
+      expect(d.pendingIds, isEmpty);
+      // What TasksState.carriedCount counts, so the other device offers Write all again too.
+      expect(d.tasks().where((t) => t.carriedFrom != null), hasLength(2));
+    }
+    expect(desktop.ids, phone.ids);
+  });
 }

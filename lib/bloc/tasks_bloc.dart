@@ -211,6 +211,13 @@ class TasksState {
   /// Whether writing one more task would go over the limit, so the app asks first.
   bool get atLimit => openCount >= taskLimit;
 
+  /// How many tasks on the note were written again from an earlier note, one by one or all at once.
+  int get carriedCount => tasks.where((t) => t.carriedFrom != null).length;
+
+  /// Whether the note offers to write all the waiting tasks again at once: only once [writeAllAfter]
+  /// were written again one by one, and with more than one still waiting.
+  bool get offersWriteAll => carriedCount >= writeAllAfter && pending.length > 1;
+
   /// The time committed to on this note: the expected times of all its tasks, done ones included.
   int get committedSeconds => tasks.fold(0, (sum, t) => sum + t.timerLengthSeconds);
 
@@ -236,6 +243,9 @@ class TasksState {
   bool needsTearOff([int? now]) =>
       tasks.isNotEmpty && dayOf(noteStartedAt) != dayOf(now ?? nowSeconds());
 }
+
+/// How many tasks are written again one by one before the note offers to write all the rest at once.
+const writeAllAfter = 3;
 
 abstract class TasksEvent {}
 
@@ -310,6 +320,10 @@ class CarryTaskEvent extends TasksEvent {
 
   CarryTaskEvent({required this.id});
 }
+
+/// Writes every unfinished task of torn-off notes again at once, after a wrong sound: choosing them
+/// one by one is the point of tearing off. Offered only after [writeAllAfter] were written again.
+class CarryAllEvent extends TasksEvent {}
 
 /// Lets go of an unfinished task of a torn-off note, or of all of them when [id] is null.
 class LetGoEvent extends TasksEvent {
@@ -504,6 +518,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   // Made on the first sound, so a list that never rings needs no audio player.
   AudioPlayer? _audioPlayerOrNull;
   AudioPlayer get _audioPlayer => _audioPlayerOrNull ??= AudioPlayer();
+
+  /// Plays a sound asset in place of the audio player: tests pass one that records the sounds.
+  final Future<void> Function(String asset)? _playSound;
   // Null until the saved document has been loaded; edits before that are ignored.
   TaskDocument? _doc;
   // Which task has the focus is local to this device.
@@ -529,7 +546,9 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
   /// The task document, once loaded, for syncing with the group's other devices.
   Future<CRDTDocument> get document => _document.future;
 
-  TasksBloc() : super(TasksState(tasks: [])) {
+  TasksBloc({Future<void> Function(String asset)? playSound})
+      : _playSound = playSound,
+        super(TasksState(tasks: [])) {
     on<AddTaskOnTopEvent>(_onAddTaskOnTop);
     on<AddNextTaskEvent>((e, emit) => _insert(emit, e.index + 1, e.id.value,
         e.name, e.timerLengthSeconds));
@@ -540,6 +559,7 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     on<EditTaskEvent>(_onEditTask);
     on<TearOffNoteEvent>(_onTearOff);
     on<CarryTaskEvent>(_onCarry);
+    on<CarryAllEvent>(_onCarryAll);
     on<LetGoEvent>(_onLetGo);
     on<RemoveTaskEvent>(_onRemoveTask);
     on<DoneTaskEvent>(_onDoneTask);
@@ -750,6 +770,18 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
     });
   }
 
+  void _onCarryAll(CarryAllEvent event, Emitter<TasksState> emit) {
+    // The wrong sound first, so it is heard as the tasks come back.
+    _playAlertSound(alertType: 'WRONG');
+    _edit(emit, (doc) {
+      final working = _working(doc);
+      for (final id in doc.pendingIds) {
+        doc.carry(id, newId(), doc.ids.length);
+      }
+      _runTop(doc, working);
+    });
+  }
+
   void _onLetGo(LetGoEvent event, Emitter<TasksState> emit) {
     _edit(emit, (doc) {
       for (final id in doc.pendingIds) {
@@ -912,13 +944,14 @@ class TasksBloc extends Bloc<TasksEvent, TasksState> {
 
   void _playAlertSound({String? alertType}) async {
     if (_muted) return;
-    switch (alertType) {
-      case 'REMINDER':
-        await _audioPlayer.play(AssetSource('bmb-reminder.mp3'));
-
-      default:
-        await _audioPlayer.play(AssetSource('alert.mp3'));
-    }
+    final asset = switch (alertType) {
+      'REMINDER' => 'bmb-reminder.mp3',
+      'WRONG' => 'wrong.mp3',
+      _ => 'alert.mp3',
+    };
+    final play = _playSound;
+    if (play != null) return play(asset);
+    await _audioPlayer.play(AssetSource(asset));
   }
 
   /// Deletes every task, note and logged time on this device and starts over with an empty

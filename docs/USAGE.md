@@ -48,6 +48,8 @@ A note belongs to the day it was started (a day starts at 4:00). The next day th
 above today's note. Press **Write again** on the ones that still matter, in the order you will do them,
 and **Let go** of the rest. Rewriting them by hand, one by one, is the point: it makes you choose again
 instead of letting the list grow.
+After three written again one by one, **Write all again** appears next to **Let go of all** and
+brings the rest back at once, with a wrong sound: it works, but it skips the choosing.
 
 You can also tear off a note during the day from the note's ⋯ menu, with **Tear off and start a fresh
 note**.
