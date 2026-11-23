@@ -115,10 +115,20 @@ below or beside it, the rest of the list in a quiet **Up next**.
 - **Skip** (⏭) ends the session or break now; **Restart** (↺) puts it back to its full length.
 - **Mark task done** finishes the task and goes back to the list, with Undo.
 - The lengths under the clock (or the settings icon at the top right) set the focus, short break
-  and long break lengths and how many sessions come before a long break. They apply right away; leave
+  and long break lengths and how many sessions come before a long break. They apply right away, to
+  the session or break under way too: it takes the new length, less the time already spent in it (5
+  minutes into a 25-minute session, 50 minutes leaves 45). If that time is already longer than the
+  new length, the session or break ends there. On a task with a time set, the task's time wins: the
+  session is cut from the time the task has left, at the new focus length. Leave
   **Use these lengths from now on** ticked to keep them on this device for the next focus. Under them
   the view shows what a full cycle adds up to, up to the end of the long break, and how much of it
   is focus. The defaults, with the same total, are also in **Settings**, under **Pomodoro**.
+- **Changing the task's time** (on the list, or on another device while the focus view is open) cuts
+  the sessions again from the time the task now has left. A task's time counts from when you set
+  it, so the session under way runs on for that time; sessions already done stay done. Set it to
+  no time and sessions go back to full length.
+- Lengths changed in **Settings** are the defaults for the next fresh Pomodoro. A task whose
+  Pomodoro is already under way keeps its own lengths; change those from its focus view.
 - The back arrow (or Esc) goes back to the list and pauses the Pomodoro; the task's timer carries
   on as it was.
 - Each task remembers where its Pomodoro is: the phase, the time left, the sessions done and how far

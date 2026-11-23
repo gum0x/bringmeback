@@ -331,6 +331,91 @@ void main() {
     await tester.runAsync(bloc.close);
   });
 
+  testWidgets('F1.9 a Pomodoro under way keeps its lengths when the defaults change',
+      (tester) async {
+    final bloc = await startApp(tester);
+    bloc.add(InsertTaskEvent(
+        index: 0, name: 'Write report', id: const ValueKey('r')));
+    await settle(tester);
+    await openFocusOn(tester, 'Write report');
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
+
+    // New defaults in Settings, while the task's Pomodoro is under way.
+    await tester.runAsync(
+        () => const PomodoroSettings(workMinutes: 50, shortBreakMinutes: 10).save());
+    await openFocusOn(tester, 'Write report');
+    expect(find.text('25 min focus · 5 min break'), findsOneWidget);
+
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(bloc.close);
+  });
+
+  testWidgets('F2.1 a task time changed on the list refits its Pomodoro on the next focus',
+      (tester) async {
+    final bloc = await startApp(tester);
+    bloc.add(InsertTaskEvent(
+        index: 0,
+        name: 'Write report',
+        id: const ValueKey('r'),
+        timerLengthSeconds: 60 * 60));
+    await settle(tester);
+    await openFocusOn(tester, 'Write report');
+    expect(find.textContaining("Fits the task's 1 h: 25 + 25 + 10 min"),
+        findsOneWidget);
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
+
+    bloc.add(EditTaskEvent(
+        id: const ValueKey('r'),
+        name: 'Write report',
+        timerLengthSeconds: 30 * 60));
+    await settle(tester);
+    await openFocusOn(tester, 'Write report');
+    expect(find.text('Picked up where you left off'), findsOneWidget);
+    expect(find.textContaining("Fits the task's 30 min: 30 min of focus"),
+        findsOneWidget);
+    expect(find.text('Session 1 of 1 for this task'), findsOneWidget);
+    final record = PomodoroRecord.decode(bloc.state.tasks.first.pomodoro)!;
+    expect(record.state.workSeconds, closeTo(30 * 60, 2));
+
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(bloc.close);
+  });
+
+  testWidgets('F2.2 a task time changed while the focus view is open refits the clock at once',
+      (tester) async {
+    final bloc = await startApp(tester);
+    bloc.add(InsertTaskEvent(
+        index: 0,
+        name: 'Write report',
+        id: const ValueKey('r'),
+        timerLengthSeconds: 60 * 60));
+    await settle(tester);
+    await openFocusOn(tester, 'Write report');
+    expect(find.text('Session 1 of 3 for this task'), findsOneWidget);
+
+    // Set to 20 min on the phone, synced here.
+    bloc.add(EditTaskEvent(
+        id: const ValueKey('r'),
+        name: 'Write report',
+        timerLengthSeconds: 20 * 60));
+    await settle(tester);
+    expect(find.textContaining("Fits the task's 20 min: 20 min of focus"),
+        findsOneWidget);
+    expect(find.text('Session 1 of 1 for this task'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Pause'), findsOneWidget);
+
+    await tester.tap(find.byType(BackButton));
+    await settle(tester);
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(bloc.close);
+  });
+
   testWidgets('a task marked done in focus starts fresh next time',
       (tester) async {
     final bloc = await startApp(tester);

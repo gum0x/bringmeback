@@ -103,6 +103,46 @@ Not covered yet:
 - The current task isn't running after a merge (one device paused, the other started a task below):
   the lower task keeps running. A gap, described in SYNC.md.
 
+## F · Focus with Pomodoro
+
+**F1. I change the Pomodoro lengths while I'm focusing on a task.** (The bug of 2026-11-23: on a
+task already started, with a time set, the clock kept the old length after I changed the focus
+length, and I had to skip twice, past the session and its break, before the new length showed.)
+The lengths apply right away, to the phase under way too, counting the time already spent in it.
+
+| Case | Expected | Status |
+| --- | --- | --- |
+| F1.1 A focus session under way (running or paused) gets a longer focus length | The session takes the new length, minus what was already worked: 5 min into a 25 min session, 50 min leaves 45:00. It keeps running, or stays paused | covered: `pomodoro_test › F1.1 a session under way takes the new length, counting the time worked` |
+| F1.2 The new focus length is shorter than the time already worked | The session is over: it counts what was worked, and the break starts, with its sound, running or paused as the clock was | covered: `pomodoro_test › F1.2 a new length shorter than the time worked ends the session` |
+| F1.3 A break under way gets a new break length | Same rule: the new length minus the time already on the break; a break already longer than that ends, and focus starts | covered: `pomodoro_test › F1.3 a break under way takes the new break length` |
+| F1.4 The task has a time set, and the new focus length doesn't match it | The task's time wins: the session is the next slice of the time the task has left, cut at the new focus length. A task with an hour, 5 min into its first session, set to 50 min sessions: this one is 50 min (45:00 left), then 10 min | covered: `pomodoro_test › F1.4 with a task time, the session is cut from the time left at the new length` |
+| F1.5 The new focus length is longer than the task's time left | The session is only as long as the task's time left (a task with 20 min gets a 20 min session even at 50 min focus) | covered: same test |
+| F1.6 After changing the lengths I skip | One skip goes to the break at its new length, the next to a focus session at the new length | covered: `pomodoro_test › F1.6 one skip after a change goes to the new break, the next to the new focus length` |
+| F1.7 Changed in the focus view, on screen | The clock, the lengths and the plan under it change at once, also while running | covered: `focus_page_test › F1.7 lengths changed while the clock runs apply to the session under way` |
+| F1.8 Changed on another device with the focus view open on both | Shows here too | covered: `focus_resume_test › a change from another device shows in the open focus view` |
+| F1.9 Defaults changed in **Settings** while a task has a Pomodoro under way | The defaults are for the next fresh Pomodoro. One under way keeps its own lengths, which sync with the task; change those from its focus view | known limit: `focus_resume_test › F1.9 a Pomodoro under way keeps its lengths when the defaults change` |
+
+**F2. I change a task's time while its Pomodoro is under way.** The task's time is the plan: the
+sessions are cut again from the time the task has left now, keeping the sessions done and the focus
+already counted.
+
+| Case | Expected | Status |
+| --- | --- | --- |
+| F2.1 Changed on the list, with the focus view closed (Pomodoro paused) | The next focus cuts the sessions again from the new time left; sessions done stay done. A 1 h task set to 30 min after its first minutes gets one 30 min session | covered: `focus_resume_test › F2.1 a task time changed on the list refits its Pomodoro on the next focus` |
+| F2.2 Changed while the focus view is open (on another device, synced here) | The open clock refits at once; the time already worked in this session counts against it | covered: `focus_resume_test › F2.2 a task time changed while the focus view is open refits the clock at once`, `pomodoro_test › F2.2 a new task time refits the session under way` |
+| F2.3 The new time is less than this session has already worked | A task's time counts from when it is set, so it is time still to do: 10 min into a session, a task set to 5 min gets 5 more minutes, then the break | covered: `pomodoro_test › F2.3 a task time set below what this session has worked counts from now` |
+| F2.4 The task is set to no time left, or is already over its time | Sessions go back to full length, and the plan under the clock goes | covered: `pomodoro_test › F2.4 a task with no time left after the change gets full sessions` |
+| F2.5 Changed during a break | The break carries on; the next session is cut from the new time | covered: `pomodoro_test › F2.5 a task time changed on a break refits the next session` |
+| F2.6 The task's countdown only runs down (no change to its time) | Nothing is cut again: the Pomodoro stays on its plan, as C6 says | covered: `pomodoro_test › F2.6 the same task time does not cut a new plan` |
+| F2.7 A Pomodoro saved by an older version (no record of the task time it was cut from) | Kept on its plan; a later change of the task's time refits it | covered: `pomodoro_test › F2.7 a clock from an older version keeps its plan until the task time changes` |
+
+Not covered yet:
+- The plan under the clock ("Fits the task's 1 h: 25 + 25 + 10 min") is the task's time cut at the
+  current focus length from the start of the Pomodoro, not the sessions as they actually went: after
+  a change mid-way it can list lengths the first sessions didn't have. A known limit.
+- The task's time and the lengths changed on two devices while apart: each device refits when it
+  sees the other's change, and the later record wins. No test yet; a gap, low risk.
+
 ## T · Tearing off the note
 
 **T1. I tear off yesterday's note on one device; my other devices should not ask me again.**

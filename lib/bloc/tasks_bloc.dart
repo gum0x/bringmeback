@@ -119,6 +119,10 @@ class TaskState {
 
   bool get running => entries.any((e) => e.end == null);
 
+  /// Says which time the task was given, and when: changes when its time is set again (or reset),
+  /// not as its countdown runs down. A Pomodoro on the task cuts its sessions again when it does.
+  String get timerMark => '$timerLengthSeconds@$timerStartAt';
+
   /// Countdown left; negative once it has run out.
   int get taskTimerSeconds => remainingSecondsAt(nowSeconds());
 
