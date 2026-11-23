@@ -248,6 +248,43 @@ void main() {
     });
   });
 
+  testWidgets('F1.7 lengths changed while the clock runs apply to the session under way',
+      (tester) async {
+    await tester.runAsync(() async {
+      tasks = TasksBloc();
+      await tasks.document;
+    });
+    pomodoro = PomodoroCubit(
+        taskSeconds: 60 * 60, now: () => now, startTicking: false);
+    await addTasks(tester, ['Write docs']);
+    await pumpFocus(tester, 'Write docs');
+    await tester.pump();
+    expect(pomodoro.state.running, isTrue);
+    now = now.add(const Duration(minutes: 5));
+    pomodoro.tick();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('20:00'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('pomodoroLengths')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Focus'), '50');
+    await tester.tap(find.text('Use these lengths from now on'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('45:00'), findsOneWidget);
+    expect(find.text('50 min focus · 5 min break'), findsOneWidget);
+    expect(find.textContaining("Fits the task's 1 h: 50 + 10 min of focus"),
+        findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Pause'), findsOneWidget);
+
+    await tester.runAsync(() async {
+      await pomodoro.close();
+      await tasks.close();
+    });
+  });
+
   testWidgets('settings dialog refuses an empty length', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home:

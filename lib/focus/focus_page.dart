@@ -30,11 +30,17 @@ Future<void> openFocus(BuildContext context, String taskId,
   await Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => BlocProvider(
       // A fresh focus cuts its sessions to fit the time the task has left.
-      create: (_) => PomodoroCubit(
-          settings: settings,
-          taskSeconds: task?.taskTimerSeconds,
-          resumeFrom: resumeFrom,
-          endsAt: endsAt),
+      create: (_) {
+        final cubit = PomodoroCubit(
+            settings: settings,
+            taskSeconds: task?.taskTimerSeconds,
+            taskTimer: task?.timerMark,
+            resumeFrom: resumeFrom,
+            endsAt: endsAt);
+        // The task's time set again since its Pomodoro was left: its sessions are cut again.
+        if (task != null) cubit.retime(task.taskTimerSeconds, task.timerMark);
+        return cubit;
+      },
       child: FocusPage(
           taskId: taskId, autoStart: autoStart, resumed: record != null),
     ),
@@ -159,16 +165,22 @@ class _FocusPageState extends State<FocusPage> {
     _tasks.add(SetPomodoroEvent(taskId: widget.taskId, record: encoded));
   }
 
-  /// Takes on the clock as another device left it.
+  /// Takes on the clock as another device left it, and cuts the sessions again when the task's
+  /// time is set again, here or elsewhere.
   void _onTasks(TasksState state) {
     if (_finished || _pomodoro.isClosed) return;
-    final encoded = _task(state)?.pomodoro;
-    if (encoded == null || _written.contains(encoded)) return;
-    final record = PomodoroRecord.decode(encoded);
-    if (record == null || record.key == _lastKey) return;
-    _lastKey = record.key;
-    final (clock, endsAt) = record.at(DateTime.now());
-    _pomodoro.apply(clock, endsAt);
+    final task = _task(state);
+    if (task == null) return;
+    final encoded = task.pomodoro;
+    if (encoded != null && !_written.contains(encoded)) {
+      final record = PomodoroRecord.decode(encoded);
+      if (record != null && record.key != _lastKey) {
+        _lastKey = record.key;
+        final (clock, endsAt) = record.at(DateTime.now());
+        _pomodoro.apply(clock, endsAt);
+      }
+    }
+    _pomodoro.retime(task.taskTimerSeconds, task.timerMark);
   }
 
   int _indexIn(TasksState state) =>

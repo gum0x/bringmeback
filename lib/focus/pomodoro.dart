@@ -149,6 +149,11 @@ class PomodoroState {
   /// The length of the current focus session: a full one, or a slice of the task's time.
   final int workSeconds;
 
+  /// The task's time setting [taskSeconds] was cut from (see `TaskState.timerMark`). When the
+  /// task's time is set again, the sessions are cut again from what it has left. Null for a clock
+  /// saved by an older version.
+  final String? taskTimer;
+
   const PomodoroState({
     required this.settings,
     required this.phase,
@@ -158,9 +163,11 @@ class PomodoroState {
     this.taskSeconds,
     this.focusedSeconds = 0,
     required this.workSeconds,
+    this.taskTimer,
   });
 
-  factory PomodoroState.initial(PomodoroSettings settings, {int? taskSeconds}) {
+  factory PomodoroState.initial(PomodoroSettings settings,
+      {int? taskSeconds, String? taskTimer}) {
     final work = workSecondsFor(settings, taskSeconds, 0);
     return PomodoroState(
       settings: settings,
@@ -170,6 +177,7 @@ class PomodoroState {
       completedSessions: 0,
       taskSeconds: taskSeconds,
       workSeconds: work,
+      taskTimer: taskTimer,
     );
   }
 
@@ -210,6 +218,7 @@ class PomodoroState {
         taskSeconds: taskSeconds,
         focusedSeconds: focusedSeconds,
         workSeconds: workSeconds ?? this.workSeconds,
+        taskTimer: taskTimer,
       );
 }
 
@@ -226,11 +235,12 @@ class PomodoroCubit extends Cubit<PomodoroState> {
       StreamController<PomodoroPhase>.broadcast();
 
   /// Starts from [resumeFrom] when given, else from a fresh focus session of [settings], cut to
-  /// fit [taskSeconds], the time the task has left. A running [resumeFrom] needs [endsAt], when its
-  /// phase ends; without it, it comes back paused.
+  /// fit [taskSeconds], the time the task has left under its time setting [taskTimer]. A running
+  /// [resumeFrom] needs [endsAt], when its phase ends; without it, it comes back paused.
   PomodoroCubit({
     PomodoroSettings settings = const PomodoroSettings(),
     int? taskSeconds,
+    String? taskTimer,
     PomodoroState? resumeFrom,
     DateTime? endsAt,
     DateTime Function()? now,
@@ -241,7 +251,8 @@ class PomodoroCubit extends Cubit<PomodoroState> {
             ? PomodoroState.initial(settings,
                 taskSeconds: taskSeconds == null || taskSeconds <= 0
                     ? null
-                    : taskSeconds)
+                    : taskSeconds,
+                taskTimer: taskTimer)
             : resumeFrom.copyWith(
                 running: resumeFrom.running && endsAt != null)) {
     if (startTicking) {
@@ -290,16 +301,65 @@ class PomodoroCubit extends Cubit<PomodoroState> {
     emit(state.copyWith(remainingSeconds: seconds));
   }
 
-  /// Applies new lengths. A phase not yet started takes the new length; one under way keeps going.
+  /// Applies new lengths at once, to the phase under way too: it takes the new length, less the
+  /// time already spent in it. A focus session on a task with a time is cut from the time the task
+  /// has left, at the new focus length. A phase already longer than its new length is over.
   void updateSettings(PomodoroSettings settings) {
-    final untouched =
-        !state.running && state.remainingSeconds == state.phaseSeconds;
     final work =
         workSecondsFor(settings, state.taskSeconds, state.focusedSeconds);
-    final next = state.copyWith(
-        settings: settings, workSeconds: untouched ? work : null);
-    emit(next.copyWith(
-        remainingSeconds: untouched ? next.phaseSeconds : null));
+    _refit(state.copyWith(settings: settings, workSeconds: work));
+  }
+
+  /// The task's time was set again ([mark], see `TaskState.timerMark`), so it has [taskLeftSeconds]
+  /// left from now: the sessions are cut again from that, keeping the sessions done and the focus
+  /// counted, the time worked in this session included. A task with no time left gets full
+  /// sessions. The same [mark] as before changes nothing: a countdown running down is no reason to
+  /// cut a new plan. A clock that doesn't know its mark (an older version saved it) takes this one
+  /// and keeps its plan.
+  void retime(int taskLeftSeconds, String mark) {
+    final s = state;
+    if (mark == s.taskTimer) return;
+    if (s.taskTimer == null) {
+      emit(_withTask(s, s.taskSeconds, mark));
+      return;
+    }
+    final task = taskLeftSeconds > 0
+        ? s.focusedSeconds + _workedSeconds() + taskLeftSeconds
+        : null;
+    _refit(_withTask(s, task, mark));
+  }
+
+  PomodoroState _withTask(PomodoroState s, int? taskSeconds, String mark) =>
+      PomodoroState(
+        settings: s.settings,
+        phase: s.phase,
+        remainingSeconds: s.remainingSeconds,
+        running: s.running,
+        completedSessions: s.completedSessions,
+        taskSeconds: taskSeconds,
+        focusedSeconds: s.focusedSeconds,
+        workSeconds: workSecondsFor(s.settings, taskSeconds, s.focusedSeconds),
+        taskTimer: mark,
+      );
+
+  /// Moves to [next], the current phase with new lengths, keeping the time already spent in it.
+  /// When that is already as long as the new length, the phase is over, as if it had run out.
+  void _refit(PomodoroState next) {
+    final running = state.running;
+    final spent = state.phaseSeconds - _remaining();
+    final left = next.phaseSeconds - spent;
+    if (left > 0) {
+      if (running) _endsAt = _now().add(Duration(seconds: left));
+      emit(next.copyWith(remainingSeconds: left));
+      return;
+    }
+    final after = nextPhase(next,
+        running: running,
+        workedSeconds: next.phase == PomodoroPhase.work ? spent : 0);
+    _endsAt =
+        running ? _now().add(Duration(seconds: after.remainingSeconds)) : null;
+    emit(after);
+    _phaseStarted.add(after.phase);
   }
 
   /// Brings the shown time up to date, and moves on when the phase has run out.
@@ -381,6 +441,7 @@ class PomodoroRecord {
         if (state.taskSeconds case final t?) 'taskSeconds': t,
         'focused': state.focusedSeconds,
         'workSeconds': state.workSeconds,
+        if (state.taskTimer case final t?) 'taskTimer': t,
         if (endsAt case final e?)
           'endsAt': e.millisecondsSinceEpoch
         else
@@ -428,6 +489,10 @@ class PomodoroRecord {
         _ => null,
       };
       final focused = switch (m['focused']) { int f when f > 0 => f, _ => 0 };
+      final taskTimer = switch (m['taskTimer']) {
+        String t when t.length <= 64 => t,
+        _ => null,
+      };
       final full = settings.secondsFor(PomodoroPhase.work);
       final work = switch (m['workSeconds']) {
         int w when w > 0 && w <= full + _smallestSlice => w,
@@ -445,6 +510,7 @@ class PomodoroRecord {
           taskSeconds: taskSeconds,
           focusedSeconds: focused,
           workSeconds: work,
+          taskTimer: taskTimer,
         ),
         endsAt: endsAt,
         open: m['open'] == true,
@@ -507,6 +573,7 @@ PomodoroState nextPhase(PomodoroState s,
     taskSeconds: s.taskSeconds,
     focusedSeconds: focused,
     workSeconds: work,
+    taskTimer: s.taskTimer,
   );
 }
 
